@@ -1,0 +1,11 @@
+{
+  "_note": "Codex's MCP config is TOML at ~/.codex/config.toml under [mcp_servers.super-loop], not JSON. This file shows the equivalent fields plus the TOML to paste. Codex's continuous driver is /goal. Replace /path/to with the absolute path to this package.",
+  "_toml": "[mcp_servers.super-loop]\ncommand = \"node\"\nargs = [\"/path/to/super-loop-mcp/src/server.mjs\"]\nenv = { SUPER_LOOP_HOST = \"codex\" }",
+  "mcpServers": {
+    "super-loop": {
+      "command": "node",
+      "args": ["/path/to/super-loop-mcp/src/server.mjs"],
+      "env": { "SUPER_LOOP_HOST": "codex" }
+    }
+  }
+}

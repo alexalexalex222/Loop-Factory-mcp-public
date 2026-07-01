@@ -1,0 +1,29 @@
+{
+  "task": "Improve a code-review loop so it catches more real bugs at equal or lower token cost",
+  "routes": ["claude-opus-4-8", "glm-5.2", "claude-opus-4-8"],
+  "remineOnEmpty": false,
+  "benchmark": {
+    "name": "review-quality-v1",
+    "taskValueDimensions": ["bug_catch_rate", "evidence_quality"],
+    "resourceDimensions": ["tokenCost"],
+    "qualityScale": 1,
+    "oracle": {
+      "mustInclude": ["VERIFIED", "file:"],
+      "mustExclude": ["I think", "probably", "TODO"]
+    },
+    "cases": [
+      {
+        "id": "c1",
+        "prompt": "Review the diff and list each real bug with file:line evidence. End the message with the literal word VERIFIED when the review is complete."
+      }
+    ]
+  },
+  "targets": [
+    {
+      "kind": "improve",
+      "loop": "loop-de-loop",
+      "baselineContent": "BASELINE: <paste the full text of the loop / prompt you want to improve here — this is hash-locked as the baseline>",
+      "routes": ["claude-opus-4-8", "glm-5.2", "claude-opus-4-8"]
+    }
+  ]
+}

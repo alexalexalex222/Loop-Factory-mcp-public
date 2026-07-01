@@ -1,0 +1,10 @@
+{
+  "_note": "Claude Code MCP config. Add this block to ~/.claude.json (merge into an existing mcpServers map). Replace /path/to with the absolute path to this package. Claude Code's continuous driver is /goal (progress-driven) — see https://code.claude.com/docs/en/goal.",
+  "mcpServers": {
+    "super-loop": {
+      "command": "node",
+      "args": ["/path/to/super-loop-mcp/src/server.mjs"],
+      "env": { "SUPER_LOOP_HOST": "claude" }
+    }
+  }
+}

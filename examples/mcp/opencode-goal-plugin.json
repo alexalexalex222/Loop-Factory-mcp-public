@@ -1,0 +1,12 @@
+{
+  "_note": "OpenCode (registry verified:false). Tier-1 continuous /goal REQUIRES an OpenCode goal plugin. Without the plugin, OpenCode is tier 2 — drive it with examples/rules/super-loop-continuation.md, or use the super-loop-run CLI. Confirm OpenCode's MCP config format/path in your build. Replace /path/to with the absolute path to this package.",
+  "_requires": "an OpenCode goal plugin (e.g. opencode-goal) for the /goal driver",
+  "mcp": {
+    "super-loop": {
+      "type": "local",
+      "command": ["node", "/path/to/super-loop-mcp/src/server.mjs"],
+      "environment": { "SUPER_LOOP_HOST": "opencode" },
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "super-loop-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first Loop Factory supervisor/harness for evidence-gated agent loops. Holds the full private Strip Miner + Loop-de-loop inside the server, streams them phase-gated, owns the lane/target queue + transitions + stop policy, blocks spoofed human review, and blocks any promotion lacking a frozen benchmark plus tool-measured reverified frontier movement. Reactive MCP front-end + an autonomous driver (scripts/run-campaign.mjs) that drives the campaign itself. The operator is the only stop condition.",
+  "bin": {
+    "super-loop-mcp": "src/server.mjs",
+    "super-loop-run": "scripts/run-campaign.mjs"
+  },
+  "main": "src/server.mjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "run-campaign": "node scripts/run-campaign.mjs",
+    "test": "node --test",
+    "demo": "node scripts/demo.mjs",
+    "verify": "node scripts/verify-sources.mjs"
+  },
+  "files": [
+    "src/",
+    "loops/",
+    "scripts/",
+    "README.md"
+  ],
+  "license": "SEE LICENSE — author retains all rights to bundled loop sources"
+}

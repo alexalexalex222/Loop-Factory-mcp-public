@@ -1,0 +1,10 @@
+{
+  "_note": "ZCode (registry verified:false). ZCode imports MCP servers similarly to Claude/Codex; confirm the exact config path/format in your ZCode build. Its goal driver is reported to mirror Codex /goal — confirm before relying on it; otherwise drive the campaign with the super-loop-run CLI. Replace /path/to with the absolute path to this package.",
+  "mcpServers": {
+    "super-loop": {
+      "command": "node",
+      "args": ["/path/to/super-loop-mcp/src/server.mjs"],
+      "env": { "SUPER_LOOP_HOST": "zcode" }
+    }
+  }
+}

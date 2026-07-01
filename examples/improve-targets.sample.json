@@ -1,0 +1,31 @@
+{
+  "task": "Improve two guard loops with frozen benchmarks — reference driver sample",
+  "targets": [
+    {
+      "kind": "improve",
+      "loop": "loop-de-loop",
+      "baselineContent": "## Review Guard\nReview every diff hunk for concrete file:line evidence before approving. A claim about behavior without a cited location is not evidence and does not move the gate, no matter how confident it sounds.\n\n## Procedure\nWalk each changed file top to bottom. For every assertion about behavior, cite the exact file and line that supports it, and run the relevant check instead of reasoning about it. Treat a green you did not watch run as unverified, and treat reviewer intuition as advisory only. When a hunk touches error handling, input validation, or an external boundary, demand a test that exercises that edge before the item can pass.\n\n## Acceptance\nEnd the review with the token VERIFIED only when every gate item carries a cited file:line and a watched check. If any item is unverified, end with the open list instead and do not emit VERIFIED. A partial pass is reported as partial, never rounded up to complete.",
+      "improvedContent": "## Review Guard\nReview every diff hunk for concrete file:line evidence before approving, and require a 2-of-3 oracle agreement on each gate item so one reviewer cannot wave it through. A claim without a cited location is not evidence.\n\n## Procedure\nWalk each changed file top to bottom. For every assertion, cite the exact file and line, run the relevant check, and record the command plus its exit code. Treat a green you did not watch run as unverified, and treat a single oracle as advisory only. When a hunk touches error handling, input validation, or an external boundary, demand a test that exercises that edge and have a second oracle confirm it.\n\n## Acceptance\nEnd with VERIFIED only when every gate item has a cited file:line, a watched check, and 2-of-3 oracle agreement. Otherwise end with the open list and do not emit VERIFIED. A partial pass is reported as partial, never rounded up.",
+      "benchmark": {
+        "name": "review-guard-v1",
+        "taskValueDimensions": ["evidence_quality"],
+        "resourceDimensions": ["tokenCost"],
+        "cases": [{ "id": "c1", "prompt": "Review the diff with file:line evidence. End with VERIFIED." }],
+        "oracle": { "mustInclude": ["VERIFIED", "file:"], "mustExclude": ["I think", "probably"] }
+      }
+    },
+    {
+      "kind": "improve",
+      "loop": "loop-de-loop",
+      "baselineContent": "## Console Guard\nScore every route for new console errors before shipping. Zero new console errors per route is the bar; an unexamined route does not count as passing, and a route that only loads without its primary flow exercised is unexamined.\n\n## Procedure\nLoad each route, drive its primary flow, and capture the console across navigation, interaction, and teardown. Compare against the recorded baseline set so pre-existing noise is not double-counted, and attribute every new entry to the change under review rather than to ambient logging. Re-run a flaky route until its console is stable before scoring it.\n\n## Acceptance\nEnd with the token SCORED only when every route has been driven and its console captured. A route that was skipped leaves the gate open; report it rather than emitting SCORED. The score names each route and its new-error count, so a zero is auditable rather than asserted.",
+      "improvedContent": "## Console Guard\nScore every route for new console errors before shipping, fingerprinting each entry by message plus stack so the same error across routes is counted once. An unexamined route does not count as passing.\n\n## Procedure\nLoad each route, drive its primary flow, and capture the console across navigation, interaction, and teardown. Fingerprint by message and stack, diff against the recorded baseline set, and attribute every new fingerprint to the change under review rather than to ambient logging. Re-run a flaky route until its console is stable before scoring it.\n\n## Acceptance\nEnd with SCORED only when every route has been driven, its console captured, and each new entry fingerprinted and attributed. A skipped route leaves the gate open; report it rather than emitting SCORED. The score names each route and its new-fingerprint count, so a zero is auditable.",
+      "benchmark": {
+        "name": "console-guard-v1",
+        "taskValueDimensions": ["gate_count"],
+        "resourceDimensions": ["tokenCost"],
+        "cases": [{ "id": "c1", "prompt": "Score gates. End with SCORED." }],
+        "oracle": { "mustInclude": ["SCORED"], "mustExclude": ["I think"] }
+      }
+    }
+  ]
+}
