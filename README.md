@@ -37,8 +37,8 @@ Everything runs **on your machine**. Nothing is uploaded.
 
 ```bash
 cd super-loop-mcp
-npm test       # full node:test suite (219 checks) — no install, zero deps
-npm run demo   # spawns the real server and drives a whole campaign over stdio (38/38 checks)
+npm test       # full node:test suite (290 checks) — no install, zero deps
+npm run demo   # spawns the real server and drives a whole campaign over stdio (41/41 checks)
 npm run verify # prove the bundled loop hashes against the mandated contract
 ```
 
@@ -168,7 +168,7 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 
 ---
 
-## Tools (27)
+## Tools (29)
 
 | tool | what it enforces |
 |------|------------------|
@@ -176,6 +176,7 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 | `initialize_loop_run` | ask-once (brief + a few short Qs: goal, **path picker** (improve / discover / mine + library scout), the loop/domain, **corpus scope + order**, what "better" means, a hard limit, deeper-explanation; no model/promotion/policy questions — the supervisor decides those); stores every user message with a sha256 hash; picks a frontier model; surfaces the stop-condition notice, the **cold-start notice** (fresh run), and the **native-continuation notice** (Claude/Codex `/goal`; `/loop` = Claude's polling alternate) up front; returns a **host-aware `hostSetup`** with a path-aware step 3; honors the "deeper explanation" answer in the same response |
 | `loop_register` | **add your own loop** to the local MCP: hash-lock, safe id, sectionize, persist locally; never overwrites a mandated loop |
 | `loop_library` | list mandated (hash-locked) + custom local loops |
+| `skill_fetch` | retrieve skill knowledge for the current task — `plan` mode returns an index of matching skills (titles, purposes, token estimates) to pick from; `section` mode fetches one section body by (`skill_id`, `section_id`); default partition `working`, `reference` is opt-in/held-out only |
 | `loop_start` | begin phase-gated streaming of any loop (mandated or custom); returns section 0 only |
 | `request_next_phase` / `loop_next` | next section **iff** the current one has evidence, else `PHASE_SKIP` |
 | `observation_record` | lightweight phase evidence |
@@ -197,6 +198,7 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 | `update_dashboard` | render the polished always-on local dashboard with the stop-condition notice |
 | `report_export` | reproducible markdown campaign report |
 | `host_capability_preflight` | local report of which frontier-agent CLIs are installed on PATH (filesystem stat only, never executes, not SOTA/web research) **plus the resolved host profile** — `driverFamily`, `tier`, `setupHint`, and the full host matrix when `SUPER_LOOP_HOST` is unknown |
+| `host_runtime_detect` | advisory guess of which host runtime the agent is in, from which MCP config files exist on disk (per the host registry); read-only existence check — never reads file contents or mutates config; `SUPER_LOOP_HOST` is authoritative when set |
 
 ### Block codes you will see
 `NOT_INITIALIZED · PHASE_SKIP · BASELINE_FIRST · BASELINE_LOCKED · BENCHMARK_FIRST · BENCHMARK_FROZEN · WEAK_BENCHMARK · BASELINE_BAR_FIRST · HYPOTHESIS_COUNT · BANNED_ROUTE · BUILDER_ROUTE · FULLTEST_AGENTS · MODEL_REPORTED · MEASUREMENT_AUTHORITY · QUALITY_UNVERIFIED · NO_SCORE_MATRIX · NOT_REVERIFIED · BELOW_THRESHOLD · BELOW_FLOOR · STAGED_TRADEOFF · OPERATOR_IS_STOP · DASHBOARD_ONLY · NO_ACTIVE_LANE · EXEC_DISABLED · EXEC_FAILED · LOOP_EXISTS · LOOP_SOURCE`
@@ -212,7 +214,7 @@ SUPER_LOOP_ALLOW_EXEC=1 node scripts/run-campaign.mjs --config campaign.json --s
 
 It runs the whole loop unattended (intake → mine → improve targets → validate every worker → bank Stones → advance/retire → re-mine) and **only stops when you create the stop-file**. The same logic is the `run_campaign` MCP tool, bounded by `maxBatches` for the in-call version. An MCP alone is reactive (a host calls it); the supervisor is what makes Loop Factory self-driving.
 
-Workers run on the real CLIs via **stdin** (`claude -p --output-format json`, `codex exec --json`) — the prompt never touches argv (no injection), and the real answer text + token usage are extracted for benchmarking. **Benchmark modes:** `oracle` (deterministic → auto-promote on a measured win) and `judge` (an independent Opus/GLM judge scores baseline-vs-challenger *real outputs* under a rubric → subjective → queues to the dashboard, never auto-promotes; the challenger never scores itself).
+Workers run on the real CLIs via **stdin** (`claude -p --output-format json`, `codex exec --json`) — the prompt never touches argv (no injection), and the real answer text + token usage are extracted for benchmarking. **Benchmark modes:** `oracle` (deterministic → tool-measured, reverified, then queued for mandatory operator Approve — never self-ships) and `judge` (an independent Opus/GLM judge scores baseline-vs-challenger *real outputs* under a rubric → subjective → queues to the dashboard, never auto-promotes; the challenger never scores itself).
 
 ---
 
@@ -242,7 +244,7 @@ If the Strip Miner saturates, the supervisor **auto-transitions** (Strip Miner �
 ## Design notes
 
 - **Zero dependencies on purpose.** No SDK, nothing to `npm install` that can fail or time out, nothing phoning home. The MCP transport is ~90 lines of newline-delimited JSON-RPC in `src/server.mjs`. There is nothing to install.
-- **Tool-computed measurement authority.** The MCP **derives** every metric from the recorded raw bytes — `tokenCost` always (a deterministic token estimate), `quality` via the frozen benchmark's deterministic oracle when one exists. A number the model types is `caller-reported` and is refused by the benchmark/test gates (`MEASUREMENT_AUTHORITY`). `reverify_run` re-derives from the sealed bytes, so a tampered number cannot survive. **The honest boundary, stated plainly:** the MCP cannot prove the recorded bytes came from a real frontier-agent run unless *it* launched the worker (the opt-in live executor), and it cannot judge subjective quality without an oracle. Subjective quality routes to the dashboard for a human and **never auto-promotes** (`QUALITY_UNVERIFIED`); deterministic, oracle-scored quality promotes autonomously. In short: deterministic → tool-measured, subjective → dashboard.
+- **Tool-computed measurement authority.** The MCP **derives** every metric from the recorded raw bytes — `tokenCost` always (a deterministic token estimate), `quality` via the frozen benchmark's deterministic oracle when one exists. A number the model types is `caller-reported` and is refused by the benchmark/test gates (`MEASUREMENT_AUTHORITY`). `reverify_run` re-derives from the sealed bytes, so a tampered number cannot survive. **The honest boundary, stated plainly:** the MCP cannot prove the recorded bytes came from a real frontier-agent run unless *it* launched the worker (the opt-in live executor), and it cannot judge subjective quality without an oracle. Subjective quality routes to the dashboard for a human and **never auto-promotes** (`QUALITY_UNVERIFIED`); deterministic, oracle-scored quality still cannot self-ship — a pareto win that clears the integrity gate is tool-measured and reverified, then queues for **mandatory operator Approve** on the dashboard (`PROMOTION_NEEDS_APPROVAL`) before it is recorded as an internal champion. In short: every promotion is tool-measured and re-verified, but only the operator ships it — the supervisor never self-ships.
 - **Host capability preflight, no execution.** `host_capability_preflight` resolves known frontier-agent CLI names against `PATH` with a filesystem stat — it never spawns a command, never probes a model-supplied binary, and is not SOTA/web research. Presence on PATH ≠ working auth, and it says so.
 - **Anti-tampering.** Baseline and benchmark are write-once within a cycle; changing either needs an explicit new epoch + rationale.
 - **Path hardening.** `runId` and artifact ids are validated before touching disk, and `sourcePath` reads are refused so a model cannot turn the MCP into a local-file reader. Submit artifact bytes through `content`.

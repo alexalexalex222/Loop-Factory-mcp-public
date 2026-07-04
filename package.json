@@ -25,5 +25,5 @@
     "scripts/",
     "README.md"
   ],
-  "license": "SEE LICENSE — author retains all rights to bundled loop sources"
+  "license": "MIT"
 }

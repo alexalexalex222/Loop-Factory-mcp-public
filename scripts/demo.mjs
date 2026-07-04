@@ -4,7 +4,7 @@
 // miner, BLOCKED states, frozen benchmark, 3–5 frontier hypotheses, a tool-
 // measured + reverified promotion, and the dashboard stop-condition notice.
 // Writes a transcript + PROOF.md under proof/.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
@@ -77,8 +77,8 @@ async function main() {
   const tools = await request('tools/list');
   const toolNames = tools.result.tools.map((t) => t.name);
   log('tools:', toolNames.join(', '));
-  expect('server lists all 26 tools incl. autonomous driver + supervisor lanes + live executor + loop library + host detect',
-    tools.result.tools.length === 26 && ['run_campaign', 'report_saturation', 'campaign_status', 'execute_full_test', 'continue_run', 'loop_register', 'loop_library', 'host_capability_preflight', 'host_runtime_detect'].every((n) => toolNames.includes(n)));
+  expect('server lists all 29 tools incl. autonomous driver + supervisor lanes + live executor + loop library + skill fetch + host detect',
+    tools.result.tools.length === 29 && ['run_campaign', 'report_saturation', 'campaign_status', 'execute_full_test', 'continue_run', 'loop_register', 'loop_library', 'skill_fetch', 'host_capability_preflight', 'host_runtime_detect'].every((n) => toolNames.includes(n)));
 
   log('\n=== 2. Ask-once (vague task → questions) ===');
   const vague = await call('initialize_loop_run', { runId: RUN, task: 'make my loop better', userMessages: ['make my loop better', 'use the FULL strip miner and loop-de-loop'] });
@@ -158,7 +158,43 @@ async function main() {
     && JSON.stringify(cs.builderGatingRoutes) === JSON.stringify(['claude-opus-4-8', 'glm-5.2']));
 
   log('\n=== 5. Benchmark-first: hash-lock baseline, freeze scorecard, set the bar ===');
-  await call('artifact_record', { runId: RUN, role: 'baseline', name: 'baseline-miner.txt', content: 'BASELINE STRIP MINER v1 (frozen copy)' });
+  const baselineFixture = [
+    '## Demo Fixture — Baseline Strip Miner v1 (frozen copy)',
+    '',
+    'This artifact is demo fixture content recorded by `scripts/demo.mjs` to exercise the',
+    'benchmark-first gate end-to-end. It stands in for "the loop as it existed before this',
+    'cycle\'s improvement attempt" — a hash-locked baseline the challenger hypotheses must',
+    'beat. It is not the real Strip Miner loop; the real loop is the private 345-line',
+    'source hash-locked inside `loops/strip-miner.txt` and streamed separately through the',
+    'phase gate.',
+    '',
+    '## Baseline procedure summary',
+    '',
+    '1. Discover every accessible agent-session source across the machine the operator',
+    '   has authorized.',
+    '2. Read each session\'s recorded tool trace and extract the workflow steps that',
+    '   produced a real, verifiable result.',
+    '3. Score each candidate workflow against replay pass-rate, evidence fidelity, and',
+    '   token cost.',
+    '4. Freeze the highest-scoring workflows as the baseline reference for this',
+    '   improvement cycle.',
+    '',
+    '## What the baseline-integrity floor checks',
+    '',
+    'The engine\'s baseline-integrity floor rejects a baseline that is too thin or lacks',
+    'real structure, so a worker cannot register a trivial stand-in and then promote weak',
+    'challengers against it. A genuine baseline carries real prose, real steps, and enough',
+    'length to be worth beating.',
+    '',
+    '## Scope of this fixture',
+    '',
+    'Nothing in this fixture is executed by the demo. Its only job is to give the',
+    'baseline-integrity floor real content to evaluate: sufficient estimated token length',
+    'and at least three markdown section headers, exactly like a genuine recorded',
+    'baseline would have.'
+  ].join('\n');
+  const baselineRec = await call('artifact_record', { runId: RUN, role: 'baseline', name: 'baseline-miner.txt', content: baselineFixture });
+  expect('baseline fixture recorded + hash-locked', baselineRec.status === 'OK');
   const prop = await call('benchmark_propose', { runId: RUN, benchmarks: [{
     name: 'miner-yield-vs-cost',
     taskValueDimensions: ['qualified-loops', 'evidence-fidelity', 'contradiction-coverage'],
@@ -213,9 +249,27 @@ async function main() {
   expect('promotion blocked before reverify', early.status === 'BLOCKED' && early.code === 'NOT_REVERIFIED');
   const rv = await call('reverify_run', { runId: RUN, testId: ft.testId });
   expect('deep reverify passes on sealed artifacts', rv.status === 'OK' && rv.reverified === true);
+  const queued = await call('promotion_request', { runId: RUN, hypothesisId: winner });
+  log('promotion (pre-approval):', queued.status, '·', queued.message);
+  expect('supervisor refuses to self-ship — promotion queued for operator review',
+    queued.status === 'BLOCKED' && queued.code === 'PROMOTION_NEEDS_APPROVAL' && !!queued.queuedReviewId);
+
+  log('\n=== 8b. Operator step: Approve the queued review out-of-band via apply-decisions.mjs ===');
+  const decisionsPath = join(ROOT, 'proof', 'demo-decisions.json');
+  writeFileSync(decisionsPath, JSON.stringify({
+    runId: RUN, decisions: { [queued.queuedReviewId]: { decision: 'approve', notes: 'demo operator approval' } }
+  }, null, 2));
+  const applyOut = execFileSync('node', [
+    join(ROOT, 'scripts', 'apply-decisions.mjs'), '--file', decisionsPath, '--run', RUN, '--home', DEMO_HOME
+  ], { encoding: 'utf8' });
+  log('apply-decisions:', applyOut.trim());
+  const applyRes = JSON.parse(applyOut);
+  expect('operator Approve applied out-of-band (apply-decisions.mjs, not the model)',
+    applyRes.ok === true && applyRes.applied.some((a) => a.reviewId === queued.queuedReviewId && a.approved === true));
+
   const promo = await call('promotion_request', { runId: RUN, hypothesisId: winner });
-  log('promotion:', promo.status, '·', promo.message);
-  expect('tool-measured + reverified winner promoted', promo.status === 'OK' && promo.decision.promote === true);
+  log('promotion (post-approval):', promo.status, '·', promo.message);
+  expect('tool-measured + reverified + operator-approved winner promoted', promo.status === 'OK' && promo.decision.promote === true);
 
   const noMatrix = await call('promotion_request', { runId: RUN, hypothesisId: reg.hypothesisIds[1] });
   expect('hypothesis with no score matrix is blocked', noMatrix.status === 'BLOCKED' && noMatrix.code === 'NO_SCORE_MATRIX');
