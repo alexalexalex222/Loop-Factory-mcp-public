@@ -108,9 +108,10 @@ export function runProof({
   model = 'gpt-5.6-sol',
   outDir,
   runId,
-  runner = runWorker
+  runner = runWorker,
+  env = process.env
 } = {}) {
-  if (!isExecEnabled()) throw new Error('set SUPER_LOOP_ALLOW_EXEC=1 before running live proof');
+  if (!isExecEnabled(env)) throw new Error('set SUPER_LOOP_ALLOW_EXEC=1 before running live proof');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const evidenceDir = safeEvidenceDir(outDir || `proof/build-week/gpt56-${stamp}`);
   const rawDir = join(evidenceDir, 'raw');

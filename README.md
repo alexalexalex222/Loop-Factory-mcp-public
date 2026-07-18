@@ -55,6 +55,53 @@ The served dashboard is a live **Campaign Console**. It polls `GET /api/run?run=
 
 ---
 
+## OpenAI Build Week - GPT-5.6 Sol referee
+
+Loop Factory supervises the exact `gpt-5.6-sol` worker through phase gates, tool-owned measurement, sealed-byte reverification, and operator-only promotion. The public proof uses three explicitly controlled adversarial fixtures: a requested phase skip, a requested self-reported metric, and requested self-promotion. These are regression prompts that demonstrate the enforcement boundary, not claims of spontaneous model behavior.
+
+### Judge in one command
+
+Prerequisites: Node 18+ and an authenticated Codex CLI `0.144.0` or newer with GPT-5.6 Sol access.
+
+```bash
+npm run judge:gpt56-sol
+```
+
+The command locates a compatible installed Codex binary, pins `gpt-5.6-sol`, runs an exact-model auth sentinel, executes the three controlled cases, and writes a new evidence packet under `proof/build-week/`. It never falls back to a different model.
+
+No Codex auth or Sol access:
+
+```bash
+npm run demo
+```
+
+The fallback is deterministic and no-auth. It proves the supervisor mechanics without claiming a live GPT-5.6 Sol call.
+
+### What changed on July 18, 2026
+
+| Before this extension | Added during this Build Week task |
+|---|---|
+| Zero-dependency Node MCP server and autonomous campaign driver | First-class `gpt-5.6-sol` policy preset |
+| Hash-locked Strip Miner and Loop-de-loop sources | Exact `codex exec -m gpt-5.6-sol` invocation receipts |
+| Tool-computed measurement, sealed-byte reverify, integrity and operator approval gates | Live controlled Sol proof for phase skip, model-reported metrics, and self-promotion |
+| 313-test baseline and 47-check demo | Sanitized polling API with ETag/304 and leak regression tests |
+| Static generated dashboard and same-origin review POST | Responsive live Campaign Console with desktop/375/360 browser proof |
+| Opt-in Codex executor without a route-specific model flag | One-command judge kit with CLI version/auth preflight and explicit no-auth fallback |
+
+Baseline snapshot: `19d9138`. Build Week packages: `cbf2267` (Sol proof) and `8aabede` (Campaign Console), followed by the judge-kit commit in this branch.
+
+Codex performed the repository audit, CLI contract verification, implementation, regression testing, live Sol proof capture, and browser QA. GPT-5.6 Sol was the supervised worker in the captured enforcement cases. The design is motivated by completion and authorization risks discussed in OpenAI's GPT-5.6 safety materials; the claim here is bounded to what this harness proves.
+
+Evidence:
+
+- [`proof/build-week/judge-gpt56-sol-20260718-final/JUDGE.md`](proof/build-week/judge-gpt56-sol-20260718-final/JUDGE.md)
+- [`proof/build-week/gpt56-sol-live-20260718-final/TRANSCRIPT.md`](proof/build-week/gpt56-sol-live-20260718-final/TRANSCRIPT.md)
+- [`proof/build-week/campaign-console-20260718-final/qa-summary.json`](proof/build-week/campaign-console-20260718-final/qa-summary.json)
+- [`docs/BUILD_WEEK_SUBMISSION.md`](docs/BUILD_WEEK_SUBMISSION.md)
+- [`docs/BUILD_WEEK_VIDEO.md`](docs/BUILD_WEEK_VIDEO.md)
+
+---
+
 # For developers
 
 Engineering detail: tools, host matrix, trajectory export, layout, and block codes.

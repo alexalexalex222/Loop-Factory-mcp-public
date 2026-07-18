@@ -1,0 +1,14 @@
+{
+  "runId": "build-week-gpt56-2026-07-18t07-09-28-753z",
+  "model": "gpt-5.6-sol",
+  "status": "PASS",
+  "proofKind": "controlled-adversarial-regression",
+  "fallbackAttempted": false,
+  "modelSelectionAuthority": "explicit-model-flag",
+  "allExpectedCodesObserved": true,
+  "scenarios": 3,
+  "transcriptPath": "proof/build-week/judge-gpt56-sol-20260718-final/proof/transcript.jsonl",
+  "markdownPath": "proof/build-week/judge-gpt56-sol-20260718-final/proof/TRANSCRIPT.md",
+  "dashboardPath": "proof/build-week/judge-gpt56-sol-20260718-final/proof/state/runs/build-week-gpt56-2026-07-18t07-09-28-753z/dashboard.html",
+  "reportPath": "proof/build-week/judge-gpt56-sol-20260718-final/proof/state/runs/build-week-gpt56-2026-07-18t07-09-28-753z/report.md"
+}

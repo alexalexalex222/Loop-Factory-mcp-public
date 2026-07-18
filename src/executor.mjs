@@ -20,7 +20,7 @@
 //   - hard timeout + kill, bounded output buffer.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveOnPath } from './host.mjs';
 import { sha256 } from './util.mjs';
@@ -105,6 +105,31 @@ export function execBinaryForRoute(model, env = process.env) {
     return resolveOnPath('opencode', env.PATH || env.Path, process.platform === 'win32') ? 'opencode' : null;
   }
   return fam.bin;
+}
+
+export function resolveWorkerBinary(model, env = process.env) {
+  const bin = execBinaryForRoute(model, env);
+  if (!bin) return { bin: null, binPath: null, reason: 'NOT_ALLOWLISTED' };
+  if (bin === 'codex' && env.SUPER_LOOP_CODEX_BIN) {
+    const candidate = String(env.SUPER_LOOP_CODEX_BIN).trim();
+    if (!isAbsolute(candidate) || basename(candidate) !== 'codex') {
+      return { bin, binPath: null, reason: 'BINARY_OVERRIDE_INVALID' };
+    }
+    const full = resolve(candidate);
+    try {
+      if (!existsSync(full) || !statSync(full).isFile()) {
+        return { bin, binPath: null, reason: 'BINARY_OVERRIDE_INVALID' };
+      }
+    } catch {
+      return { bin, binPath: null, reason: 'BINARY_OVERRIDE_INVALID' };
+    }
+    return { bin, binPath: full, reason: null };
+  }
+  return {
+    bin,
+    binPath: resolveOnPath(bin, augmentedPath(env), process.platform === 'win32'),
+    reason: null
+  };
 }
 
 /** The `opencode -m <slug>` model id for an opencode-driven route, else null. */
@@ -288,7 +313,8 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
   if (!isExecEnabled(env)) {
     return { ok: false, model, bin: null, reason: 'EXEC_DISABLED', message: 'Live execution is off. Set SUPER_LOOP_ALLOW_EXEC=1 to let Loop Factory launch and meter workers itself.' };
   }
-  const bin = execBinaryForRoute(model);
+  const resolvedBinary = resolveWorkerBinary(model, env);
+  const bin = resolvedBinary.bin;
   if (!bin) {
     return { ok: false, model, bin: null, reason: 'NOT_ALLOWLISTED', message: `route "${model}" maps to no allowlisted executor binary (claude/codex/glm/gemini only)` };
   }
@@ -296,8 +322,17 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
   // raw inherited PATH — a GUI/launchd-minimal PATH otherwise fails every launch with
   // BINARY_MISSING. This widens only WHERE the four allowlisted binaries are looked up,
   // never the allowlist itself (the env.PATH dirs are still searched first).
-  const binPath = resolveOnPath(bin, augmentedPath(env), process.platform === 'win32');
+  const binPath = resolvedBinary.binPath;
   if (!binPath) {
+    if (resolvedBinary.reason === 'BINARY_OVERRIDE_INVALID') {
+      return {
+        ok: false,
+        model,
+        bin,
+        reason: 'BINARY_OVERRIDE_INVALID',
+        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing file named "codex"'
+      };
+    }
     return { ok: false, model, bin, reason: 'BINARY_MISSING', message: `allowlisted binary "${bin}" not found on PATH (cannot execute route ${model})` };
   }
   const args = buildArgs(bin, execSlugForRoute(model), model);

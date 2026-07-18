@@ -15,6 +15,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "run-campaign": "node scripts/run-campaign.mjs",
+    "judge:gpt56-sol": "node scripts/judge-build-week.mjs",
     "proof:gpt56-sol": "node scripts/build-week-gpt56-proof.mjs",
     "proof:gpt56": "node scripts/build-week-gpt56-proof.mjs",
     "test": "node --test",

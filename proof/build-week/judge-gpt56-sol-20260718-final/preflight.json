@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "requestedModel": "gpt-5.6-sol",
+  "resultSha256": "9d3db62d061195b1488f568b3eb5db3603a589dbcd3932ef17f56e86c9d578ab",
+  "stdoutSha256": "39736654ce4e4465d5879e4a2c3a25028339862a3f27061f6a2d6d76ab5b29cd",
+  "tokenUsage": 22199,
+  "modelSelectionAuthority": "explicit-model-flag",
+  "reason": null
+}

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
-import { buildArgs, isExecEnabled, execBinaryForRoute, parseTokenUsage, runWorker } from '../src/executor.mjs';
+import { buildArgs, isExecEnabled, execBinaryForRoute, parseTokenUsage, resolveWorkerBinary, runWorker } from '../src/executor.mjs';
 import { freshEngine, initThroughBaselineBar } from './helpers.mjs';
 
 const H = (model, title) => ({ title, bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model } });
@@ -89,6 +89,35 @@ printf '%s\\n' '{"type":"token_count","input_tokens":12,"output_tokens":8}'
     assert.match(res.invocation.stdoutSha256, /^[a-f0-9]{64}$/);
     assert.match(res.invocation.resultSha256, /^[a-f0-9]{64}$/);
     assert.equal('prompt' in res.invocation, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('explicit Codex binary override is absolute, basename-locked, and used without widening execution', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-codex-override-'));
+  const bin = join(dir, 'codex');
+  writeFileSync(bin, `#!/bin/sh
+printf '%s\\n' '{"type":"agent_message","text":"override output"}'
+`);
+  chmodSync(bin, 0o755);
+  try {
+    assert.equal(resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: 'relative/codex' }).reason, 'BINARY_OVERRIDE_INVALID');
+    assert.equal(resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: join(dir, 'not-codex') }).reason, 'BINARY_OVERRIDE_INVALID');
+    const resolved = resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: bin });
+    assert.equal(resolved.bin, 'codex');
+    assert.equal(resolved.binPath, bin);
+    const result = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt: 'x',
+      env: {
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        SUPER_LOOP_CODEX_BIN: bin,
+        PATH: ''
+      }
+    });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.resultText, 'override output');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
