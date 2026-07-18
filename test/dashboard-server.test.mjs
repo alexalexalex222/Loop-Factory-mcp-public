@@ -70,3 +70,50 @@ test('served dashboard: unknown run → 404, and a cross-origin POST is refused 
     assert.equal(r403.status, 403);
   } finally { server.close(); }
 });
+
+test('served dashboard: sanitized run API returns ETag and 304 without exposing raw state fields', async () => {
+  const store = createStore(mkdtempSync(join(tmpdir(), 'sl-dash-api-')));
+  const engine = createEngine(store);
+  engine.initialize_loop_run({
+    runId: 'api-1',
+    task: TASK,
+    userMessages: ['API_USER_MESSAGE_SECRET'],
+    modelPreset: 'gpt-5.6-sol'
+  });
+  engine.loop_start({ runId: 'api-1', loop: 'loop-de-loop' });
+  engine.human_review_request({
+    runId: 'api-1',
+    item: { title: 'API_REVIEW_SECRET', summary: 'API_SUMMARY_SECRET', loopContent: 'API_LOOP_SECRET' }
+  });
+  const state = store.load('api-1');
+  state.dashboardPath = '/Users/operator/private/dashboard.html';
+  store.save(state);
+
+  const server = buildDashboardServer(store, 0);
+  const port = await listen(server);
+  try {
+    const first = await req(port, 'GET', '/api/run?run=api-1');
+    assert.equal(first.status, 200);
+    assert.equal(first.json.schemaVersion, 1);
+    assert.equal(first.json.run.id, 'api-1');
+    assert.equal(first.json.policy.primary, 'gpt-5.6-sol');
+    const etag = first.json && first.status === 200
+      ? await new Promise((resolve, reject) => {
+          const r = request({ host: '127.0.0.1', port, path: '/api/run?run=api-1', method: 'GET' }, (res) => {
+            res.resume();
+            res.on('end', () => resolve(res.headers.etag));
+          });
+          r.on('error', reject);
+          r.end();
+        })
+      : null;
+    assert.match(etag, /^"[a-f0-9]{64}"$/);
+    const notModified = await req(port, 'GET', '/api/run?run=api-1', null, { 'if-none-match': etag });
+    assert.equal(notModified.status, 304);
+    for (const forbidden of [TASK, 'API_USER_MESSAGE_SECRET', 'API_REVIEW_SECRET', 'API_SUMMARY_SECRET', 'API_LOOP_SECRET', '/Users/operator']) {
+      assert.ok(!first.text.includes(forbidden), `API must omit ${forbidden}`);
+    }
+    assert.equal((await req(port, 'GET', '/api/run?run=../bad')).status, 404);
+    assert.equal((await req(port, 'GET', '/?run=nope')).status, 404);
+  } finally { server.close(); }
+});

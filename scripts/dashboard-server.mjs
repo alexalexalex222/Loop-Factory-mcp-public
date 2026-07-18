@@ -15,6 +15,8 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { createStore } from '../src/store.mjs';
+import { buildConsoleSnapshot } from '../src/console.mjs';
+import { isSafeId, sha256 } from '../src/util.mjs';
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -25,8 +27,16 @@ const home = flag('--home', process.env.SUPER_LOOP_HOME || join(PKG_ROOT, '.supe
 const port = Number(flag('--port', process.env.SUPER_LOOP_DASHBOARD_PORT || '8787'));
 const store = createStore(home);
 
-const send = (res, code, type, body) => { res.writeHead(code, { 'content-type': type }); res.end(body); };
-const json = (res, code, obj) => send(res, code, 'application/json', JSON.stringify(obj));
+const send = (res, code, type, body, headers = {}) => {
+  res.writeHead(code, {
+    'content-type': type,
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    ...headers
+  });
+  res.end(body);
+};
+const json = (res, code, obj, headers) => send(res, code, 'application/json', JSON.stringify(obj), headers);
 
 export function buildDashboardServer(theStore = store, thePort = port) {
   // Only same-origin (the served dashboard) may POST. A browser attaches Origin on
@@ -36,10 +46,28 @@ export function buildDashboardServer(theStore = store, thePort = port) {
   const originOk = (req) => {
     const o = req.headers.origin;
     if (!o) return true;
-    return o === `http://127.0.0.1:${thePort}` || o === `http://localhost:${thePort}`;
+    const host = String(req.headers.host || '');
+    if (!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(host)) return false;
+    return o === `http://${host}`;
   };
   return createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
+
+    if (req.method === 'GET' && u.pathname === '/api/run') {
+      const runId = String(u.searchParams.get('run') || '');
+      if (!isSafeId(runId) || !theStore.exists(runId)) {
+        return json(res, 404, { ok: false, error: 'unknown run' }, { 'cache-control': 'no-store' });
+      }
+      const snapshot = buildConsoleSnapshot(theStore.load(runId));
+      const body = JSON.stringify(snapshot);
+      const etag = `"${sha256(body)}"`;
+      const headers = { etag, 'cache-control': 'no-store' };
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, headers);
+        return res.end();
+      }
+      return send(res, 200, 'application/json; charset=utf-8', body, headers);
+    }
 
     if (req.method === 'POST' && u.pathname === '/apply') {
       if (!originOk(req)) return json(res, 403, { ok: false, error: 'cross-origin POST refused' });
@@ -65,7 +93,8 @@ export function buildDashboardServer(theStore = store, thePort = port) {
 
     if (req.method === 'GET') {
       const run = u.searchParams.get('run');
-      if (run && theStore.exists(run)) {
+      if (run) {
+        if (!isSafeId(run) || !theStore.exists(run)) return send(res, 404, 'text/plain', 'unknown run');
         const html = theStore.readRunFile(run, 'dashboard.html');
         if (html) return send(res, 200, 'text/html; charset=utf-8', html);
         return send(res, 404, 'text/plain', `no dashboard yet for ${run}`);

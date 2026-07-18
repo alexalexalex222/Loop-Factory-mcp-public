@@ -67,10 +67,33 @@ test('dashboard Approve is not optimistic on file:// — labels local draft inst
   const r = engine.update_dashboard({ runId: 'd5' });
   const html = readFileSync(r.path, 'utf8');
   // Script must not flip the chip to APPROVED before confirmed POST; file:// path labels draft.
-  assert.match(html, /local draft — export to apply/, 'file:// path labels draft, does not claim APPROVED');
+  assert.match(html, /local draft - export to apply/, 'file:// path labels draft, does not claim APPROVED');
   assert.match(html, /isFileProtocol|location\.protocol === 'file:'/, 'detects file:// protocol');
   // Must not optimistically set APPROVED before fetch resolves
   assert.doesNotMatch(html, /statusEl\.textContent = act === 'approve' \? 'APPROVED'[\s\S]{0,40}postDecision/, 'no optimistic APPROVED before postDecision');
   // Confirmed apply path still sets APPROVED only inside the fetch .then
   assert.match(html, /\.then\(function\(\)\{[\s\S]*?APPROVED/, 'APPROVED only after confirmed POST apply');
+});
+
+test('dashboard is a live sanitized Campaign Console with polling, ETags, and complete async states', () => {
+  const { engine } = freshEngine();
+  engine.initialize_loop_run({
+    runId: 'd6',
+    task: SPECIFIC_TASK,
+    modelPreset: 'gpt-5.6-sol',
+    userMessages: ['DASHBOARD_USER_SECRET']
+  });
+  engine.loop_start({ runId: 'd6', loop: 'loop-de-loop' });
+  const r = engine.update_dashboard({ runId: 'd6' });
+  const html = readFileSync(r.path, 'utf8');
+  assert.match(html, /data-console-root/);
+  assert.match(html, /Supervisor verdict timeline/);
+  assert.match(html, /Model policy/);
+  assert.match(html, /\/api\/run\?run=/);
+  assert.match(html, /If-None-Match/);
+  assert.match(html, /setInterval\(pollRun,1000\)/);
+  assert.match(html, /Live state is unavailable/);
+  assert.match(html, /file snapshot/);
+  assert.ok(!html.includes(SPECIFIC_TASK), 'task prompt is not embedded in the public console');
+  assert.ok(!html.includes('DASHBOARD_USER_SECRET'), 'user messages are not embedded in the public console');
 });

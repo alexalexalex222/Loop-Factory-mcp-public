@@ -1,0 +1,48 @@
+{
+  "date": "2026-07-18",
+  "status": "PASS",
+  "url": "http://127.0.0.1:8792/?run=campaign-console-sol-final",
+  "source": "Operational state derived from the real GPT-5.6 Sol supervised proof run; the pending console-qa review is a labeled browser interaction fixture.",
+  "desktop": {
+    "viewport": "1280x720",
+    "horizontalOverflow": false,
+    "consoleErrors": 0,
+    "verdictsVisible": 3,
+    "taskTextExposed": false,
+    "screenshot": "desktop.png",
+    "sha256": "2d3b1bc48e9f30d17a66f518fb4529b11e2639edb7b3ebecdfe0d1ed33209ba5"
+  },
+  "mobile375": {
+    "viewport": "375x900",
+    "horizontalOverflow": false,
+    "panelBoundsValid": true,
+    "overflowingTableCues": 2,
+    "minimumActiveControlHeight": 44,
+    "consoleErrors": 0,
+    "screenshot": "mobile-375.png",
+    "sha256": "de965f67ff0e7d34cb8aa655c2791b9bb15b781cd3a60c4a3da49c8ef88becfd"
+  },
+  "mobile360": {
+    "viewport": "360x800",
+    "horizontalOverflow": false,
+    "panelBoundsValid": true,
+    "overflowingTableCues": 2,
+    "consoleErrors": 0,
+    "screenshot": "mobile-360.png",
+    "sha256": "36c8f5a9ea05bedc5e70597d19f0d527b802b706e7cfee5833877260ba64f27f"
+  },
+  "reviewFlow": {
+    "viewport": "360x800",
+    "notePreservedAcrossPoll": true,
+    "confirmedStatus": "APPROVED",
+    "submittedControlsDisabled": true,
+    "screenshot": "mobile-360-review.png",
+    "sha256": "e7f01b14d286fb70750e171df6881b8825fdf4a78cea2fcbee8e425c19980baf"
+  },
+  "api": {
+    "route": "GET /api/run?run=<runId>",
+    "etag304Covered": true,
+    "unknownAndUnsafeRunIdsReturn404": true,
+    "allowlistLeakRegressionCovered": true
+  }
+}

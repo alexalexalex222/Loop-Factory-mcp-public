@@ -51,6 +51,8 @@ SUPER_LOOP_ALLOW_EXEC=1 node scripts/run-campaign.mjs \
 
 Serves the dashboard at `http://127.0.0.1:8787`. Stops only on `./STOP` or Ctrl-C. Edit `task`, `routes`, `benchmark`, and a floor-passing `baselineContent` in the example configs first.
 
+The served dashboard is a live **Campaign Console**. It polls `GET /api/run?run=<runId>` once per second with ETag/304 support and preserves in-progress operator notes across updates. The API is an allowlist view of operational facts only: safe IDs, counts, hashes, model routes, measured scores, verdict codes, and sanitized invocation receipts. It never returns task text, user messages, answers, prompts, raw artifacts, review prose/content, environment values, trajectory arguments/results, or filesystem paths. Opening `dashboard.html` directly still works as a read-only `file://` snapshot; decisions remain local drafts until exported.
+
 ---
 
 # For developers
