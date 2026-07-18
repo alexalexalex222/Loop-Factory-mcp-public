@@ -108,18 +108,22 @@ export const NEVER_STOP_ON = [
   'reports, dashboard updates, report_export — checkpoints, not stopping points'
 ];
 
-// Default model the server proposes when the operator does not name one.
-// "the most capable available model" — the operator may override at init, and
-// the agent is told to web-search current SOTA before committing.
+// Default model the server proposes when the operator presses enter / says
+// "defaults" / uses the "just go" fast-path. Ask-once asks ONE friendly model
+// question at init; the operator's answer is persisted as state.config.modelPolicy
+// (see src/models.mjs). These constants are the DEFAULT policy data only — the
+// active policy for a run lives on that run's state. The agent is still told to
+// web-search current SOTA before committing to a long campaign.
 export const DEFAULT_PRIMARY_MODEL = 'claude-opus-4-8';
 
-// Named current-frontier routes (advisory only — banlist below is the hard gate).
+// Named current-frontier routes (advisory only — the active banlist mode is the hard gate).
 export const KNOWN_FRONTIER_EXAMPLES = ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2', 'gemini-3-pro'];
 
-// Builds and IN-LOOP GATING route ONLY to these trusted builder/gating workers.
-// Codex/GPT remains a supported HOST surface but is NOT a trusted in-loop builder
-// or gating worker (it keeps re-architecting the spec), so it is excluded here.
-// This does not narrow the general frontier set used for hypothesis test workers.
+// Default builder / in-loop gating routes (Opus 4.8 / GLM 5.2). Codex/GPT remains
+// a supported HOST surface but is NOT a trusted in-loop builder under the default
+// policy (it keeps re-architecting the spec). Operator-chosen modelPolicy.builderRoutes
+// can widen or re-target this list at init. This does not narrow the general
+// frontier set used for hypothesis test workers under the default banlist.
 export const BUILDER_GATING_ROUTES = ['claude-opus-4-8', 'glm-5.2'];
 
 export const DEFAULTS = {
@@ -186,7 +190,9 @@ export const BLOCK = {
   PROMOTION_REJECTED: 'PROMOTION_REJECTED',       // operator declined the champion on the dashboard (Sludge/Reject)
   LOOP_EXISTS: 'LOOP_EXISTS',                     // custom loop id collides with a mandated/registered loop
   LOOP_SOURCE: 'LOOP_SOURCE',                     // custom loop source is empty/too small to phase-gate
-  NO_ACTIVE_LANE: 'NO_ACTIVE_LANE',               // a supervisor lane op ran with no active lane
+  // Reserved / documented: not currently emitted by any tool path. Kept so
+  // callers and docs share one vocabulary if a lane op is added later.
+  NO_ACTIVE_LANE: 'NO_ACTIVE_LANE',               // reserved — a supervisor lane op with no active lane
   BUILDER_ROUTE: 'BUILDER_ROUTE',                 // a build / in-loop gating step routed to a non-builder (e.g. codex/gpt) worker
   EXEC_DISABLED: 'EXEC_DISABLED',                 // live worker execution requested but SUPER_LOOP_ALLOW_EXEC is not set
   EXEC_FAILED: 'EXEC_FAILED',                     // a launched worker failed/timed out/was not allowlisted → invalid batch (does not count)

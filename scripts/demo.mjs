@@ -84,19 +84,25 @@ async function main() {
   const vague = await call('initialize_loop_run', { runId: RUN, task: 'make my loop better', userMessages: ['make my loop better', 'use the FULL strip miner and loop-de-loop'] });
   log('questions:', JSON.stringify(vague.questions, null, 2));
   expect('explain-first brief + a few short questions returned once',
-    vague.questions && vague.questions.length >= 5 && vague.questions.length <= 8
+    vague.questions && vague.questions.length >= 5 && vague.questions.length <= 10
     && typeof vague.explanation === 'string' && vague.explanation.length > 80
     && /dashboard is always on/i.test(vague.briefing || '') && vague.dashboardAlwaysOn === true);
-  expect('ask-once never poses model/promotion-mode/policy choices to the operator',
+  expect('ask-once includes the operator model-choice question (defaults / any model)',
+    /which models do you want to use/i.test(vague.questions.join('\n'))
+    && /defaults|any model/i.test(vague.questions.join('\n')));
+  expect('ask-once never poses promotion-mode / 3000-char policy choices to the operator',
     !/promotion mode/i.test(vague.questions.join('\n'))
-    && !/which .{0,20}model|model limit|budget\/?model/i.test(vague.questions.join('\n'))
-    && !/char ?cap|3000\s*char/i.test(vague.questions.join('\n')));
+    && !/char ?cap|3000\s*char/i.test(vague.questions.join('\n'))
+    && /you choose the models/i.test(vague.explanation || ''));
 
   log('\n=== 3. Answer once → INITIALIZED (never asks again) ===');
-  const initd = await call('initialize_loop_run', { runId: RUN, answers: ['3+ qualified loops per corpus', 'my local loop sources', 'tokens down, replay pass-rate up, no proof loss', 'keep my authorship', 'keep moving after the brief'] });
-  log('status:', initd.status, '· model:', initd.model.primary);
+  // answers: goal, path, start-from, scope/order, better, hard-limit, models, deeper
+  const initd = await call('initialize_loop_run', { runId: RUN, answers: ['3+ qualified loops per corpus', 'my local loop sources', 'my local loop sources', 'whole history, best first', 'tokens down, replay pass-rate up, no proof loss', 'keep my authorship', 'defaults', 'keep moving after the brief'] });
+  log('status:', initd.status, '· model:', initd.model.primary, '· policy:', initd.modelPolicy && initd.modelPolicy.banlist.mode);
   expect('initialized with no further questions', initd.status === 'OK' && !initd.questions);
   expect('init surfaces the stop-condition notice up front', initd.stopCondition === 'WARNING: You are the stop condition. This loop does not stop until you stop it.');
+  expect('defaults model policy persisted on the run (primary + banlist default)',
+    initd.modelPolicy && initd.modelPolicy.primary === 'claude-opus-4-8' && initd.modelPolicy.banlist.mode === 'default');
 
   log('\n=== 3b. Deeper explanation honored only when asked (leak #2) ===');
   expect('no deeper explanation when the operator says keep moving', !initd.deeperExplanation);
@@ -152,10 +158,12 @@ async function main() {
   expect('saturation auto-transitions to loop-de-loop, not a stop',
     sat.status === 'OK' && sat.autoTransitioned === true && sat.transition.toLoop === 'loop-de-loop' && sat.continuation.required === true);
   const cs = await call('campaign_status', { runId: RUN });
-  expect('campaign_status reports lanes; pending review never blocks; 30-batch retirement; builder routes',
+  expect('campaign_status reports lanes; pending review never blocks; 30-batch retirement; active modelPolicy',
     cs.status === 'OK' && cs.runStatus === 'ACTIVE' && cs.pendingReviewBlocksCampaign === false
     && cs.branchRetirementThreshold === 30 && Array.isArray(cs.lanes) && cs.lanes.length >= 2
-    && JSON.stringify(cs.builderGatingRoutes) === JSON.stringify(['claude-opus-4-8', 'glm-5.2']));
+    && cs.modelPolicy && cs.modelPolicy.banlist && cs.modelPolicy.banlist.mode === 'default'
+    && JSON.stringify(cs.builderGatingRoutes) === JSON.stringify(cs.modelPolicy.builderRoutes)
+    && JSON.stringify(cs.modelPolicy.builderRoutes) === JSON.stringify(['claude-opus-4-8', 'glm-5.2']));
 
   log('\n=== 5. Benchmark-first: hash-lock baseline, freeze scorecard, set the bar ===');
   const baselineFixture = [
@@ -214,17 +222,74 @@ async function main() {
   const crBar = await call('benchmark_run', { runId: RUN, arm: 'baseline', measurementRef: crRef });
   expect('caller-reported measurement rejected (MEASUREMENT_AUTHORITY)', crBar.status === 'BLOCKED' && crBar.code === 'MEASUREMENT_AUTHORITY');
 
-  log('\n=== 6. Hypotheses: reject non-frontier, accept 3–5 frontier ===');
+  log('\n=== 6. Hypotheses: reject non-frontier under default banlist, accept 3–5 frontier ===');
   const mini = await call('register_hypotheses', { runId: RUN, hypotheses: [
     { title: 'cheap', route: { model: 'claude-haiku-4-5' } }, { title: 'b', route: { model: 'gpt-5.5' } }, { title: 'c', route: { model: 'glm-5.2' } }
   ] });
   log('mini attempt:', mini.status, mini.code);
-  expect('haiku route rejected (BANNED_ROUTE)', mini.status === 'BLOCKED' && mini.code === 'BANNED_ROUTE');
+  expect('haiku route rejected under default banlist (BANNED_ROUTE)', mini.status === 'BLOCKED' && mini.code === 'BANNED_ROUTE');
 
   const codexBuild = await call('register_hypotheses', { runId: RUN, hypotheses: [
     { title: 'a', route: { model: 'claude-opus-4-8' }, builderRoute: 'codex' }, { title: 'b', route: { model: 'gpt-5.5' } }, { title: 'c', route: { model: 'glm-5.2' } }
   ] });
-  expect('Codex as in-loop BUILDER is refused (builds route to Opus 4.8 / GLM 5.2)', codexBuild.status === 'BLOCKED' && codexBuild.code === 'BUILDER_ROUTE');
+  expect('Codex as in-loop BUILDER is refused under default modelPolicy builders', codexBuild.status === 'BLOCKED' && codexBuild.code === 'BUILDER_ROUTE');
+
+  // Separate run: banlist-off accepts a previously-banned route; banned primary holds for confirmation.
+  log('\n=== 6b. Model policy: any-model run + banned-choice confirmation ===');
+  const anyRun = await call('initialize_loop_run', {
+    runId: 'demo-any-model',
+    task: 'Improve the strip-miner loop to raise candidate precision by at least 10% while keeping token cost under the current benchmark.',
+    modelPolicy: { banlist: { mode: 'off' }, primary: 'claude-opus-4-8' }
+  });
+  expect('"any model" / banlist-off policy initializes', anyRun.status === 'OK' && anyRun.modelPolicy && anyRun.modelPolicy.banlist.mode === 'off');
+  // Floor-passing baseline + bar for the any-model run so register can proceed.
+  const anyBaseline = [
+    '## Purpose',
+    'Demo baseline for banlist-off policy check. '.repeat(40),
+    '## Procedure',
+    'Record phases, measure, reverify. '.repeat(40),
+    '## Acceptance',
+    'Quality holds at equal or lower cost. '.repeat(40)
+  ].join('\n');
+  await call('artifact_record', { runId: 'demo-any-model', role: 'baseline', name: 'b.md', content: anyBaseline });
+  const anyProp = await call('benchmark_propose', { runId: 'demo-any-model', benchmarks: [{
+    name: 'any-pol', taskValueDimensions: ['q'], resourceDimensions: ['c'],
+    cases: [{ id: 'c1', input: 'i', expect: 'e' }], oracle: DEFAULT_QUALITY_ORACLE
+  }] });
+  await call('benchmark_select', { runId: 'demo-any-model', benchmarkId: anyProp.benchmarkIds[0] });
+  const anyBarRef = (await call('artifact_record', {
+    runId: 'demo-any-model', name: 'bar', role: 'runlog',
+    content: buildMeasuredContent(1000, 0.70), measurement: { tokenCost: 1000, quality: 0.70 }
+  })).artifactId;
+  await call('benchmark_run', { runId: 'demo-any-model', arm: 'baseline', measurementRef: anyBarRef });
+  const anyReg = await call('register_hypotheses', { runId: 'demo-any-model', hypotheses: [
+    { title: 'cheap-ok', route: { model: 'claude-haiku-4-5' } },
+    { title: 'b', route: { model: 'gpt-5.5' } },
+    { title: 'c', route: { model: 'glm-5.2' } }
+  ] });
+  expect('"any model" run accepts a previously-banned haiku route', anyReg.status === 'OK' && anyReg.hypothesisIds && anyReg.hypothesisIds.length === 3);
+
+  const confHold = await call('initialize_loop_run', {
+    runId: 'demo-ban-confirm',
+    task: 'Improve the strip-miner loop to raise candidate precision by at least 10% while keeping token cost under the current benchmark.',
+    model: 'claude-haiku-4-5'
+  });
+  expect('banned primary holds at AWAITING_ANSWERS with needsConfirmation (never silent accept)',
+    confHold.status === 'OK'
+    && confHold.needsConfirmation === true
+    && confHold.runStatus === 'AWAITING_ANSWERS'
+    && confHold.confirmation && confHold.confirmation.requested === 'claude-haiku-4-5'
+    && Array.isArray(confHold.questions) && confHold.questions.length === 1);
+  const confResolve = await call('initialize_loop_run', {
+    runId: 'demo-ban-confirm',
+    answers: ['use it anyway']
+  });
+  expect('confirmation "use it anyway" initializes with banlist off + requested primary (no re-ask)',
+    confResolve.status === 'OK'
+    && confResolve.runStatus === 'INITIALIZED'
+    && confResolve.needsConfirmation === false
+    && confResolve.modelPolicy && confResolve.modelPolicy.banlist.mode === 'off'
+    && confResolve.model && confResolve.model.primary === 'claude-haiku-4-5');
 
   const reg = await call('register_hypotheses', { runId: RUN, hypotheses: [
     { title: 'restructure reader routing', bottleneck: 'precision', operation: 'restructure', route: { model: 'claude-opus-4-8' } },

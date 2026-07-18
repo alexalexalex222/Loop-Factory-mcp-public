@@ -58,17 +58,25 @@ function augmentedPath(env = process.env) {
   return dirs.filter((d) => (seen.has(d) ? false : (seen.add(d), true))).join(delimiter);
 }
 
-// Route family → the ONE binary allowed to run it. Builds/in-loop gating are
-// restricted elsewhere (Opus/GLM); execution of a *test* worker may use codex for a
-// gpt-5.x frontier route. Order matters: most specific first. The opencode-driven
-// families carry a `slug` (the `opencode -m <slug>` model id) and are only spawnable
-// when opencode is actually on PATH — execBinaryForRoute gates them so a route that
-// looks frontier but cannot be launched is refused at register time, not silently accepted.
+// Route family → the ONE binary allowed to run it.
+//
+// IMPORTANT — family mapping ≠ model-policy endorsement. Banlist mode "off" may
+// accept haiku/mini/etc. as *named routes* for measurement gates, but execution
+// still requires a known family here. Mapping `haiku` → the `claude` binary only
+// means "if this route is launched, use the claude CLI" — it does not endorse haiku
+// as a frontier route. Unknown routes that match no family return null from
+// execBinaryForRoute → NOT_ALLOWLISTED / ROUTE_UNSPAWNABLE / EXEC_FAILED. Never
+// free-form binary execution from a route string.
+//
+// Builds/in-loop gating are restricted elsewhere (active modelPolicy.builderRoutes).
+// Execution of a *test* worker may use codex for a gpt-5.x route. Order matters:
+// most specific first. The opencode-driven families carry a `slug` and are only
+// spawnable when opencode is on PATH.
 const EXEC_FAMILIES = [
   { match: /minimax[-_ ]?m3/i, bin: 'opencode', slug: 'minimax-anthropic-api/minimax-m3' },
   { match: /deepseek[-_ ]?v4[-_ ]?pro/i, bin: 'opencode', slug: 'deepseek-api/deepseek-v4-pro' },
-  { match: /mimo[-_ ]?v?2\.5[-_ ]?pro/i, bin: 'opencode', slug: 'openrouter-api/mimo-v2.5-pro' },
-  { match: /claude|opus|sonnet|fable|haiku/i, bin: 'claude' },
+  { match: /mimo[-_ ]?v?2\.5[-_ ]?pro/i, bin: 'opencode', slug: 'mimo-token-plan-api/mimo-v2.5-pro' },
+  { match: /claude|opus|sonnet|fable|haiku/i, bin: 'claude' }, // haiku maps to claude binary for exec safety only — not a policy endorsement
   { match: /glm/i, bin: 'glm' },
   { match: /gpt|codex|o[34]/i, bin: 'codex' },
   { match: /gemini/i, bin: 'gemini' }

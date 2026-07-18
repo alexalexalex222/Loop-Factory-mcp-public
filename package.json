@@ -23,6 +23,8 @@
     "src/",
     "loops/",
     "scripts/",
+    "hosts/",
+    "examples/",
     "README.md"
   ],
   "license": "MIT"

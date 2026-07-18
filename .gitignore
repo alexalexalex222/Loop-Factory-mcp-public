@@ -20,3 +20,6 @@ src.bak-*/
 *.keys.env
 .env
 .env.*
+
+# local edit backups — never publish
+*.bak-*

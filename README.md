@@ -1,124 +1,87 @@
-# super-loop-mcp — Loop Factory
+# Loop Factory
 
-**A referee for self-improving AI agent loops.** Loop Factory mines your past agent sessions for the workflows that actually worked, tries to improve them, and refuses to call anything "better" or "done" without measured proof — and it never stops until *you* stop it.
+**AI agents that improve themselves tend to lie, skip steps, and stop early.** Loop Factory is the local supervisor that won't let them: it streams improvement procedures one phase at a time, measures results from sealed bytes, and never calls a campaign "done" until *you* stop it.
 
-`local-first` · `zero dependencies` · `Node ≥18` · `MCP over stdio`
+`local-first` · `zero dependencies` · `Node ≥18` · `MCP over stdio` · package name `super-loop-mcp` (git-install; `"private": true`)
 
----
-
-## In one minute (no jargon)
-
-When you put an AI agent on a repetitive improvement task — *"make this prompt/workflow better, and keep going"* — three things tend to go wrong:
-
-- it says **"done"** when it isn't,
-- it **skips steps** it was told to follow,
-- it **stops early** because it "thought hard" and felt finished.
-
-**Loop Factory is the supervisor that doesn't allow that.** It sits between you and the AI and acts like a strict lab referee:
-
-- It holds the improvement procedure (a **"loop"**) and hands the agent **one step at a time** — the next step only unlocks once the current one has left real evidence on disk.
-- It keeps a **sealed scorecard**. The agent can't grade its own work; Loop Factory measures the result itself and **re-checks it from the sealed record** before accepting any "this is better."
-- It **never declares victory.** The run keeps going until *you* say stop — and it says so, plainly, the whole time:
-
-  > **WARNING: You are the stop condition. This loop does not stop until you stop it.**
-
-Everything runs **on your machine**. Nothing is uploaded.
-
-### What it does for you
-
-- **Mines your history** — reads back through your past agent sessions to surface the loops/workflows that genuinely worked (the **Strip Miner**).
-- **Improves a loop** — takes a loop and tries to make it better, generation after generation (**Loop-de-loop**).
-- **Only promotes real wins** — a change is "promoted" only if it is *measurably* better on a frozen test and re-verified from sealed bytes; otherwise it is blocked.
-- **Keeps your authorship** — your loops never leave your machine, and it never overwrites your canonical loop without you.
+![Loop Factory dashboard — stop-condition banner](docs/cover.png)
 
 ---
 
 ## Quickstart
 
 ```bash
-cd super-loop-mcp
-npm test       # full node:test suite (290 checks) — no install, zero deps
-npm run demo   # spawns the real server and drives a whole campaign over stdio (41/41 checks)
-npm run verify # prove the bundled loop hashes against the mandated contract
+git clone https://github.com/alexalexalex222/Loop-Factory-mcp-public.git
+cd Loop-Factory-mcp-public
+npm test       # full node:test suite — no install, zero deps
+npm run demo   # live stdio campaign (46+ checks)
+npm run verify # bundled loop hashes match the mandated contract
 ```
 
-Then point your MCP host (e.g. **Claude Code**) at it:
+### Say this to the agent
+
+> Use Loop Factory (`initialize_loop_run`). Mine or improve a loop with evidence-gated phases. Don't mark the run complete — I'm the only stop condition. Press enter on the model question for defaults, or tell me which models to use.
+
+Then point your MCP host at it — **Codex** and **Claude Code** are tier-1 verified (`/goal`):
 
 ```json
 {
   "mcpServers": {
-    "super-loop": {
+    "loop-factory": {
       "command": "node",
-      "args": ["/path/to/super-loop-mcp/src/server.mjs"],
-      "env": { "SUPER_LOOP_HOST": "claude" }
+      "args": ["/path/to/Loop-Factory-mcp-public/src/server.mjs"],
+      "env": { "SUPER_LOOP_HOST": "codex" }
     }
   }
 }
 ```
 
-Set `SUPER_LOOP_HOST` in the server `env` so the run hands the agent a host-correct setup checklist at start. The value is any host id or alias from the [host registry](hosts/registry.json) — e.g. `"claude"`, `"codex"`, `"zcode"`, `"cursor"`, `"opencode"`. Ready-made config snippets per host live in [`examples/mcp/`](examples/mcp/). State lives under `SUPER_LOOP_HOME` (default `<package>/.super-loop`). Nothing leaves your machine.
+- **Codex** / **Claude Code** (tier 1, verified): engage **`/goal`** with an operator-stop objective.
+- **Other hosts**: set `SUPER_LOOP_HOST` to any id/alias from [`hosts/registry.json`](hosts/registry.json) (`cursor`, `opencode`, …) or use the CLI fallback below. Config snippets: [`examples/mcp/`](examples/mcp/).
 
-### Use it — just say this
+State lives under `SUPER_LOOP_HOME` (default `<package>/.super-loop`). Nothing leaves your machine. `initialize_loop_run` returns a host-correct `hostSetup` checklist. Checkpoints (`EXEC_DISABLED`, saturation, advisories) are not stops — **you are**.
 
-In your MCP host, tell the agent:
-
-> **"Use super loop on this. Mine my sessions for a better loop, then keep improving it until I stop you."**
-
-`initialize_loop_run` returns a `hostSetup` block — a numbered, host-correct checklist the agent runs to put itself into continuous mode and start the phase gate:
-
-- **Claude Code** → run **`/goal`** with an operator-stop objective (progress-driven: the next turn starts automatically when the previous finishes; [docs](https://code.claude.com/docs/en/goal)). `/loop` is for interval polling or self-paced wake-ups, not a convergence campaign.
-- **Codex** → create a **`/goal`** and keep it active across turns.
-- **Other hosts** → see the [host compatibility matrix](#host-compatibility) for the per-host driver, or use the `super-loop-run` CLI fallback.
-
-The run then streams the loop one phase at a time, measures every result itself, and **never marks itself done** — `EXEC_DISABLED`, saturation, and no-improvement advisories are checkpoints, not stops. **You are the only stop condition.**
-
-**Infinite or bounded — your call.** By default a run is *infinite*: it never self-stops; `campaignContinues` stays `true` until you stop it. Give it a limit at init (`config.maxCycles`, e.g. `5`) and it flips to *bounded* mode — when it reaches the limit (or the no-improvement/exhaustion advisory), it returns `campaignContinues: false` + `boundedComplete: true` and tells the agent it **may stop the /loop** and report the final state, instead of spinning forever. Either way nothing auto-promotes, any pending dashboard reviews still wait for you, and the run resumes by `runId` if you raise the limit. The limit is tool-enforced and set once at init — the model can't talk its way to "done."
-
-If your first message already says the goal and "just go," the agent can skip the ask-once questions and start with surfaced default assumptions (mine → improve, whole history, best-first).
-
-### Run it autonomously (hands-off, no chat)
-
-For a campaign that drives itself until you drop a stop-file — no host turns:
+### Run it autonomously (hands-off)
 
 ```bash
-SUPER_LOOP_ALLOW_EXEC=1 super-loop-run \
+SUPER_LOOP_ALLOW_EXEC=1 node scripts/run-campaign.mjs \
   --config examples/campaign.json \
   --stop-file ./STOP
 ```
 
-This launches real frontier workers itself (opt-in via `SUPER_LOOP_ALLOW_EXEC=1`), serves the click-and-done dashboard at `http://127.0.0.1:8787`, and stops only when you create `./STOP` (or Ctrl-C). Copy [`examples/campaign.json`](examples/campaign.json) (or the improve-only [`examples/campaign-improve-only.json`](examples/campaign-improve-only.json)) and edit `task`, `routes`, the `benchmark`, and the improve target's `baselineContent`. The autonomous CLI runs the **supervisor** (mine → improve → re-mine) — it does not resume a reactive MCP run mid-phase.
-
-### Host compatibility
-
-Super Loop is **MCP-first** (the portable layer), with the continuous driver chosen per host from the [host registry](hosts/registry.json), and the `super-loop-run` CLI as the universal fallback. The driver families collapse ~every agent into a few mechanisms, so you don't ship a bespoke string per host:
-
-| Host | Driver family | Tier | Continuous driver | Verified |
-|------|---------------|------|-------------------|----------|
-| Claude Code | `goal_progress` | 1 | `/goal` (operator-stop objective) | ✅ |
-| Codex | `goal_progress` | 1 | `/goal` | ✅ |
-| ZCode | `goal_progress` | 1 | `/goal` (mirrors Codex — confirm) | ⚠︎ |
-| OpenCode | `plugin_goal` | 1 | `/goal` **(requires a goal plugin)** | ⚠︎ |
-| Cursor | `mcp_reactive` | 2 | none — continuation rules snippet | ⚠︎ |
-| Kilo Code | `mcp_reactive` | 2 | none — rules snippet (CLI fork = tier 1 with a goal plugin) | ⚠︎ |
-| OpenClaw | `auto_continue` | 2 | config (`autoContinue` / heartbeat) | ⚠︎ |
-| Hermes | `internal_loop` | 3 | its own loop — call tools each turn | ⚠︎ |
-| Factory Droid | `orchestrator` | 2 | Super Loop runs **inside** a Mission worker | ⚠︎ |
-| MiniMax Mini-Agent | `internal_loop` | 3 | its own loop, or the CLI fallback | ⚠︎ |
-| _anything else_ | `cli_autonomous` | 3 | **`super-loop-run`** (universal fallback) | — |
-
-**Three tiers:**
-
-1. **Native goal** (Claude/Codex/ZCode, OpenCode+plugin) — engage `/goal` with an operator-stop objective.
-2. **MCP + continuation contract** (Cursor, Kilo IDE, OpenClaw, Hermes) — no reliable continuous slash command, so ship the [continuation rules snippet](examples/rules/super-loop-continuation.md): continue on every tool result, `checkpoint != stop`, cold-start fresh.
-3. **CLI owns the loop** (`super-loop-run`) — for any headless/host-less run; same referee, no host babysitting.
-
-`⚠︎ verified:false` entries are modeled from the design and link their docs in the registry — confirm the exact command in your build before relying on it. `host_capability_preflight` returns the resolved host profile (`tier`, `driverFamily`, `setupHint`) and, when the host is unknown, the full matrix.
+Serves the dashboard at `http://127.0.0.1:8787`. Stops only on `./STOP` or Ctrl-C. Edit `task`, `routes`, `benchmark`, and a floor-passing `baselineContent` in the example configs first.
 
 ---
 
 # For developers
 
-Everything below is the engineering detail behind the one-minute summary.
+Engineering detail: tools, host matrix, trajectory export, layout, and block codes.
+
+## Host compatibility
+
+Loop Factory is **MCP-first**, with the continuous driver chosen per host from [`hosts/registry.json`](hosts/registry.json), and `scripts/run-campaign.mjs` as the universal fallback.
+
+| Host | Driver family | Tier | Continuous driver | Verified |
+|------|---------------|------|-------------------|----------|
+| **Codex** | `goal_progress` | 1 | `/goal` | ✅ |
+| **Claude Code** | `goal_progress` | 1 | `/goal` (operator-stop objective) | ✅ |
+| ZCode | `goal_progress` | 1 | `/goal` (mirrors Codex — confirm) | ⚠︎ |
+| OpenCode | `plugin_goal` | 1 | `/goal` **(requires a goal plugin)** | ⚠︎ |
+| Cursor | `mcp_reactive` | 2 | none — continuation rules snippet | ⚠︎ |
+| Kilo Code | `mcp_reactive` | 2 | none — rules snippet (CLI fork = tier 1 with a goal plugin) | ⚠︎ |
+| OpenClaw | `auto_continue` | 2 | config (`autoContinue` / heartbeat) | ⚠︎ |
+| Factory Droid | `orchestrator` | 2 | Super Loop runs **inside** a Mission worker | ⚠︎ |
+| Hermes | `internal_loop` | 3 | its own loop — call tools each turn | ⚠︎ |
+| MiniMax Mini-Agent | `internal_loop` | 3 | its own loop, or the CLI fallback | ⚠︎ |
+| _anything else_ | `cli_autonomous` | 3 | **`super-loop-run`** (universal fallback) | — |
+
+**Three tiers** (per `hosts/registry.json`):
+
+1. **Native goal** (Codex, Claude Code, ZCode, OpenCode+plugin) — engage `/goal` with an operator-stop objective.
+2. **MCP + continuation contract** (Cursor, Kilo IDE, OpenClaw, Factory Droid) — no reliable continuous slash command; ship the [continuation rules snippet](examples/rules/super-loop-continuation.md).
+3. **Internal loop or CLI** (Hermes, Mini-Agent, `super-loop-run`) — host owns its loop, or drive headless with the CLI.
+
+`⚠︎ verified:false` entries are modeled from the design — confirm the exact command in your build. `host_capability_preflight` returns the resolved host profile (`tier`, `driverFamily`, `setupHint`).
 
 ## Why this exists
 
@@ -131,12 +94,13 @@ Drop a 300+ line loop into a model's context and it may ingest the whole thing, 
    - **corpus scope** — your whole session history or a set number of loops, and best-first vs in-order (asked with an up-front warning that *a run can take hours, days, or weeks depending on how deep it mines*);
    - what **"better"** means (this becomes the frozen benchmark);
    - any **task-specific limit**;
+   - **which models** to use (primary, optional test/builder/judge routes — press enter for defaults, or say `any model` to disable the banlist for this run);
    - and a final **deeper-explanation** offer, honored in the same response.
 
-   It never asks you to choose the model, promotion mode, or benchmark policy — the supervisor decides those from the task — and afterward it does not ask again or mark the campaign complete by itself. A fresh run also carries a **cold-start notice**: don't resume a prior campaign or assume a path from memory — infer only from this message and the answers (pass a `runId` to resume on purpose).
+   You choose the models at init (defaults: `claude-opus-4-8` primary, builders Opus 4.8 / GLM 5.2, standard frontier test set). The supervisor still owns measurement, integrity, and promotion — it never asks about promotion mode or benchmark policy. Afterward it does not ask again or mark the campaign complete by itself. A fresh run also carries a **cold-start notice**: don't resume a prior campaign or assume a path from memory — infer only from this message and the answers (pass a `runId` to resume on purpose).
 2. **Phase-gated streaming** — holds the loop inside the MCP and hands you the next section only after the current one has recorded evidence. No 1k-line dump.
 3. **Benchmark-first** — the baseline is hash-locked and the scorecard is frozen *before* any challenger. Model self-reported metrics never count.
-4. **Frontier hypothesis engine** — full tests need 3–5 hypotheses on frontier routes (haiku/mini/nano/lite/prior-gen rejected); one no-improvement run is never "perfect".
+4. **Hypothesis engine** — full tests need 3–5 hypotheses on routes allowed by the run's `modelPolicy` banlist. **Default banlist** rejects haiku/mini/nano/lite/prior-gen (weak models produce noisy campaigns); say `any model` at init to turn the banlist off for that run. One no-improvement run is never "perfect".
 5. **Promotion gate** — promotion requires a tool-measured, deep-**reverified** result that moves the quality/cost frontier past threshold. Otherwise: `BLOCKED`.
 
 Two surfaces share one engine: the **reactive MCP** (a host calls its tools — the in-conversation hook) and the **autonomous driver** (`super-loop-run` CLI / `run_campaign` tool) that drives the whole campaign itself and only stops on the operator stop-file. The whole point: a model **cannot** promote, upgrade, or call a loop "perfect" from reasoning alone — every decision is hooked through a tool that demands **tool-measured artifacts on disk**, and **the operator is the only stop condition**.
@@ -173,7 +137,7 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 | tool | what it enforces |
 |------|------------------|
 | `run_campaign` | **autonomous supervisor (opt-in `SUPER_LOOP_ALLOW_EXEC=1`)** — one call drives the whole campaign (intake → target queue mine→improve → FullTestBatches → reverify → promote/bank Stone → advance/retire → re-mine) until the operator stop-file. Every worker output is **validated** (summary-only/early-stop/fake-metric/self-promote/phase-skip/copied-public rejected + re-entered); invalid batches don't count. `maxBatches` is a safety cap, not completion. Unbounded via the `super-loop-run` CLI. Returns `MISSING_FULL_PRIVATE_LOOPS` if a full loop is absent. |
-| `initialize_loop_run` | ask-once (brief + a few short Qs: goal, **path picker** (improve / discover / mine + library scout), the loop/domain, **corpus scope + order**, what "better" means, a hard limit, deeper-explanation; no model/promotion/policy questions — the supervisor decides those); stores every user message with a sha256 hash; picks a frontier model; surfaces the stop-condition notice, the **cold-start notice** (fresh run), and the **native-continuation notice** (Claude/Codex `/goal`; `/loop` = Claude's polling alternate) up front; returns a **host-aware `hostSetup`** with a path-aware step 3; honors the "deeper explanation" answer in the same response |
+| `initialize_loop_run` | ask-once (brief + a few short Qs: goal, **path picker** (improve / discover / mine + library scout), the loop/domain, **corpus scope + order**, what "better" means, a hard limit, **which models** (enter = defaults, `any model` = banlist off), deeper-explanation; promotion mode / standing guarantees stay tool-owned); persists `state.config.modelPolicy`; stores every user message with a sha256 hash; surfaces the stop-condition notice, the **cold-start notice** (fresh run), and the **native-continuation notice** (Claude/Codex `/goal`; `/loop` = Claude's polling alternate) up front; returns a **host-aware `hostSetup`** with a path-aware step 3; honors the "deeper explanation" answer in the same response |
 | `loop_register` | **add your own loop** to the local MCP: hash-lock, safe id, sectionize, persist locally; never overwrites a mandated loop |
 | `loop_library` | list mandated (hash-locked) + custom local loops |
 | `skill_fetch` | retrieve skill knowledge for the current task — `plan` mode returns an index of matching skills (titles, purposes, token estimates) to pick from; `section` mode fetches one section body by (`skill_id`, `section_id`); default partition `working`, `reference` is opt-in/held-out only |
@@ -185,14 +149,14 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 | `benchmark_freeze_maker` | **bench-maker only** — freeze a scorecard directly with `benchSource:"maker"` (bypasses worker `benchmark_propose`); defaults `benchPartition:"gate"` for held-out eval |
 | `export_trajectories` | read-only export of recorded tool actions as Hermes JSONL with supervisor verdict labels; **refuses gate-partition runs** |
 | `benchmark_run` | set the tool-**computed** baseline bar; a caller-reported measurement is rejected |
-| `register_hypotheses` | 3–5 frontier hypotheses; benchmark-first; rejects banned routes |
+| `register_hypotheses` | 3–5 hypotheses on routes allowed by the active `modelPolicy` banlist; benchmark-first; rejects banned routes under mode `default` |
 | `test_hypothesis` | one full test = 3–5 frontier agents, each tool-computed; aggregates vs the bar; reports quality authority |
 | `execute_full_test` | **opt-in (`SUPER_LOOP_ALLOW_EXEC=1`)** — the supervisor itself launches 3–5 allowlisted workers (`execFile`, no shell, prompt via stdin), captures output, parses real token usage, and gates on the tool-captured bytes; off by default → `EXEC_DISABLED` |
 | `reverify_run` | **re-derive** metrics from the sealed raw bytes and confirm they reproduce (a tampered number cannot survive) |
 | `promotion_request` | promote only on measured + reverified frontier movement; a quality win the MCP can't tool-verify routes to the dashboard (`QUALITY_UNVERIFIED`) |
 | `cycle_decision_request` | **the supervisor hook** — a worker proposes a transition packet (promote/advance_phase/change_baseline/change_benchmark/saturate); only a supervisor-accepted transition is progress; completion/stop intents refused |
 | `report_saturation` | mark a lane saturated → supervisor **auto-transitions** to the next lane (Strip Miner → Loop-de-loop); never pauses/stops |
-| `campaign_status` | read-only lane/target queue, auto-transitions, 30-batch retirement + 10–15 advisory accounting, pending dashboard review (never blocks) |
+| `campaign_status` | read-only lane/target queue, auto-transitions, 30-batch retirement + 10–15 advisory accounting, **active `modelPolicy`**, pending dashboard review (never blocks) |
 | `continue_run` | records the next lane + first concrete action; it does **not** clear the obligation until a real progress tool runs |
 | `human_review_request` | queue/list Approve/Sludge items only; model-callable resolve is blocked |
 | `update_dashboard` | render the polished always-on local dashboard with the stop-condition notice |
@@ -201,7 +165,10 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 | `host_runtime_detect` | advisory guess of which host runtime the agent is in, from which MCP config files exist on disk (per the host registry); read-only existence check — never reads file contents or mutates config; `SUPER_LOOP_HOST` is authoritative when set |
 
 ### Block codes you will see
-`NOT_INITIALIZED · PHASE_SKIP · BASELINE_FIRST · BASELINE_LOCKED · BENCHMARK_FIRST · BENCHMARK_FROZEN · WEAK_BENCHMARK · BASELINE_BAR_FIRST · HYPOTHESIS_COUNT · BANNED_ROUTE · BUILDER_ROUTE · FULLTEST_AGENTS · MODEL_REPORTED · MEASUREMENT_AUTHORITY · QUALITY_UNVERIFIED · NO_SCORE_MATRIX · NOT_REVERIFIED · BELOW_THRESHOLD · BELOW_FLOOR · STAGED_TRADEOFF · OPERATOR_IS_STOP · DASHBOARD_ONLY · NO_ACTIVE_LANE · EXEC_DISABLED · EXEC_FAILED · LOOP_EXISTS · LOOP_SOURCE`
+
+All 42 codes from `src/constants.mjs` `BLOCK` (runtime vocabulary):
+
+`NOT_INITIALIZED · UNKNOWN_RUN · NO_ACTIVE_LOOP · NOT_STARTED · PHASE_SKIP · UNKNOWN_LOOP · BASELINE_FIRST · BASELINE_LOCKED · BASELINE_BAR_FIRST · BASELINE_PLACEHOLDER · BASELINE_TOO_SHALLOW · BASELINE_AUTHOR_FORBIDDEN · BENCHMARK_FIRST · BENCHMARK_FROZEN · WEAK_BENCHMARK · HYPOTHESIS_COUNT · BANNED_ROUTE · UNKNOWN_HYPOTHESIS · FULLTEST_AGENTS · MODEL_REPORTED · NO_SCORE_MATRIX · NOT_REVERIFIED · BELOW_THRESHOLD · BELOW_FLOOR · STAGED_TRADEOFF · OPERATOR_IS_STOP · DASHBOARD_ONLY · MEASUREMENT_AUTHORITY · QUALITY_UNVERIFIED · PROMOTION_NEEDS_APPROVAL · PROMOTION_REJECTED · LOOP_EXISTS · LOOP_SOURCE · NO_ACTIVE_LANE (reserved — not currently emitted) · BUILDER_ROUTE · EXEC_DISABLED · EXEC_FAILED · ROUTE_UNSPAWNABLE · MANUAL_PROVENANCE_REQUIRED · INTEGRITY_GATE · TARGET_SATURATED_NEEDS_NEW_TARGET · BAD_INPUT`
 
 ### Live execution + autonomous harness (opt-in)
 By default the server **never executes commands** (audited posture). Set `SUPER_LOOP_ALLOW_EXEC=1` to let Loop Factory own benchmark execution end-to-end: `execute_full_test` launches the frontier workers itself (allowlisted `claude`/`codex`/`glm`/`gemini` only, via `execFile` with no shell, prompt passed on **stdin** so untrusted text never reaches argv), captures each output, parses real token usage when the CLI reports it, enforces a hard timeout, and feeds the **tool-captured** bytes through the same gate. This closes the last self-report hole — when the supervisor launches the worker, there is no model-supplied run-log to fabricate. A failed/timed-out/non-allowlisted launch is an invalid batch and does not count toward retirement.
@@ -214,7 +181,22 @@ SUPER_LOOP_ALLOW_EXEC=1 node scripts/run-campaign.mjs --config campaign.json --s
 
 It runs the whole loop unattended (intake → mine → improve targets → validate every worker → bank Stones → advance/retire → re-mine) and **only stops when you create the stop-file**. The same logic is the `run_campaign` MCP tool, bounded by `maxBatches` for the in-call version. An MCP alone is reactive (a host calls it); the supervisor is what makes Loop Factory self-driving.
 
-Workers run on the real CLIs via **stdin** (`claude -p --output-format json`, `codex exec --json`) — the prompt never touches argv (no injection), and the real answer text + token usage are extracted for benchmarking. **Benchmark modes:** `oracle` (deterministic → tool-measured, reverified, then queued for mandatory operator Approve — never self-ships) and `judge` (an independent Opus/GLM judge scores baseline-vs-challenger *real outputs* under a rubric → subjective → queues to the dashboard, never auto-promotes; the challenger never scores itself).
+Workers run on the real CLIs via **stdin** (`claude -p --output-format json`, `codex exec --json`) — the prompt never touches argv (no injection), and the real answer text + token usage are extracted for benchmarking. **Benchmark modes:** `oracle` (deterministic → tool-measured, reverified, then queued for mandatory operator Approve — never self-ships) and `judge` (an independent judge on a trusted builder/gating route from the active `modelPolicy` — defaults Opus/GLM — scores baseline-vs-challenger *real outputs* under a rubric → subjective → queues to the dashboard, never auto-promotes; the challenger never scores itself).
+
+### Model policy (operator-chosen at init)
+
+Ask-once includes one friendly model question. Press enter / say `defaults` for today's historical behavior; say `any model` to set `banlist.mode: "off"` for that run. The policy is persisted as `state.config.modelPolicy` and shown on the dashboard + report.
+
+| Field | Default | Notes |
+|-------|---------|--------|
+| `primary` | `claude-opus-4-8` | Primary worker route |
+| `testRoutes` | opus / gpt-5.5 / glm-5.2 | Full-test agent routes |
+| `builderRoutes` | opus / glm-5.2 | Builds + in-loop gating (Codex/GPT is a host surface by default) |
+| `judgeRoute` | `claude-opus-4-8` | Independent judge; fallback is `policy.primary` |
+| `banlist.mode` | `default` | `default` = 21-pattern banlist; `strict` = also reject unknown frontier; `off` = only empty routes rejected |
+| `banlist.extraAllow` / `extraDeny` | `[]` | Punch holes or add denials per run |
+
+**Why a default banlist?** Weak / cheap models produce noisy campaigns that look "done" without real frontier movement. That is a default, not a cage — you can disable it per run.
 
 ---
 
@@ -282,23 +264,28 @@ Bench-maker sessions are **out-of-lineage**: a separate operator-controlled MCP 
 ## Layout
 
 ```
-loops/            bundled hash-locked loop sources (+ MANIFEST in constants)
+loops/            bundled hash-locked loop sources (verified once per process, then cached)
+hosts/            host runtime registry (PURE DATA — continuous drivers + tiers)
+examples/         campaign configs, improve-driver, MCP host snippets, rules
 src/
   server.mjs      MCP stdio JSON-RPC transport + tool schemas
   engine.mjs      Loop Factory core — every tool handler + gate
-  loops.mjs       registry, hash-lock, sectionizer (mandated + custom loaders)
+  integrity.mjs   Integrity Gate — negative control, answer-key/padded echo, solution pressure
+  loops.mjs       registry, hash verify-on-first-load + process cache, sectionizer
   measure.mjs     tool-computed measurement (derive cost/quality from bytes) + honest boundary
   executor.mjs    opt-in live worker execution (allowlist, execFile, stdin) — off by default
   supervisor.mjs  autonomous campaign driver (validate → accept/re-enter boundary)
-  host.mjs        host capability preflight (PATH presence only, no execution)
-  models.mjs      frontier-route policy (banlist/allowlist)
+  host.mjs        host capability preflight + registry loader
+  models.mjs      modelPolicy / banlist (operator-chosen at init; defaults = historical)
   scorecard.mjs   promotion frontier rule + score matrix
-  store.mjs       local atomic JSON persistence (runs + custom-loops)
+  skill-schema.mjs skill frontmatter + section schema (shared frontmatter parser)
+  skill-match.mjs  skill ranking / match against task
+  store.mjs       local atomic JSON persistence (runs + custom-loops + skills)
   dashboard.mjs   polished dashboard.html + markdown report
   constants/util  shared facts + helpers
-scripts/          demo.mjs (live proof), run-campaign.mjs (autonomous CLI, serves the dashboard),
-                  dashboard-server.mjs (zero-dep served dashboard: click Approve/Sludge → adopt),
-                  apply-decisions.mjs (operator-only headless fallback), verify-sources.mjs
+scripts/          demo.mjs, run-campaign.mjs, dashboard-server.mjs, apply-decisions.mjs,
+                  verify-sources.mjs, flywheel-harden.mjs, quarantine-addendum.mjs,
+                  tier-test.mjs, trajectory-capture.mjs, verify-trajectory.mjs
 test/             node:test suites (sources, ask-once, phase gate, benchmark,
                   hypotheses, promotion, hook, dashboard, transport, security,
                   loop library, measurement authority, host preflight, executor,

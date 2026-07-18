@@ -88,7 +88,7 @@ test('a subjective (caller-reported quality) win cannot auto-promote — it rout
   assert.equal(promo.continuation.required, true, 'still a checkpoint, not a stop');
 });
 
-test('a deterministic (oracle-scored) win promotes autonomously', () => {
+test('a deterministic (oracle-scored) win promotes after operator approval', () => {
   const { engine } = freshEngine();
   initBench(engine, 'M6', { oracle: DEFAULT_QUALITY_ORACLE, baseQuality: 0.7, baseCost: 1000 });
   const reg = engine.register_hypotheses({ runId: 'M6', hypotheses: [H('claude-opus-4-8'), H('gpt-5.5'), H('glm-5.2')] });

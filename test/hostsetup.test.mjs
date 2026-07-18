@@ -24,8 +24,11 @@ test('A1: Claude hostSetup engages /goal (progress-driven), never self-paced /lo
   withHost('claude', () => {
     const { engine } = freshEngine();
     const r = engine.initialize_loop_run({ runId: 'h1', task: SPECIFIC_TASK });
-    assert.equal(r.hostSetup.host, 'claude');
+    // Canonical registry id (alias "claude" → "claude-code")
+    assert.equal(r.hostSetup.host, 'claude-code');
     assert.equal(r.hostSetup.continuousModeCommand, '/goal');
+    assert.equal(r.hostSetup.tier, 1);
+    assert.equal(r.hostSetup.driverFamily, 'goal_progress');
     const step1 = r.hostSetup.steps[0];
     assert.match(step1, /\/goal/, 'step 1 tells Claude to run /goal');
     assert.match(step1, /objective|operator/i, 'step 1 frames an operator-stop objective');
@@ -42,7 +45,21 @@ test('A1: Codex hostSetup engages /goal', () => {
     const r = engine.initialize_loop_run({ runId: 'h2', task: SPECIFIC_TASK });
     assert.equal(r.hostSetup.host, 'codex');
     assert.equal(r.hostSetup.continuousModeCommand, '/goal');
+    assert.equal(r.hostSetup.tier, 1);
     assert.match(r.hostSetup.steps[0], /\/goal/, 'step 1 tells Codex to use /goal');
+  });
+});
+
+test('A1: SUPER_LOOP_HOST=cursor resolves through registry (setupHint + tier 2)', () => {
+  withHost('cursor', () => {
+    const { engine } = freshEngine();
+    const r = engine.initialize_loop_run({ runId: 'h-cursor', task: SPECIFIC_TASK });
+    assert.equal(r.hostSetup.host, 'cursor');
+    assert.equal(r.hostSetup.driverFamily, 'mcp_reactive');
+    assert.equal(r.hostSetup.tier, 2);
+    assert.equal(r.hostSetup.continuousModeCommand, null);
+    assert.ok(typeof r.hostSetup.setupHint === 'string' && /cursor|rules|continuation/i.test(r.hostSetup.setupHint));
+    assert.match(r.hostSetup.steps[0], /cursor|rules|continuation/i);
   });
 });
 

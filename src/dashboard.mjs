@@ -208,6 +208,16 @@ export function renderDashboard(state) {
         <span class="pill">run <b class="mono">${escapeHtml(state.runId)}</b></span>
         <span class="pill">state <b>${escapeHtml(state.status)}</b></span>
         <span class="pill">model <b>${escapeHtml(state.config.model.primary)}</b></span>
+        ${(() => {
+          const mp = state.config.modelPolicy;
+          if (!mp) return '';
+          return [
+            `<span class="pill">builders <b>${escapeHtml((mp.builderRoutes || []).join(' / ') || '—')}</b></span>`,
+            `<span class="pill">judge <b>${escapeHtml(mp.judgeRoute || '—')}</b></span>`,
+            `<span class="pill">banlist <b>${escapeHtml((mp.banlist && mp.banlist.mode) || 'default')}</b></span>`,
+            `<span class="pill">policy <b>${escapeHtml(mp.source || 'defaults')}</b></span>`
+          ].join('\n        ');
+        })()}
         <span class="pill">mode <b>${escapeHtml(state.task.mode)}</b></span>
         <span class="pill">benchmark <b>${b.frozen ? 'frozen' : 'not frozen'}</b></span>
         <span class="pill">baseline <b>${state.baseline.recorded ? 'hash-locked' : 'unlocked'}</b></span>
@@ -286,16 +296,46 @@ export function renderDashboard(state) {
       // When this dashboard is SERVED (http), a click applies itself: POST the decision
       // to /apply, which the running campaign adopts on its next tick — no file, no
       // command. Opened as a file (file://) there is no server, so fall back to Export.
-      function postDecision(id, act){
-        if (location.protocol === 'file:') return;
+      function isFileProtocol(){ return location.protocol === 'file:'; }
+      function postDecision(id, act, statusEl){
+        if (isFileProtocol()) {
+          // file:// cannot apply — keep chip as local draft, never flip to APPROVED.
+          if (statusEl) {
+            statusEl.textContent = 'local draft — export to apply';
+            statusEl.className = 'chip warn';
+          }
+          announce('local draft — export to apply (file:// has no dashboard server)');
+          return;
+        }
         try {
           var run = JSON.parse(document.getElementById('run-data').textContent);
           fetch('/apply', { method:'POST', headers:{'content-type':'application/json'},
             body: JSON.stringify({ runId: run.runId, reviewId: id, decision: act }) })
-            .then(function(r){ return r.json(); })
-            .then(function(){ announce(act + ' sent for ' + id + ' — the supervisor adopts it on its next tick. No file needed.'); })
-            .catch(function(){ announce('Could not reach the dashboard server — use Export instead.'); });
-        } catch(e){}
+            .then(function(r){
+              if (!r.ok) throw new Error('apply failed');
+              return r.json();
+            })
+            .then(function(){
+              // Only flip the chip after confirmed POST apply.
+              if (statusEl) {
+                statusEl.textContent = act === 'approve' ? 'APPROVED' : 'SLUDGE';
+                statusEl.className = 'chip ' + (act === 'approve' ? 'good' : 'bad');
+              }
+              announce(act + ' sent for ' + id + ' — the supervisor adopts it on its next tick. No file needed.');
+            })
+            .catch(function(){
+              if (statusEl) {
+                statusEl.textContent = 'PENDING';
+                statusEl.className = 'chip';
+              }
+              announce('Could not reach the dashboard server — use Export instead.');
+            });
+        } catch(e){
+          if (statusEl) {
+            statusEl.textContent = 'PENDING';
+            statusEl.className = 'chip';
+          }
+        }
       }
       document.querySelectorAll('.review').forEach(function(card){
         var id = card.getAttribute('data-review');
@@ -306,11 +346,18 @@ export function renderDashboard(state) {
             var act = btn.getAttribute('data-act');
             card.querySelectorAll('[data-act]').forEach(function(b){ b.setAttribute('aria-pressed', b===btn ? 'true':'false'); });
             decisions[id] = { decision: act, notes: notes.value || null };
-            statusEl.textContent = act === 'approve' ? 'APPROVED' : 'SLUDGE';
-            statusEl.className = 'chip ' + (act === 'approve' ? 'good' : 'bad');
+            // Do NOT optimistically flip to APPROVED/SLUDGE — only after confirmed apply
+            // (http) or label as local draft (file://).
+            if (isFileProtocol()) {
+              statusEl.textContent = 'local draft — export to apply';
+              statusEl.className = 'chip warn';
+              announce('local draft — export to apply');
+            } else {
+              statusEl.textContent = 'SENDING…';
+              statusEl.className = 'chip';
+              postDecision(id, act, statusEl);
+            }
             enableExport();
-            announce('Recorded ' + act + ' for ' + id);
-            postDecision(id, act);
           });
         });
         if(notes){ notes.addEventListener('input', function(){ if(decisions[id]) decisions[id].notes = notes.value || null; }); }
@@ -350,6 +397,10 @@ export function renderReport(state) {
   lines.push(`- **task**: ${state.task.text || '(none)'}`);
   lines.push(`- **mode**: ${state.task.mode}`);
   lines.push(`- **model**: ${state.config.model.primary} (${state.config.model.declared ? 'operator-declared' : 'auto-selected default'})`);
+  if (state.config.modelPolicy) {
+    const mp = state.config.modelPolicy;
+    lines.push(`- **modelPolicy**: source=${mp.source || 'defaults'}; primary=${mp.primary}; test=[${(mp.testRoutes || []).join(', ')}]; builders=[${(mp.builderRoutes || []).join(', ')}]; judge=${mp.judgeRoute}; banlist.mode=${(mp.banlist && mp.banlist.mode) || 'default'}`);
+  }
   lines.push(`- **failure patience**: ${state.failures.consecutive}/${state.config.failurePatience} consecutive no-improvement (${state.failures.total} total)${state.failures.exhaustionFlagged ? ' - economic-exhaustion advisory' : ''}`);
   const continuation = state.continuation || { required: false };
   const continuationNext = continuation.next || {};

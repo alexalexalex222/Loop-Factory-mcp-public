@@ -59,3 +59,18 @@ test('report_export writes a reproducible markdown report', () => {
   assert.ok(/operator is the only stop condition/i.test(md));
   assert.ok(/continuation obligation\*\*: REQUIRED/i.test(md));
 });
+
+test('dashboard Approve is not optimistic on file:// — labels local draft instead', () => {
+  const { engine } = freshEngine();
+  engine.initialize_loop_run({ runId: 'd5', task: SPECIFIC_TASK });
+  engine.human_review_request({ runId: 'd5', item: { title: 'promotion candidate', kind: 'promotion', summary: 'win' } });
+  const r = engine.update_dashboard({ runId: 'd5' });
+  const html = readFileSync(r.path, 'utf8');
+  // Script must not flip the chip to APPROVED before confirmed POST; file:// path labels draft.
+  assert.match(html, /local draft — export to apply/, 'file:// path labels draft, does not claim APPROVED');
+  assert.match(html, /isFileProtocol|location\.protocol === 'file:'/, 'detects file:// protocol');
+  // Must not optimistically set APPROVED before fetch resolves
+  assert.doesNotMatch(html, /statusEl\.textContent = act === 'approve' \? 'APPROVED'[\s\S]{0,40}postDecision/, 'no optimistic APPROVED before postDecision');
+  // Confirmed apply path still sets APPROVED only inside the fetch .then
+  assert.match(html, /\.then\(function\(\)\{[\s\S]*?APPROVED/, 'APPROVED only after confirmed POST apply');
+});

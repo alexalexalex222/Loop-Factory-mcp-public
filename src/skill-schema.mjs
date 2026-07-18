@@ -175,7 +175,9 @@ export function serializeSkillMarkdown(frontmatter, body) {
   return lines.join('\n');
 }
 
-function parseFrontmatterLines(block) {
+/** Minimal YAML-subset parser: string, integer, and [] array values only.
+ *  Shared by skill-schema and store (single implementation — no drift). */
+export function parseFrontmatterLines(block) {
   const fm = {};
   let key = null;
   let arrayMode = false;

@@ -7,7 +7,10 @@ import {
   NATIVE_CONTINUATION_NOTICE, COLD_START_NOTICE, CONTINUOUS_MODE_BY_HOST, NEVER_STOP_ON, LANE_KIND, LANE_STATUS, BUILDER_GATING_ROUTES, MANDATED_LOOPS
 } from './constants.mjs';
 import { sha256, hash8, nowIso, wordCount, round, mean, stdev, isSafeId, clone } from './util.mjs';
-import { classifyRoute, rejectedRoutes, rejectedBuilderRoutes } from './models.mjs';
+import {
+  classifyRoute, rejectedRoutes, rejectedBuilderRoutes,
+  defaultModelPolicy, normalizeModelPolicy, ensureModelPolicy, parseModelChoiceText
+} from './models.mjs';
 import { evaluatePromotion, selectBestMeasuredTest } from './scorecard.mjs';
 import { resolveLoopId, loadLoop, loopSummary, makeCustomLoop, isMandatedId, verifyAllLoops } from './loops.mjs';
 import {
@@ -96,6 +99,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       task: { text: '', sha256: '', sufficiency: 'unknown', acceptanceCriteria: null, mode: 'unknown' },
       config: {
         model: { primary: DEFAULT_PRIMARY_MODEL, declared: false, autoSelected: true },
+        modelPolicy: defaultModelPolicy('defaults'),
         failurePatience: DEFAULTS.failurePatience,
         branchRetirementBatches: DEFAULTS.branchRetirementBatches,
         promotion: { ...DEFAULTS.promotion },
@@ -148,7 +152,13 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   function loadRun(args) {
     if (!args || !args.runId) return null;
     if (!isSafeId(args.runId)) return { __blocked: invalidIdBlock('runId', args.runId) };
-    return store.exists(args.runId) ? store.load(args.runId) : null;
+    if (!store.exists(args.runId)) return null;
+    const state = store.load(args.runId);
+    if (state) ensureModelPolicy(state); // resume: backfill pre-modelPolicy runs
+    return state;
+  }
+  function activePolicy(state) {
+    return ensureModelPolicy(state);
   }
   function requireInitialized(state) {
     if (state && state.__blocked) return state.__blocked;
@@ -161,7 +171,8 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   }
   // ---- loop resolution (mandated + user-added custom loops) --------------
   // A run pins a snapshot of any custom loop it streams into state.customLoops so
-  // the source is immutable for the life of the run (and hash-locked on every load).
+  // the source is immutable for the life of the run (hash-verified on first load per
+  // process, then cached — see loops.mjs loadLoop).
   function customLoopRecord(state, id) {
     if (state.customLoops && state.customLoops[id]) return state.customLoops[id];
     return store.readLoop(id);
@@ -386,11 +397,13 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   }
   // ---- host setup (A1) : turn "engage continuous mode" from advice into an
   // executable, host-correct checklist the model can actually run at start. -----
+  // Resolve through hosts/registry.json so all 10 registry hosts get their driver
+  // + setupHint (not just claude/codex hard-codes).
   function hostFromEnv() {
-    const h = String(process.env.SUPER_LOOP_HOST || '').toLowerCase().trim();
-    if (h === 'claude' || h === 'claude-code' || h === 'claudecode') return 'claude';
-    if (h === 'codex' || h === 'gpt' || h === 'openai') return 'codex';
-    return 'unknown';
+    const raw = String((env && env.SUPER_LOOP_HOST) || process.env.SUPER_LOOP_HOST || '').toLowerCase().trim();
+    if (!raw) return 'unknown';
+    const profile = hostProfile(raw);
+    return (profile && profile.id) || 'unknown';
   }
   function trimText(text, max = 160) {
     const t = String(text || '').replace(/\s+/g, ' ').trim();
@@ -447,7 +460,18 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   }
   function buildHostSetup(state) {
     const host = hostFromEnv();
-    const mode = CONTINUOUS_MODE_BY_HOST[host] || CONTINUOUS_MODE_BY_HOST.unknown;
+    const profile = hostProfile(host);
+    // Prefer registry engageStep + primaryDriver; fall back to CONTINUOUS_MODE_BY_HOST
+    // for the legacy claude/codex/unknown keys when the registry entry is missing.
+    const legacyKey = host === 'claude-code' ? 'claude' : host;
+    const mode = CONTINUOUS_MODE_BY_HOST[legacyKey] || CONTINUOUS_MODE_BY_HOST.unknown;
+    const engageStep = (profile && profile.engageStep) || mode.engageStep;
+    const continuousModeCommand = (profile && profile.primaryDriver && profile.primaryDriver.command != null)
+      ? profile.primaryDriver.command
+      : mode.command;
+    const setupHint = profile
+      ? (profile.engageStep || (profile.primaryDriver && profile.primaryDriver.note) || null)
+      : null;
     const hasActive = !!(state.activeLoop && state.loops && state.loops[state.activeLoop]);
     const rec = recommendedNextAction(state);
     const step3 = hasActive
@@ -455,9 +479,12 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       : pathStep3(state);
     return {
       host,
-      continuousModeCommand: mode.command,
+      continuousModeCommand,
+      setupHint,
+      driverFamily: profile ? profile.driverFamily : null,
+      tier: profile ? profile.tier : null,
       steps: [
-        `1. ${mode.engageStep.replace('{OBJECTIVE}', runObjective(state))}`,
+        `1. ${String(engageStep).replace('{OBJECTIVE}', runObjective(state))}`,
         `2. host_capability_preflight { runId:"${state.runId}" } — see which frontier CLIs are installed before picking routes.`,
         `3. ${step3}`,
         '4. Tell the operator the dashboard path and keep it open for Approve/Sludge review.',
@@ -490,10 +517,12 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     return /(keep going|keep running|don'?t stop|do not stop|never stop|until i stop|until you'?re stopped|use it and go|just (?:run|start|go)\b|find it and use|set (?:it|everything) up and (?:go|run)|run it until|use super ?loop (?:and|to))/i.test(blob);
   }
   function startAssumptions(state) {
+    const pol = activePolicy(state);
     return [
       'You did not run the ask-once questionnaire — I inferred an actionable start from your message and began moving. Steer anytime from the dashboard or by sending answers.',
       'Default start: MINE your sessions for a stronger loop (Strip Miner); on saturation I auto-pivot to improving the best loop (Loop-de-loop).',
       'Default scope: whole session history, best loops improved first.',
+      `Default models (surfaced because you said just go): primary ${pol.primary}; test routes ${pol.testRoutes.join(', ')}; builders ${pol.builderRoutes.join(', ')}; judge ${pol.judgeRoute}; banlist mode "${pol.banlist.mode}". Override at init with answers or { model / modelPolicy }.`,
       `"Better" becomes the frozen, tool-measured benchmark I derive from your goal${state.task && state.task.text ? `: "${trimText(state.task.text, 120)}"` : ''}. Name a hard limit anytime and I will honor it.`
     ];
   }
@@ -612,12 +641,265 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   }
 
   // ---- ask-once helpers --------------------------------------------------
-  function resolveModel(requested) {
-    if (!requested) return { primary: DEFAULT_PRIMARY_MODEL, declared: false, warning: null };
-    const c = classifyRoute(requested);
-    if (c.ok) return { primary: requested, declared: true, warning: null };
-    return { primary: DEFAULT_PRIMARY_MODEL, declared: false,
-      warning: `requested model "${requested}" is non-frontier (${c.reason}); defaulting to ${DEFAULT_PRIMARY_MODEL}` };
+  // Honor the operator's chosen primary under the active banlist. NEVER silently
+  // rewrite a banned route to the default, and NEVER silently accept it into
+  // INITIALIZED — the init path holds at AWAITING_ANSWERS with ONE confirmation
+  // question (needsConfirmation). resolveModel only classifies; it does not commit.
+  function resolveModel(requested, policy) {
+    const pol = policy ? normalizeModelPolicy(policy) : defaultModelPolicy();
+    if (!requested) {
+      return {
+        primary: pol.primary, declared: false, warning: null, banned: false,
+        needsConfirmation: false, classification: null, reason: null
+      };
+    }
+    const c = classifyRoute(requested, pol);
+    if (c.ok) {
+      return {
+        primary: requested, declared: true, warning: null, banned: false,
+        needsConfirmation: false, classification: c, reason: null
+      };
+    }
+    const pattern = c.matchedPattern ? ` (matched ${c.matchedPattern})` : '';
+    const reason = `Requested model "${requested}" is banned under banlist mode "${pol.banlist.mode}"${pattern}: ${c.reason}`;
+    return {
+      // provisional primary for the confirmation payload only — init will NOT
+      // commit this into INITIALIZED until the operator confirms or changes.
+      primary: requested,
+      declared: true,
+      banned: true,
+      needsConfirmation: true,
+      classification: c,
+      reason,
+      warning: null
+    };
+  }
+  function modelConfirmationQuestion(pending) {
+    const req = pending.requested;
+    return `Your requested model "${req}" is banned under the active banlist (${pending.reason}). Confirm in one reply: say "use it anyway" to disable the banlist for this run and keep "${req}", name another model, or press enter / say "defaults" for ${DEFAULT_PRIMARY_MODEL}. This is the only confirmation — I will not ask again.`;
+  }
+  function modelConfirmationOptions(requested) {
+    return {
+      useAnyway: `use it anyway — banlist off for this run, keep "${requested}"`,
+      pickAnother: 'name another model (e.g. claude-opus-4-8 or gpt-5.5)',
+      defaults: `press enter / say "defaults" for ${DEFAULT_PRIMARY_MODEL} + standard frontier set`
+    };
+  }
+  /**
+   * Resolve the single confirmation answer. Never re-asks: a still-banned
+   * alternate falls through to defaults with a note.
+   */
+  function resolveModelConfirmationAnswer(answerText, pending, args) {
+    const raw = String(answerText == null ? '' : answerText).trim();
+    const lower = raw.toLowerCase();
+    // Explicit args.model on the confirmation turn wins as "pick another".
+    if (args && typeof args.model === 'string' && args.model.trim()
+      && (!raw || !/\b(use it anyway|anyway|any model|defaults?|enter)\b/i.test(raw))) {
+      const alt = args.model.trim();
+      const pol = defaultModelPolicy('operator-init');
+      pol.primary = alt;
+      const info = resolveModel(alt, pol);
+      if (!info.banned) {
+        pol.judgeRoute = alt;
+        return { policy: normalizeModelPolicy(pol, { source: 'operator-init' }), choice: 'alternate', note: null };
+      }
+      // still banned via args.model alone → use-anyway if they also said so, else defaults
+    }
+    if (!raw || /^(defaults?|enter|default|standard|no|cancel|use defaults?|just defaults?)$/i.test(lower)) {
+      return { policy: defaultModelPolicy('defaults'), choice: 'defaults', note: null };
+    }
+    if (/\b(use it anyway|anyway|any model|allow it|yes keep|banlist\s*off|disable (?:the )?banlist|confirm|keep it)\b/i.test(lower)) {
+      const pol = defaultModelPolicy('operator-init');
+      pol.banlist.mode = 'off';
+      pol.primary = pending.requested;
+      pol.judgeRoute = pending.requested;
+      if (!listIncludes(pol.testRoutes, pol.primary)) {
+        pol.testRoutes = [pol.primary, ...pol.testRoutes.filter((r) => r !== pol.primary)].slice(0, 5);
+      }
+      return {
+        policy: normalizeModelPolicy(pol, { source: 'operator-init' }),
+        choice: 'use-anyway',
+        note: `banlist mode set to "off"; primary kept as "${pending.requested}"`
+      };
+    }
+    // Treat as a new model choice / free-form policy text.
+    const parsed = parseModelChoiceText(raw);
+    let pol = parsed.policy;
+    // If they only named a bare model, ensure banlist stays default unless they said any model.
+    const info = resolveModel(pol.primary, pol);
+    if (!info.banned) {
+      return { policy: normalizeModelPolicy(pol, { source: 'operator-init' }), choice: 'alternate', note: null };
+    }
+    // Still banned after their reply — never re-ask; fall back to defaults.
+    return {
+      policy: defaultModelPolicy('defaults'),
+      choice: 'defaults-after-still-banned',
+      note: `"${pol.primary}" is still banned under the default banlist; using defaults (${DEFAULT_PRIMARY_MODEL}) rather than re-asking.`
+    };
+  }
+  function finalizeInitWithPolicy(state, policy, { startIntent, ts, deeperFromAnswers }) {
+    const pol = normalizeModelPolicy(policy, { source: policy.source });
+    state.config.modelPolicy = pol;
+    state.config.model = {
+      primary: pol.primary,
+      declared: pol.source === 'operator-init',
+      autoSelected: pol.source !== 'operator-init',
+      bannedUnderPolicy: false
+    };
+    state.pendingModelConfirmation = null;
+    state.status = STATUS.INITIALIZED;
+    state.task.sufficiency = 'sufficient';
+    state.task.path = computeCampaignPath(state) || null;
+    state.questions = [];
+    logEvent(state, 'initialized', {
+      model: state.config.model.primary,
+      modelPolicySource: pol.source,
+      banlistMode: pol.banlist.mode,
+      mode: state.task.mode,
+      path: state.task.path
+    });
+    state.updatedAt = ts;
+    const dash = writeDashboardForState(state);
+    store.save(state);
+    return ok('Initialized. Ask-once is complete; I will not ask again or mark the run complete by myself.', {
+      runId: state.runId, runStatus: state.status, model: state.config.model,
+      modelPolicy: pol,
+      needsConfirmation: false,
+      briefing: 'I will keep the run moving after this. The dashboard is always on and available for review. The model can queue or list review items, but only the operator can Approve or Sludge them from the dashboard. If a mining lane saturates or produces no winners, that is a checkpoint; the next step is to improve or harden the best available loop.',
+      coldStartNotice: COLD_START_NOTICE,
+      stopCondition: STOP_CONDITION_WARNING,
+      nativeContinuation: NATIVE_CONTINUATION_NOTICE,
+      hostSetup: buildHostSetup(state),
+      assumptions: startIntent ? startAssumptions(state) : undefined,
+      deeperExplanation: deeperFromAnswers ? deeperExplanation(state) : undefined,
+      sotaAdvisory: `Using ${pol.primary} as the primary route (policy source: ${pol.source}, banlist: ${pol.banlist.mode}). Check current SOTA via web search at the start (OpenAI / Anthropic / Google / Z.ai), and override modelPolicy at init if a stronger frontier model exists. Run host_capability_preflight to see which frontier CLIs are installed locally. Under banlist mode "default", non-frontier routes (haiku/mini/nano/lite/prior-gen) are rejected for full tests; say "any model" at init to disable the banlist for this run.`,
+      builderRoutingAdvisory: `Builds and in-loop gating route to ${pol.builderRoutes.join(' or ')} under the active modelPolicy. Codex/GPT stays a supported host surface but is not a trusted in-loop builder/gating worker unless listed in modelPolicy.builderRoutes. Frontier test workers default to ${pol.testRoutes.join(', ')}.`,
+      failurePatience: state.config.failurePatience, branchRetirementBatches: state.config.branchRetirementBatches, mode: state.task.mode,
+      runMode: state.config.runMode, maxCycles: state.config.maxCycles,
+      limitNotice: state.config.runMode === 'bounded'
+        ? `Bounded run: after ${state.config.maxCycles} full test(s) — or the failure/exhaustion advisory — you MAY stop your /loop (campaignContinues flips to false). Until then, keep going. The operator can still stop earlier or extend the limit.`
+        : 'Infinite run: never self-stops. campaignContinues stays true until the operator stops you. Set config.maxCycles at init for a bounded run that may stop itself at the limit.',
+      storedUserMessages: state.userMessages.length,
+      dashboardPath: dash.path,
+      dashboardAlwaysOn: true,
+      continuation: continuationPayload(state),
+      next: 'Call loop_start { runId, loop:"strip-miner" } (The Strip Miner Loop) or { loop:"loop-de-loop" } (Loop 2), or a custom loop registered with loop_register. Sections stream one at a time and require recorded evidence before the next section unlocks. Reports are checkpoints, not stopping points.'
+    });
+  }
+  function holdForModelConfirmation(state, modelInfo, { ts }) {
+    const requested = modelInfo.primary;
+    const reason = modelInfo.reason || modelInfo.classification?.reason || 'banned under active banlist';
+    const pending = {
+      requested,
+      reason,
+      options: modelConfirmationOptions(requested),
+      ts
+    };
+    state.pendingModelConfirmation = pending;
+    state.status = STATUS.AWAITING_ANSWERS;
+    state.task.sufficiency = 'insufficient';
+    state.questions = [modelConfirmationQuestion(pending)];
+    // Do not commit a banned primary as the run's live primary for gates.
+    state.config.modelPolicy = defaultModelPolicy('defaults');
+    state.config.model = {
+      primary: DEFAULT_PRIMARY_MODEL,
+      declared: false,
+      autoSelected: true,
+      bannedUnderPolicy: false,
+      pendingRequest: requested
+    };
+    logEvent(state, 'model_confirmation_required', { requested, reason });
+    state.updatedAt = ts;
+    const dash = writeDashboardForState(state);
+    store.save(state);
+    return ok('Your model choice needs a quick confirmation before I start — one question only; I will not ask again after this.', {
+      runId: state.runId,
+      runStatus: state.status,
+      needsConfirmation: true,
+      confirmation: {
+        requested: pending.requested,
+        reason: pending.reason,
+        options: pending.options
+      },
+      questions: state.questions,
+      model: state.config.model,
+      defaultModelPolicy: state.config.modelPolicy,
+      briefing: 'Answer the confirmation, then I initialize and keep moving. The dashboard stays available. You remain the stop condition.',
+      coldStartNotice: COLD_START_NOTICE,
+      stopCondition: STOP_CONDITION_WARNING,
+      nativeContinuation: NATIVE_CONTINUATION_NOTICE,
+      hostSetup: buildHostSetup(state),
+      dashboardPath: dash.path,
+      dashboardAlwaysOn: true,
+      continuation: continuationPayload(state),
+      next: `Call initialize_loop_run again with { runId:"${state.runId}", answers:["use it anyway" | "<other-model>" | "defaults"] }. This is the only confirmation turn.`
+    });
+  }
+  /**
+   * Build the run's modelPolicy from operator inputs (args.modelPolicy, args.model,
+   * free-form model answer text). Defaults when nothing is said = today's behavior.
+   */
+  function resolveModelPolicyFromInit(args, answers, questions) {
+    const notes = [];
+    let partial = null;
+    let source = 'defaults';
+
+    if (args && args.modelPolicy && typeof args.modelPolicy === 'object') {
+      partial = args.modelPolicy;
+      source = 'operator-init';
+      notes.push('modelPolicy supplied in initialize_loop_run args');
+    }
+
+    // Scan answers for a model-choice reply (keyword hit, or the dedicated question index).
+    const answerTexts = (answers || []).map((a) => String(a && a.text != null ? a.text : a));
+    let modelAnswer = null;
+    if (questions && questions.length) {
+      const modelQIdx = questions.findIndex((q) => /which models do you want to use/i.test(q));
+      if (modelQIdx >= 0 && answerTexts[modelQIdx] != null && String(answerTexts[modelQIdx]).trim()) {
+        modelAnswer = String(answerTexts[modelQIdx]);
+      }
+    }
+    if (!modelAnswer) {
+      modelAnswer = answerTexts.find((t) =>
+        /\b(defaults?|any models?|banlist|primary\s*[:=]|test\s+routes?|builder\s+routes?|judge\s*[:=]|(?:claude|gpt|glm|gemini|grok|opus|sonnet|haiku)[-_a-z0-9.]+)\b/i.test(t)
+      ) || null;
+    }
+    if (modelAnswer) {
+      const parsed = parseModelChoiceText(modelAnswer);
+      partial = { ...(partial || {}), ...parsed.policy, banlist: parsed.policy.banlist };
+      // If parse said defaults and we already had operator modelPolicy args, keep args.
+      if (parsed.source === 'operator-init') source = 'operator-init';
+      notes.push(...parsed.notes);
+      if (parsed.source === 'defaults') notes.push('model answer resolved to defaults');
+      else notes.push('model answer applied from operator reply');
+    }
+
+    if (args && typeof args.model === 'string' && args.model.trim()) {
+      partial = partial || {};
+      partial.primary = args.model.trim();
+      if (source === 'defaults') source = 'operator-init';
+      notes.push(`primary set from args.model="${args.model.trim()}"`);
+    }
+
+    const policy = normalizeModelPolicy(partial || defaultModelPolicy(source), { source });
+    const modelInfo = resolveModel(policy.primary, policy);
+    // If not banned, commit primary into policy; if banned, leave policy as-is for
+    // the confirmation hold (do not rewrite — do not commit either).
+    if (!modelInfo.banned) {
+      policy.primary = modelInfo.primary;
+      if (!listIncludes(policy.testRoutes, policy.primary)) {
+        if (source === 'operator-init' && policy.testRoutes.length === 3
+          && policy.testRoutes[0] === DEFAULT_PRIMARY_MODEL) {
+          policy.testRoutes = [policy.primary, ...policy.testRoutes.filter((r) => r !== policy.primary)].slice(0, 5);
+        }
+      }
+      if (!policy.judgeRoute) policy.judgeRoute = policy.primary;
+    }
+    return { policy: normalizeModelPolicy(policy, { source }), modelInfo, notes };
+  }
+  function listIncludes(arr, item) {
+    const key = String(item || '').toLowerCase();
+    return (arr || []).some((x) => String(x).toLowerCase() === key);
   }
   function inferMode(text) {
     const t = String(text || '');
@@ -636,12 +918,12 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (vagueOnly) return false;
     return words >= 8 && hasMetric;
   }
-  // Ask-once questions cover ONLY what the operator alone can answer: the goal,
-  // the starting point, how WIDE to mine, what ORDER to improve in, what "better"
-  // means, and any task-specific hard limit. Model routes, promotion mode, benchmark
-  // policy, and the standing guarantees are decided by the tool from the task —
-  // never posed back to the operator. The deeper-explanation offer stays LAST
-  // (wantsDeeperExplanation weights the final answer).
+  // Ask-once questions cover what the operator alone can answer: the goal, the
+  // starting point, how WIDE to mine, what ORDER to improve in, what "better"
+  // means, any task-specific hard limit, and ONE friendly model-choice question.
+  // Promotion mode, benchmark policy, measurement authority, integrity, and the
+  // standing guarantees stay tool-owned — never posed back. The deeper-explanation
+  // offer stays LAST (wantsDeeperExplanation weights the final answer).
   function generateQuestions() {
     return [
       'In one sentence: what is the end result a successful run must produce?',
@@ -650,6 +932,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       'If mining or discovering: search your WHOLE session history, or stop after a set number of loops? Give a number, or say "whole history". And after mining, improve the BEST loops first, or go in the order found? Heads-up — a run can go for hours, days, or weeks depending on how deep I mine; best-first surfaces value soonest.',
       'In plain English, what would make the result clearly better? I turn this into the frozen, tool-measured benchmark.',
       'Anything task-specific I must not break? The standing guarantees — evidence-gated promotion, a hash-locked baseline, no cost regression, and your authorship — always hold, so name only the extras.',
+      'Which models do you want to use? (primary worker, and optionally: test routes, builder routes, judge). Press enter / say \'defaults\' for ' + DEFAULT_PRIMARY_MODEL + ' + the standard frontier set. Say \'any model\' to disable the banlist for this run.',
       'Want me to explain how Loop Factory enforces this before I start, or should I just keep moving after this?'
     ];
   }
@@ -660,7 +943,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     return [
       'Loop Factory is the supervisor/harness, not a prompt. It owns campaign state, the target queue, transitions, benchmark math, the dashboard, and stop policy.',
       'I hold the full private Strip Miner and Loop-de-loop inside the harness and stream them one section at a time, each gated on recorded evidence. A worker model can only PROPOSE artifacts or transitions; a summary, a "done", a confidence claim, or a bare tool call is never progress — only a supervisor-accepted transition counts. I freeze a benchmark from your definition of "better", lock the baseline by hash, measure baseline and challenger on the same yardstick, compute the delta myself, and re-verify from sealed bytes before any promotion.',
-      'You decide the goal, whether to start by mining or by improving an existing loop, how wide to mine (your whole history or a set number of loops), what order to improve in (best-first or in order), what "better" means, and any hard limit. I decide the model routes (default ' + DEFAULT_PRIMARY_MODEL + ', strongest available; builds and in-loop gating route to ' + BUILDER_GATING_ROUTES.join(' or ') + '), the promotion rule, and the internal thresholds — those are mine, so you are not asked to set policy.',
+      'You decide the goal, whether to start by mining or by improving an existing loop, how wide to mine (your whole history or a set number of loops), what order to improve in (best-first or in order), what "better" means, any hard limit, and the models for this run. You choose the models (defaults shown: primary ' + DEFAULT_PRIMARY_MODEL + ', builders ' + BUILDER_GATING_ROUTES.join(' / ') + ', standard frontier test set); the supervisor still owns measurement, integrity, and promotion. Press enter / say defaults for today\'s behavior; say "any model" to turn the banlist off for this run.',
       'If the Strip Miner saturates I auto-transition to Loop-de-loop or the next lane; a branch retires only after ' + DEFAULTS.branchRetirementBatches + ' valid no-improvement test batches and then pivots — it never ends the campaign. The dashboard stays open the whole run for your Approve/Sludge review, and the run never marks itself complete. You are the only stop condition.'
     ].join(' ');
   }
@@ -683,14 +966,14 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     return positive && !negativeOnly;
   }
   function deeperExplanation(state) {
-    const model = state.config.model.primary;
+    const pol = activePolicy(state);
     return [
       'How Loop Factory actually enforces this (the deeper explanation you asked for):',
       `1) Phase-gated streaming — the full private 345-line Strip Miner and 75-line Loop-de-loop (Loop 2) live inside the supervisor. loop_start hands you one section; request_next_phase only unlocks the next section after evidence is recorded for the current one (PHASE_SKIP otherwise). The full loop never collapses into context before real decisions. You can also add your own loops with loop_register, and they stream the same way.`,
       '2) Benchmark-first — you hash-lock a baseline (write-once) and freeze a task-specific scorecard before any challenger. The scorecard carries a deterministic oracle where possible so quality is tool-scored, not asserted.',
       '3) Tool-measured authority — every metric is derived by the MCP from the raw bytes you record (tokenCost always; quality via the frozen oracle). A number typed by the model is caller-reported and refused by the benchmark/test gates. reverify_run re-derives the metrics from the sealed bytes, so a tampered number cannot survive.',
       '4) The honest boundary — the MCP cannot prove the recorded bytes came from a real frontier-agent run, and it cannot judge subjective quality without an oracle. Subjective wins go to the dashboard for your Approve/Sludge decision and never auto-promote. Deterministic wins can promote autonomously. That split is intentional, not hidden.',
-      `5) Frontier + parallel — full tests need 3–5 frontier agents (haiku/mini/nano/lite/prior-gen rejected). Default route ${model}; web-search current SOTA and run host_capability_preflight to see which CLIs are installed.`,
+      `5) Models + parallel — full tests need 3–5 agents under the active modelPolicy (primary ${pol.primary}, banlist mode "${pol.banlist.mode}"). Under mode "default", haiku/mini/nano/lite/prior-gen are rejected; you chose the models at init (or accepted defaults). Web-search current SOTA and run host_capability_preflight to see which CLIs are installed.`,
       '6) Continuation rule — reports, dashboards, saturation, and no-improvement advisories create a continuation obligation. continue_run records intent but cannot clear that obligation; only a real progress tool clears it. The operator is the only stop condition.'
     ].join('\n');
   }
@@ -716,7 +999,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     };
   }
   function validateAgentRun(state, run) {
-    const c = classifyRoute(run && run.model);
+    const c = classifyRoute(run && run.model, activePolicy(state));
     if (!c.ok) return { ok: false, model: c.model, reason: `route ${c.model}: ${c.reason}`, code: BLOCK.BANNED_ROUTE };
     const m = resolveMeasurement(state, run && run.measurementRef);
     if (!m.ok) return { ok: false, model: c.model, reason: `agent run on ${c.model}: ${m.reason}`, code: BLOCK.MODEL_REPORTED };
@@ -785,6 +1068,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     const runId = args.runId || `run-${hash8(String(args.task || '') + ts)}`;
     if (!isSafeId(runId)) return invalidIdBlock('runId', runId);
     let state = store.exists(runId) ? store.load(runId) : freshRun(runId, ts);
+    ensureModelPolicy(state); // resume-safe: backfill pre-modelPolicy state.json
 
     // Always (re)store user messages + task hash locally — this is the hook corpus.
     if (Array.isArray(args.userMessages)) state.userMessages = storeMessages(args.userMessages);
@@ -805,12 +1089,60 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       store.save(state);
       const deeper = wantsDeeperExplanation(state.answers) ? deeperExplanation(state) : undefined;
       return ok('Already initialized. Ask-once is satisfied; I will not ask again or mark the run complete by myself.',
-        { runId, runStatus: state.status, model: state.config.model, dashboardPath: dash.path, dashboardAlwaysOn: true, stopCondition: STOP_CONDITION_WARNING, nativeContinuation: NATIVE_CONTINUATION_NOTICE, hostSetup: buildHostSetup(state), deeperExplanation: deeper, continuation: continuationPayload(state), next: nextSentence(state) });
+        { runId, runStatus: state.status, model: state.config.model, modelPolicy: activePolicy(state), needsConfirmation: false, dashboardPath: dash.path, dashboardAlwaysOn: true, stopCondition: STOP_CONDITION_WARNING, nativeContinuation: NATIVE_CONTINUATION_NOTICE, hostSetup: buildHostSetup(state), deeperExplanation: deeper, continuation: continuationPayload(state), next: nextSentence(state) });
     }
 
-    // First-time configuration.
-    const modelInfo = resolveModel(args.model);
-    state.config.model = { primary: modelInfo.primary, declared: modelInfo.declared, autoSelected: !modelInfo.declared };
+    // Pending banned-model confirmation: resolve ONE answer, never re-ask.
+    if (state.status === STATUS.AWAITING_ANSWERS && state.pendingModelConfirmation) {
+      const answersProvided = Array.isArray(args.answers) && args.answers.length > 0;
+      if (!answersProvided && !(args && typeof args.model === 'string' && args.model.trim())
+        && !(args && args.modelPolicy && typeof args.modelPolicy === 'object')) {
+        // Re-surface the same confirmation — do not invent a second question.
+        const pending = state.pendingModelConfirmation;
+        const dash = writeDashboardForState(state);
+        store.save(state);
+        return ok('Still waiting on the model confirmation (one question only).', {
+          runId, runStatus: state.status,
+          needsConfirmation: true,
+          confirmation: { requested: pending.requested, reason: pending.reason, options: pending.options },
+          questions: state.questions,
+          dashboardPath: dash.path,
+          dashboardAlwaysOn: true,
+          stopCondition: STOP_CONDITION_WARNING,
+          next: `Call initialize_loop_run with { runId:"${runId}", answers:["use it anyway" | "<other-model>" | "defaults"] }.`
+        });
+      }
+      const confText = answersProvided
+        ? String(args.answers[args.answers.length - 1] && args.answers[args.answers.length - 1].text != null
+          ? args.answers[args.answers.length - 1].text
+          : args.answers[args.answers.length - 1])
+        : '';
+      if (answersProvided) {
+        state.answers = [
+          ...(state.answers || []),
+          ...args.answers.map((a, i) => ({ index: (state.answers || []).length + i, sha256: sha256(String(a)), text: String(a), ts }))
+        ];
+      }
+      const resolvedConf = resolveModelConfirmationAnswer(confText, state.pendingModelConfirmation, args);
+      if (args && args.modelPolicy && typeof args.modelPolicy === 'object') {
+        // Explicit full policy on the confirmation turn wins.
+        const pol = normalizeModelPolicy(args.modelPolicy, { source: 'operator-init' });
+        const info = resolveModel(pol.primary, pol);
+        if (!info.banned) {
+          return finalizeInitWithPolicy(state, pol, {
+            startIntent: false, ts,
+            deeperFromAnswers: wantsDeeperExplanation(state.answers)
+          });
+        }
+      }
+      return finalizeInitWithPolicy(state, resolvedConf.policy, {
+        startIntent: false, ts,
+        deeperFromAnswers: wantsDeeperExplanation(state.answers)
+      });
+    }
+
+    // First-time configuration (failure patience / bounds / comparison — model policy
+    // is resolved later once we know answers vs just-go, so banlist honor is consistent).
     if (args.config && Number.isFinite(args.config.failurePatience)) {
       state.config.failurePatience = clamp(Math.round(args.config.failurePatience), 10, 15);
     }
@@ -851,6 +1183,10 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       state.status = STATUS.AWAITING_ANSWERS;
       state.task.sufficiency = 'insufficient';
       state.questions = generateQuestions();
+      state.pendingModelConfirmation = null;
+      // Seed default policy on the awaiting state so the dashboard shows defaults early.
+      state.config.modelPolicy = defaultModelPolicy('defaults');
+      state.config.model = { primary: state.config.modelPolicy.primary, declared: false, autoSelected: true };
       logEvent(state, 'ask_once', { count: state.questions.length });
       state.updatedAt = ts;
       const dash = writeDashboardForState(state);
@@ -859,6 +1195,8 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         runId, runStatus: state.status,
         explanation: askOnceExplanation(),
         questions: state.questions,
+        needsConfirmation: false,
+        defaultModelPolicy: state.config.modelPolicy,
         briefing: 'I will keep the run moving after this. The dashboard is always on and available for review. The model can queue or list review items, but only the operator can Approve or Sludge them from the dashboard. If a mining lane saturates or produces no winners, that is a checkpoint; the next step is to improve or harden the best available loop.',
         coldStartNotice: COLD_START_NOTICE,
         stopCondition: STOP_CONDITION_WARNING,
@@ -871,35 +1209,25 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       });
     }
 
-    state.status = STATUS.INITIALIZED;
-    state.task.sufficiency = 'sufficient';
-    state.task.path = computeCampaignPath(state) || null; // Step 5: improve / mine / discover
-    logEvent(state, 'initialized', { model: state.config.model.primary, mode: state.task.mode, path: state.task.path });
-    state.updatedAt = ts;
-    const dash = writeDashboardForState(state);
-    store.save(state);
-    return ok('Initialized. Ask-once is complete; I will not ask again or mark the run complete by myself.', {
-      runId, runStatus: state.status, model: state.config.model,
-      briefing: 'I will keep the run moving after this. The dashboard is always on and available for review. The model can queue or list review items, but only the operator can Approve or Sludge them from the dashboard. If a mining lane saturates or produces no winners, that is a checkpoint; the next step is to improve or harden the best available loop.',
-      coldStartNotice: COLD_START_NOTICE,
-      stopCondition: STOP_CONDITION_WARNING,
-      nativeContinuation: NATIVE_CONTINUATION_NOTICE,
-      hostSetup: buildHostSetup(state),
-      assumptions: startIntent ? startAssumptions(state) : undefined,
-      deeperExplanation: wantsDeeperExplanation(state.answers) ? deeperExplanation(state) : undefined,
-      modelWarning: modelInfo.warning || undefined,
-      sotaAdvisory: `Using ${state.config.model.primary} as the most capable available route. Check current SOTA via web search at the start (OpenAI / Anthropic / Google / Z.ai), and override config.model if a stronger frontier model exists. Run host_capability_preflight to see which frontier CLIs are installed locally. Non-frontier routes (haiku/mini/nano/lite/prior-gen) are rejected for full tests.`,
-      builderRoutingAdvisory: `Builds and in-loop gating route to ${BUILDER_GATING_ROUTES.join(' or ')}. Codex/GPT stays a supported host surface but is not a trusted in-loop builder/gating worker. Frontier test workers may still include gpt-5.5.`,
-      failurePatience: state.config.failurePatience, branchRetirementBatches: state.config.branchRetirementBatches, mode: state.task.mode,
-      runMode: state.config.runMode, maxCycles: state.config.maxCycles,
-      limitNotice: state.config.runMode === 'bounded'
-        ? `Bounded run: after ${state.config.maxCycles} full test(s) — or the failure/exhaustion advisory — you MAY stop your /loop (campaignContinues flips to false). Until then, keep going. The operator can still stop earlier or extend the limit.`
-        : 'Infinite run: never self-stops. campaignContinues stays true until the operator stops you. Set config.maxCycles at init for a bounded run that may stop itself at the limit.',
-      storedUserMessages: state.userMessages.length,
-      dashboardPath: dash.path,
-      dashboardAlwaysOn: true,
-      continuation: continuationPayload(state),
-      next: 'Call loop_start { runId, loop:"strip-miner" } (The Strip Miner Loop) or { loop:"loop-de-loop" } (Loop 2), or a custom loop registered with loop_register. Sections stream one at a time and require recorded evidence before the next section unlocks. Reports are checkpoints, not stopping points.'
+    // Resolve model policy now that we know answers / just-go / args.model.
+    // "Just go" and specific-task paths with no model input → defaults (today's behavior).
+    const resolved = resolveModelPolicyFromInit(
+      args,
+      state.answers,
+      state.questions.length ? state.questions : generateQuestions()
+    );
+    const modelInfo = resolved.modelInfo;
+
+    // Banned under active banlist → hold at AWAITING_ANSWERS with ONE confirmation.
+    // Never silently rewrite; never proceed to INITIALIZED with a buried warning.
+    if (modelInfo.banned || modelInfo.needsConfirmation) {
+      return holdForModelConfirmation(state, modelInfo, { ts });
+    }
+
+    return finalizeInitWithPolicy(state, resolved.policy, {
+      startIntent: !!startIntent,
+      ts,
+      deeperFromAnswers: wantsDeeperExplanation(state.answers)
     });
   }
 
@@ -1279,12 +1607,15 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       return blocked(BLOCK.MEASUREMENT_AUTHORITY, `Benchmark run rejected: tokenCost authority is "${m.authority.tokenCost}", not tool-computed. The MCP must derive the bar's cost from recorded bytes; a caller-reported number cannot set the bar challengers are measured against.`, { authority: m.authority });
     }
     if (arm === 'baseline') {
-      // Step 1 — a worker may not set its own bar. Block if the baseline carries no
-      // author provenance, or is worker-authored AND its bytes were also recorded as a
-      // challenger (worker authored both the baseline and the challenger).
+      // Step 1 — block only when there is no author provenance, OR the baseline is
+      // worker-authored AND its bytes were also recorded as a challenger (self-bar:
+      // worker authored both sides). A clean worker baseline without selfBar is a
+      // legitimate bar — do not demand operator/maker authorship in that case.
       if (!state.baseline.baselineSource || (state.baseline.baselineSource === 'worker' && state.baseline.selfBar)) {
-        return blocked(BLOCK.BASELINE_AUTHOR_FORBIDDEN,
-          'Worker cannot set its own bar; baseline must be operator/maker-authored.',
+        const why = !state.baseline.baselineSource
+          ? 'Baseline has no author provenance (baselineSource missing). Record the baseline with explicit authorship, or use an operator/maker-authorized baseline.'
+          : 'Worker authored both the baseline and a challenger from the same bytes (selfBar). A worker may set a clean baseline bar, but cannot also author the challenger it is measured against.';
+        return blocked(BLOCK.BASELINE_AUTHOR_FORBIDDEN, why,
           { baselineSource: state.baseline.baselineSource || null, selfBar: !!state.baseline.selfBar });
       }
       state.benchmark.baselineScore = { tokenCost: m.metrics.tokenCost, quality: m.metrics.quality, source: 'tool', qualityAuthority: m.authority.quality, measurementRef: m.measurementRef, ts: clock() };
@@ -1317,16 +1648,18 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (hyps.length < DEFAULTS.hypothesisMin || hyps.length > DEFAULTS.hypothesisMax) {
       return blocked(BLOCK.HYPOTHESIS_COUNT, `A full test needs ${DEFAULTS.hypothesisMin}–${DEFAULTS.hypothesisMax} parallel hypotheses tested with frontier models; you provided ${hyps.length}.`, { provided: hyps.length });
     }
+    const pol = activePolicy(state);
     const routes = hyps.map((h) => (h.route && h.route.model) || h.model || '');
-    const bad = rejectedRoutes(routes);
-    if (bad.length) return blocked(BLOCK.BANNED_ROUTE, `Non-frontier route(s) rejected: ${bad.map((b) => b.model).join(', ')}. Full tests run on the most frontier models (e.g. ${KNOWN_FRONTIER_EXAMPLES.join(', ')}); haiku/mini/nano/lite and prior-gen are rejected.`, { rejected: bad });
+    const bad = rejectedRoutes(routes, pol);
+    if (bad.length) return blocked(BLOCK.BANNED_ROUTE, `Route(s) rejected under modelPolicy banlist mode "${pol.banlist.mode}": ${bad.map((b) => b.model).join(', ')}. Default frontier set: ${KNOWN_FRONTIER_EXAMPLES.join(', ')}. Say "any model" at init (banlist off) or add banlist.extraAllow to permit a previously-banned route for this run.`, { rejected: bad, modelPolicy: { banlist: pol.banlist, primary: pol.primary } });
     // Builder/gating routing: a hypothesis MAY name the worker that BUILDS its
-    // challenger. If named, it must be a trusted builder/gating route (Opus 4.8 /
-    // GLM 5.2). Codex/GPT is a fine frontier TEST worker but not an in-loop builder
-    // here, so a build routed to it is refused. (Test-worker routes are unaffected.)
+    // challenger. If named, it must be a trusted builder/gating route under the
+    // active modelPolicy (defaults: Opus 4.8 / GLM 5.2). Codex/GPT is a fine
+    // frontier TEST worker under the default banlist but not an in-loop builder
+    // unless listed in modelPolicy.builderRoutes.
     const builderRoutes = hyps.map((h) => (h.builderRoute && h.builderRoute.model) || h.builderRoute || '').filter(Boolean);
-    const badBuilders = rejectedBuilderRoutes(builderRoutes);
-    if (badBuilders.length) return blocked(BLOCK.BUILDER_ROUTE, `Builder/gating route(s) rejected: ${badBuilders.map((b) => b.model).join(', ')}. Builds and in-loop gating route to ${BUILDER_GATING_ROUTES.join(' or ')}; Codex/GPT stays a host surface, not an in-loop builder.`, { rejected: badBuilders });
+    const badBuilders = rejectedBuilderRoutes(builderRoutes, pol);
+    if (badBuilders.length) return blocked(BLOCK.BUILDER_ROUTE, `Builder/gating route(s) rejected: ${badBuilders.map((b) => b.model).join(', ')}. Builds and in-loop gating route to ${pol.builderRoutes.join(' or ')} under the active modelPolicy; Codex/GPT stays a host surface, not an in-loop builder, unless listed in modelPolicy.builderRoutes.`, { rejected: badBuilders, builderRoutes: pol.builderRoutes });
     // Step 3 — wire OR block: a route that passes classifyRoute but maps to no executor
     // binary (opencode not on PATH) is NOT silently accepted. It is refused unless the caller
     // explicitly records it manually WITH provenance, so a hand-run route is honest, not invisible.
@@ -1382,8 +1715,9 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (runs.length < DEFAULTS.fullTestAgentsMin || runs.length > DEFAULTS.fullTestAgentsMax) {
       return blocked(BLOCK.FULLTEST_AGENTS, `A full test must run the loop with ${DEFAULTS.fullTestAgentsMin}–${DEFAULTS.fullTestAgentsMax} frontier agents (not ${runs.length}). "Think hard and count it as a test" is not a test.`, { provided: runs.length });
     }
-    const routeBad = runs.map((r) => classifyRoute(r && r.model)).filter((c) => !c.ok);
-    if (routeBad.length) return blocked(BLOCK.BANNED_ROUTE, `Full test rejected: non-frontier agent route(s) ${routeBad.map((c) => c.model).join(', ')}.`, { rejected: routeBad.map((c) => ({ model: c.model, reason: c.reason })) });
+    const pol = activePolicy(state);
+    const routeBad = runs.map((r) => classifyRoute(r && r.model, pol)).filter((c) => !c.ok);
+    if (routeBad.length) return blocked(BLOCK.BANNED_ROUTE, `Full test rejected under banlist mode "${pol.banlist.mode}": agent route(s) ${routeBad.map((c) => c.model).join(', ')}.`, { rejected: routeBad.map((c) => ({ model: c.model, reason: c.reason })) });
     const validated = runs.map((r) => validateAgentRun(state, r));
     const unmeasured = validated.filter((v) => !v.ok);
     if (unmeasured.length) {
@@ -1398,6 +1732,10 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     const costs = validated.map((v) => v.metrics.tokenCost);
     const qualityAuthority = validated.every((v) => v.authority.quality === TOOL_AUTHORITY) ? TOOL_AUTHORITY : CALLER_AUTHORITY;
     const agg = { tokenCost: round(mean(costs)), quality: round(mean(quals)), n: validated.length, stdevQuality: round(stdev(quals)), minQuality: round(Math.min(...quals)), maxQuality: round(Math.max(...quals)) };
+    // Movement math uses the same thresholds as promotion, but this batch is NOT yet
+    // reverified — store reverified:false and label the response so consumers cannot
+    // misread a pre-reverify MOVED_FRONTIER as a shippable win. Promotion gating itself
+    // still requires reverify_run (untouched).
     const mv = evaluatePromotion(state.benchmark.baselineScore, { tokenCost: agg.tokenCost, quality: agg.quality, source: 'tool', reverified: true }, state.config.promotion, state.config.comparisonRule);
     const moved = mv.promote || mv.code === BLOCK.STAGED_TRADEOFF;
     const verdict = moved ? VERDICT.MOVED_FRONTIER : VERDICT.NO_IMPROVEMENT;
@@ -1405,7 +1743,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     state.tests.push({
       id: tid, hypothesisId: h.id, ts: clock(),
       agentRuns: validated.map((v) => ({ model: v.model, tokenCost: v.metrics.tokenCost, quality: v.metrics.quality, measurementRef: v.measurementRef, qualityAuthority: v.authority.quality, reverifiable: v.reverifiable })),
-      agg, source: 'tool', qualityAuthority, reverified: false, verdict, movement: mv
+      agg, source: 'tool', qualityAuthority, reverified: false, verdict, movement: mv, verdictBasis: 'pre-reverify'
     });
     if (moved && h.status !== 'PROMOTED_INTERNAL') h.status = VERDICT.MOVED_FRONTIER;
     else if (h.status === 'REGISTERED') h.status = 'TESTED';
@@ -1444,10 +1782,15 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     state.updatedAt = clock();
     const dash = writeDashboardForState(state);
     store.save(state);
-    return ok(`Full test ${tid} for ${h.id}: quality ${agg.quality} vs baseline ${state.benchmark.baselineScore.quality}, tokenCost ${agg.tokenCost} vs ${state.benchmark.baselineScore.tokenCost}. Verdict ${verdict}. ${mv.message}${retirement ? ` Branch retired after ${retirement.batches} valid no-improvement batches — supervisor auto-pivoted to the next lane (NOT a stop).` : ''}`, {
-      testId: tid, verdict, aggregate: agg, movement: mv, qualityAuthority,
+    return ok(`Full test ${tid} for ${h.id}: quality ${agg.quality} vs baseline ${state.benchmark.baselineScore.quality}, tokenCost ${agg.tokenCost} vs ${state.benchmark.baselineScore.tokenCost}. Verdict ${verdict} (pre-reverify — not yet shippable). ${mv.message}${retirement ? ` Branch retired after ${retirement.batches} valid no-improvement batches — supervisor auto-pivoted to the next lane (NOT a stop).` : ''}`, {
+      testId: tid,
+      verdict, // provisional movement signal only — see provisionalVerdict + verdictBasis
+      provisionalVerdict: verdict,
+      verdictBasis: 'pre-reverify',
+      reverified: false,
+      aggregate: agg, movement: mv, qualityAuthority,
       qualityNote: qualityAuthority === TOOL_AUTHORITY
-        ? 'quality is tool-computed against the frozen oracle — eligible for autonomous promotion.'
+        ? 'quality is tool-computed against the frozen oracle — eligible for autonomous promotion after reverify + operator Approve.'
         : 'quality is caller-reported (no deterministic oracle) — a quality win here must go through the dashboard and cannot auto-promote.',
       failureCounter: { consecutive: state.failures.consecutive, total: state.failures.total, patience: state.config.failurePatience, exhaustionFlagged: state.failures.exhaustionFlagged },
       branchRetirement: { laneId: lane.id, noImproveBatches: lane.noImproveBatches, threshold: state.config.branchRetirementBatches, retired: !!retirement },
@@ -1458,7 +1801,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       next: retirement
         ? `Branch retired and the supervisor auto-pivoted. ${retirement.pivotedToLoop ? `loop_start { loop:"${retirement.pivotedToLoop}" }` : 'open the next improvement branch (register_hypotheses for the next bottleneck)'}. The campaign keeps running.`
         : verdict === VERDICT.MOVED_FRONTIER
-        ? `Deep-reverify the winning evidence (reverify_run { testId:"${tid}" }), then promotion_request.`
+        ? `Deep-reverify the winning evidence (reverify_run { testId:"${tid}" }), then promotion_request. The verdict above is pre-reverify only.`
         : 'No movement. This is not a final answer and not a stopping point; iterate another hypothesis, try another operation, or pivot lanes.'
     });
   }
@@ -1487,10 +1830,11 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (routes.length < DEFAULTS.fullTestAgentsMin || routes.length > DEFAULTS.fullTestAgentsMax) {
       return blocked(BLOCK.FULLTEST_AGENTS, `execute_full_test launches ${DEFAULTS.fullTestAgentsMin}-${DEFAULTS.fullTestAgentsMax} frontier workers; you gave ${routes.length} route(s).`, { provided: routes.length });
     }
-    const routeBad = routes.map((r) => classifyRoute(r)).filter((c) => !c.ok);
-    if (routeBad.length) return blocked(BLOCK.BANNED_ROUTE, `Non-frontier route(s) refused: ${routeBad.map((c) => c.model).join(', ')}.`, { rejected: routeBad.map((c) => ({ model: c.model, reason: c.reason })) });
+    const pol = activePolicy(state);
+    const routeBad = routes.map((r) => classifyRoute(r, pol)).filter((c) => !c.ok);
+    if (routeBad.length) return blocked(BLOCK.BANNED_ROUTE, `Route(s) refused under banlist mode "${pol.banlist.mode}": ${routeBad.map((c) => c.model).join(', ')}.`, { rejected: routeBad.map((c) => ({ model: c.model, reason: c.reason })) });
     const notAllow = routes.filter((r) => !execBinaryForRoute(r, env));
-    if (notAllow.length) return blocked(BLOCK.EXEC_FAILED, `Routes with no allowlisted executor binary (claude/codex/glm/gemini only): ${notAllow.join(', ')}.`, { notAllowlisted: notAllow });
+    if (notAllow.length) return blocked(BLOCK.EXEC_FAILED, `Routes with no allowlisted executor binary (claude/codex/glm/gemini/opencode families only): ${notAllow.join(', ')}. Family mapping is exec safety — not a model-policy endorsement.`, { notAllowlisted: notAllow });
     const prompt = String(args.prompt == null ? '' : args.prompt).trim();
     if (!prompt) return blocked(BLOCK.BAD_INPUT, 'execute_full_test needs { prompt } — the loop + task the launched worker should actually run.');
 
@@ -1857,7 +2201,9 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       failureCounter: state.failures,
       pendingDashboardReview: pendingReviews,
       pendingReviewBlocksCampaign: false,
-      builderGatingRoutes: BUILDER_GATING_ROUTES,
+      modelPolicy: activePolicy(state),
+      // Convenience mirror of the active policy's builder routes (same list as modelPolicy.builderRoutes).
+      builderGatingRoutes: activePolicy(state).builderRoutes,
       runMode: state.config.runMode,
       maxCycles: state.config.maxCycles,
       cyclesDone: (state.counters && state.counters.test) || 0,

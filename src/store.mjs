@@ -5,6 +5,7 @@
 import { mkdirSync, writeFileSync, readFileSync, renameSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isSafeId, safeId } from './util.mjs';
+import { parseSkillFile } from './skill-schema.mjs';
 
 export function createStore(homeDir) {
   const runsRoot = resolve(homeDir, 'runs');
@@ -207,66 +208,7 @@ export function createStore(homeDir) {
   };
 }
 
-/** Split a skill markdown file into frontmatter object + body (minimal line parser). */
+/** Split a skill markdown file into frontmatter + body (shared parser in skill-schema). */
 function splitSkillMarkdown(raw) {
-  const text = String(raw);
-  if (!text.startsWith('---')) {
-    return { frontmatter: {}, body: text };
-  }
-  const close = text.indexOf('\n---', 3);
-  if (close === -1) {
-    return { frontmatter: {}, body: text };
-  }
-  const fmBlock = text.slice(4, close);
-  const body = text.slice(close + 4).replace(/^\n+/, '');
-  return { frontmatter: parseFrontmatterLines(fmBlock), body };
-}
-
-/** Minimal YAML-subset parser: string, integer, and [] array values only. */
-function parseFrontmatterLines(block) {
-  const fm = {};
-  let key = null;
-  let arrayMode = false;
-  for (const line of block.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const arrayStart = trimmed.match(/^([A-Za-z0-9_]+):\s*\[(.*)$/);
-    if (arrayStart) {
-      key = arrayStart[1];
-      const rest = arrayStart[2];
-      if (rest.includes(']')) {
-        const inner = rest.slice(0, rest.indexOf(']')).trim();
-        fm[key] = inner ? inner.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')) : [];
-        key = null;
-        arrayMode = false;
-      } else {
-        fm[key] = [];
-        arrayMode = true;
-        const first = rest.trim();
-        if (first) fm[key].push(first.replace(/^['"]|['"]$/g, ''));
-      }
-      continue;
-    }
-    if (arrayMode && key) {
-      if (trimmed === ']') {
-        arrayMode = false;
-        key = null;
-        continue;
-      }
-      const item = trimmed.replace(/^-\s*/, '').replace(/,$/, '').replace(/^['"]|['"]$/g, '');
-      fm[key].push(item);
-      continue;
-    }
-    const kv = trimmed.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
-    if (!kv) continue;
-    key = kv[1];
-    const val = kv[2].trim();
-    if (/^-?\d+$/.test(val)) {
-      fm[key] = Number(val);
-    } else {
-      fm[key] = val.replace(/^['"]|['"]$/g, '');
-    }
-    key = null;
-  }
-  return fm;
+  return parseSkillFile(raw);
 }

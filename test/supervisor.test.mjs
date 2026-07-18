@@ -78,7 +78,11 @@ test('campaign_status exposes the lane queue, retirement threshold, advisory ban
   assert.equal(s.activeLane.kind, 'mine');
   assert.equal(s.branchRetirementThreshold, 30);
   assert.ok(s.advisoryBand >= 10 && s.advisoryBand <= 15);
-  assert.deepEqual(s.builderGatingRoutes, ['claude-opus-4-8', 'glm-5.2']);
+  // Active policy (defaults) — not a hard-coded constant the campaign cannot change.
+  assert.ok(s.modelPolicy, 'campaign_status exposes the ACTIVE modelPolicy');
+  assert.equal(s.modelPolicy.banlist.mode, 'default');
+  assert.deepEqual(s.builderGatingRoutes, s.modelPolicy.builderRoutes);
+  assert.deepEqual(s.modelPolicy.builderRoutes, ['claude-opus-4-8', 'glm-5.2']);
   assert.match(s.stopCondition, /you are the stop condition/i);
 });
 

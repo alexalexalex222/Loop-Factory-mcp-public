@@ -1,11 +1,12 @@
 // Req 4: ask-once. A brief explanation first, then a few short questions when the
 // task is underspecified; never asks again after init; user messages stored
-// locally with sha256 hashes. The questions cover only what the operator alone
-// can answer — never model, promotion mode, benchmark policy, or the standing
-// guarantees, which the tool decides from the task.
+// locally with sha256 hashes. Operator-scope questions include ONE friendly
+// model-choice question; promotion mode / benchmark policy / standing guarantees
+// remain tool-owned and are never posed back.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshEngine, SPECIFIC_TASK } from './helpers.mjs';
+import { DEFAULT_PRIMARY_MODEL } from './fixtures/model-policy.mjs';
 
 test('vague task returns a brief explanation + a few short questions exactly once', () => {
   const { engine } = freshEngine();
@@ -36,18 +37,20 @@ test('vague task returns a brief explanation + a few short questions exactly onc
   assert.equal(r.continuation.required, false);
 });
 
-test('ask-once NEVER asks the operator to decide model, promotion mode, policy, or the standing guarantees', () => {
+test('ask-once asks ONE model question; never promotion mode / subjective routing / standing guarantees', () => {
   const { engine } = freshEngine();
   const r = engine.initialize_loop_run({ runId: 'rpol', task: 'improve my loop' });
   const blob = r.questions.join('\n');
-  // None of these model-internal policy choices may be posed back to the operator.
+  // Model choice IS asked (friendly, enter = defaults).
+  assert.match(blob, /which models do you want to use/i, 'asks the operator which models to use');
+  assert.match(blob, /defaults|any model/i, 'offers defaults and any-model escape hatch');
+  // These model-internal policy choices must still NOT be posed back.
   assert.doesNotMatch(blob, /promotion mode/i, 'must not ask the operator to choose promotion mode');
   assert.doesNotMatch(blob, /\bdeterministic\b[\s\S]*\bsubjective\b|\bsubjective\b[\s\S]*\bdeterministic\b/i, 'must not pose deterministic-vs-subjective as an operator choice');
-  assert.doesNotMatch(blob, /which .{0,20}\bmodel|model limit|budget\/?model|\bgpt-5|\bglm-5|opus-4/i, 'must not ask the operator to choose the model/route');
   assert.doesNotMatch(blob, /char ?cap|≤?\s*3000\s*char|3000\s*char/i, 'must never introduce a 3000-char cap');
-  // And the explanation must state that the tool — not the operator — owns those decisions.
-  assert.match(r.explanation, /I decide the model routes/i);
-  assert.match(r.explanation, /promotion rule|internal threshold/i);
+  // Explanation: operator chooses models; supervisor owns measurement/integrity/promotion.
+  assert.match(r.explanation, /you choose the models/i);
+  assert.match(r.explanation, /supervisor still owns measurement, integrity, and promotion/i);
   assert.match(r.explanation, /you decide the goal/i);
 });
 
@@ -86,7 +89,7 @@ test('a specific task initializes immediately with no questions', () => {
 
 test('user messages are stored locally with sha256 hashes', () => {
   const { engine, store } = freshEngine();
-  engine.initialize_loop_run({ runId: 'r4', task: SPECIFIC_TASK, userMessages: ['msg one', 'msg two', 'fuck this build the real thing'] });
+  engine.initialize_loop_run({ runId: 'r4', task: SPECIFIC_TASK, userMessages: ['msg one', 'msg two', 'stop stalling build the real thing'] });
   const state = store.load('r4');
   assert.equal(state.userMessages.length, 3);
   for (const m of state.userMessages) {
@@ -95,13 +98,82 @@ test('user messages are stored locally with sha256 hashes', () => {
   }
 });
 
-test('non-frontier requested model is auto-corrected, not blocking init', () => {
+test('banned requested model holds at AWAITING_ANSWERS with needsConfirmation — never silent rewrite or silent accept', () => {
   const { engine, store } = freshEngine();
   const r = engine.initialize_loop_run({ runId: 'r5', task: SPECIFIC_TASK, model: 'claude-haiku-4-5' });
   assert.equal(r.status, 'OK');
+  assert.equal(r.needsConfirmation, true, 'must surface needsConfirmation');
+  assert.equal(r.runStatus, 'AWAITING_ANSWERS', 'must NOT proceed to INITIALIZED');
+  assert.ok(r.confirmation && r.confirmation.requested === 'claude-haiku-4-5');
+  assert.match(r.confirmation.reason, /haiku|banned|non-frontier/i);
+  assert.ok(r.confirmation.options && r.confirmation.options.useAnyway);
+  assert.ok(Array.isArray(r.questions) && r.questions.length === 1, 'exactly ONE confirmation question');
+  assert.match(r.questions[0], /use it anyway|defaults/i);
   const state = store.load('r5');
-  assert.equal(state.config.model.primary, 'claude-opus-4-8'); // defaulted away from haiku
-  assert.ok(r.modelWarning);
+  assert.equal(state.status, 'AWAITING_ANSWERS');
+  assert.ok(state.pendingModelConfirmation);
+  // Live primary is NOT the banned choice (gates must not run on it yet).
+  assert.notEqual(state.config.model.primary, 'claude-haiku-4-5');
+  assert.equal(state.config.modelPolicy.banlist.mode, 'default');
+});
+
+test('model confirmation: "use it anyway" sets banlist off and keeps requested primary — never re-asks', () => {
+  const { engine, store } = freshEngine();
+  engine.initialize_loop_run({ runId: 'r5c', task: SPECIFIC_TASK, model: 'claude-haiku-4-5' });
+  const r = engine.initialize_loop_run({ runId: 'r5c', answers: ['use it anyway'] });
+  assert.equal(r.status, 'OK');
+  assert.equal(r.needsConfirmation, false);
+  assert.equal(r.runStatus, 'INITIALIZED');
+  assert.equal(r.questions, undefined);
+  assert.equal(store.load('r5c').config.model.primary, 'claude-haiku-4-5');
+  assert.equal(store.load('r5c').config.modelPolicy.banlist.mode, 'off');
+  // Third call must not re-ask.
+  const r3 = engine.initialize_loop_run({ runId: 'r5c', task: SPECIFIC_TASK });
+  assert.match(r3.message, /Already initialized/i);
+  assert.equal(r3.needsConfirmation, false);
+});
+
+test('model confirmation: "defaults" / enter uses historical primary — never re-asks', () => {
+  const { engine, store } = freshEngine();
+  engine.initialize_loop_run({ runId: 'r5e', task: SPECIFIC_TASK, model: 'claude-haiku-4-5' });
+  const r = engine.initialize_loop_run({ runId: 'r5e', answers: ['defaults'] });
+  assert.equal(r.runStatus, 'INITIALIZED');
+  assert.equal(store.load('r5e').config.model.primary, DEFAULT_PRIMARY_MODEL);
+  assert.equal(store.load('r5e').config.modelPolicy.banlist.mode, 'default');
+});
+
+test('model confirmation: naming an allowed alternate resolves without re-ask', () => {
+  const { engine, store } = freshEngine();
+  engine.initialize_loop_run({ runId: 'r5alt', task: SPECIFIC_TASK, model: 'claude-haiku-4-5' });
+  const r = engine.initialize_loop_run({ runId: 'r5alt', answers: ['gpt-5.5'] });
+  assert.equal(r.runStatus, 'INITIALIZED');
+  assert.equal(store.load('r5alt').config.model.primary, 'gpt-5.5');
+});
+
+test('defaults on enter: empty model answer yields historical primary + banlist default', () => {
+  const { engine, store } = freshEngine();
+  engine.initialize_loop_run({ runId: 'r5d', task: 'make it better' });
+  const r = engine.initialize_loop_run({
+    runId: 'r5d',
+    answers: ['precision up 10%', 'my loop file', 'my loop', 'whole history best first', 'fewer tokens same quality', 'keep authorship', 'defaults', 'keep moving']
+  });
+  assert.equal(r.status, 'OK');
+  assert.equal(store.load('r5d').config.model.primary, DEFAULT_PRIMARY_MODEL);
+  assert.equal(store.load('r5d').config.modelPolicy.banlist.mode, 'default');
+  assert.equal(store.load('r5d').config.modelPolicy.source, 'defaults');
+});
+
+test('"any model" answer disables the banlist for this run', () => {
+  const { engine, store } = freshEngine();
+  engine.initialize_loop_run({ runId: 'r5a', task: 'make it better' });
+  const r = engine.initialize_loop_run({
+    runId: 'r5a',
+    answers: ['precision up 10%', 'my loop file', 'my loop', 'whole history best first', 'fewer tokens', 'keep authorship', 'any model', 'keep moving']
+  });
+  assert.equal(r.status, 'OK');
+  assert.equal(store.load('r5a').config.modelPolicy.banlist.mode, 'off');
+  assert.equal(store.load('r5a').config.modelPolicy.source, 'operator-init');
+  assert.ok(r.modelPolicy);
 });
 
 test('failure patience is clamped into the 10–15 advisory band', () => {

@@ -15,10 +15,34 @@
 // executor (src/executor.mjs) is just one worker backend.
 import { verifyAllLoops, loadLoop } from './loops.mjs';
 import { sha256 } from './util.mjs';
-import { DEFAULTS, BUILDER_GATING_ROUTES } from './constants.mjs';
-import { isBuilderGatingRoute } from './models.mjs';
+import { DEFAULTS } from './constants.mjs';
+import { isBuilderGatingRoute, defaultModelPolicy, normalizeModelPolicy } from './models.mjs';
 
 export const MISSING_FULL_PRIVATE_LOOPS = 'MISSING_FULL_PRIVATE_LOOPS';
+
+// Floor-passing scaffold when a target omits baselineContent. The thin
+// `BASELINE ${loopId}` stub (~29 tokens) fails BASELINE_TOO_SHALLOW and makes
+// copy-paste campaigns dead on arrival — never use it as a fallback.
+export function floorBaselineScaffold(label = 'loop') {
+  const id = String(label || 'loop');
+  return [
+    '## Purpose',
+    `Operator/scaffold baseline for "${id}". This is the reference a challenger must beat. It describes a real multi-phase improvement procedure with durable reader waves, evidence gates, and tool-measured scorecards so the baseline integrity floor accepts the bytes as a bar rather than a placeholder stub.`,
+    '',
+    '## Procedure',
+    'Stream each phase with recorded evidence. Reproduce the bottleneck on the smallest input. Freeze a scorecard before challengers. Measure cost and quality from sealed bytes. Never promote on a summary or confidence claim alone. Reverify from sealed artifacts before any promotion request.',
+    '',
+    '## Acceptance',
+    'A candidate qualifies only when measured quality holds at equal or lower token cost and the result reverifies. The operator is the only stop condition. Prefer replacing this scaffold with the real loop text when available.'
+  ].join('\n');
+}
+
+function resolveBaselineContent(target, loopId) {
+  if (typeof target.baselineContent === 'string' && target.baselineContent.trim().length > 0) {
+    return target.baselineContent;
+  }
+  return floorBaselineScaffold(loopId);
+}
 
 // Loads + hashes the full private loops. Returns the manifest, or the exact
 // MISSING_FULL_PRIVATE_LOOPS sentinel if a file is absent / drifted. Never invents a
@@ -72,10 +96,14 @@ export function parseJudgeVerdict(text) {
 }
 
 // Dispatch an independent judge to compare baseline vs challenger FINAL OUTPUTS under
-// a frozen rubric. The judge must be a trusted builder/gating route (Opus/GLM). The
-// judge prompt is the rubric + the two outputs (not a loop slice).
-function dispatchJudge(baselineOutput, challengerOutput, rubric, judgeRoute, worker, log) {
-  if (!isBuilderGatingRoute(judgeRoute)) return { error: 'JUDGE_ROUTE', message: `judge must run on a trusted route (${BUILDER_GATING_ROUTES.join(' or ')}), not ${judgeRoute}` };
+// a frozen rubric. The judge must be a trusted builder/gating route under the active
+// modelPolicy (defaults: Opus/GLM). The judge prompt is the rubric + the two outputs
+// (not a loop slice). policy is optional; omit → default policy.
+function dispatchJudge(baselineOutput, challengerOutput, rubric, judgeRoute, worker, log, policy) {
+  const pol = policy ? normalizeModelPolicy(policy) : defaultModelPolicy();
+  if (!isBuilderGatingRoute(judgeRoute, pol)) {
+    return { error: 'JUDGE_ROUTE', message: `judge must run on a trusted builder/gating route (${pol.builderRoutes.join(' or ')} under active modelPolicy; fallback primary ${pol.primary}), not ${judgeRoute}` };
+  }
   const contract = {
     loopId: 'judge', loopSha: 'judge', phase: 0, kind: 'judge', route: judgeRoute,
     slice: `You are an INDEPENDENT judge. Compare the BASELINE and CHALLENGER final outputs strictly under the rubric. Reply with ONLY <VERDICT>{"winner":"challenger"|"baseline"|"tie","score":0..1,"notes":"..."}</VERDICT> where score is the challenger's quality.\nRUBRIC:\n${rubric}\n\nBASELINE OUTPUT:\n${baselineOutput}\n\nCHALLENGER OUTPUT:\n${challengerOutput}`,
@@ -289,7 +317,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
         tx('mine_saturation', { note: 'no candidate — saturation is a PHASE EDGE, not completion; auto-transition to improve/next' });
         // auto-transition: if no improve work queued, fall through (queue may be empty → re-mine policy below)
       } else {
-        for (const c of candidates) queue.push({ kind: 'improve', loop: c.loop || 'loop-de-loop', baselineContent: c.baselineContent || `BASELINE ${c.title || c.loop}`, benchmark: target.benchmark || config.benchmark, routes: target.routes || config.routes, challengerFamily: c.challengerFamily });
+        for (const c of candidates) queue.push({ kind: 'improve', loop: c.loop || 'loop-de-loop', baselineContent: c.baselineContent || floorBaselineScaffold(c.title || c.loop), benchmark: target.benchmark || config.benchmark, routes: target.routes || config.routes, challengerFamily: c.challengerFamily });
         tx('mine_candidates', { count: candidates.length });
       }
     } else if (target.kind === 'improve') {
@@ -342,7 +370,7 @@ function runImproveTarget(engine, runId, target, ctx) {
   };
 
   engine.loop_start({ runId, loop: loopId });
-  const bl = engine.artifact_record({ runId, role: 'baseline', name: 'baseline', content: target.baselineContent || `BASELINE ${loopId}` });
+  const bl = engine.artifact_record({ runId, role: 'baseline', name: 'baseline', content: resolveBaselineContent(target, loopId) });
   if (bl.status !== 'OK') return { blocked: true, code: bl.code, transcript };
   const prop = engine.benchmark_propose({ runId, benchmarks: [target.benchmark] });
   if (prop.status !== 'OK') return { blocked: true, code: prop.code, transcript };
@@ -407,14 +435,30 @@ function runJudgeImproveTarget(engine, runId, target, ctx) {
   const t = (step, extra) => transcript.push({ step, ...extra });
   const loopId = target.loop || 'loop-de-loop';
   const rubric = target.benchmark.rubric || 'Higher-quality, clearer, more correct final output at equal-or-lower cost; no regressions.';
+  // Judge route: explicit benchmark.judgeRoute → policy.judgeRoute → first
+  // builder-gating route among target.routes → policy.primary. Never a hard-coded
+  // Opus/DEFAULT_PRIMARY_MODEL terminal that reintroduces Opus into a non-Opus campaign.
+  const targetPolicy = target.modelPolicy
+    ? normalizeModelPolicy(target.modelPolicy)
+    : defaultModelPolicy();
   const judgeRoute = target.benchmark.judgeRoute
-    || (target.routes || []).find(isBuilderGatingRoute)
-    || BUILDER_GATING_ROUTES[0];
+    || targetPolicy.judgeRoute
+    || (target.routes || []).find((r) => isBuilderGatingRoute(r, targetPolicy))
+    || targetPolicy.primary;
   const threshold = Number.isFinite(target.benchmark.threshold) ? target.benchmark.threshold : 0.6;
 
-  engine.initialize_loop_run({ runId, task: task || `improve ${loopId} (judge mode)`, answers: ctx.answers || ['a measurably better loop', `improve ${loopId}`, 'judged better final output', 'keep authorship', 'keep moving'] });
+  engine.initialize_loop_run({
+    runId,
+    task: task || `improve ${loopId} (judge mode)`,
+    answers: ctx.answers || ['a measurably better loop', `improve ${loopId}`, 'judged better final output', 'keep authorship', 'defaults', 'keep moving'],
+    modelPolicy: target.modelPolicy || undefined,
+    model: target.modelPolicy && target.modelPolicy.primary ? target.modelPolicy.primary : undefined
+  });
+  // After init, prefer the run's live policy for judge gating.
+  const statusSnap = engine.campaign_status({ runId });
+  const runPolicy = (statusSnap && statusSnap.modelPolicy) || targetPolicy;
   engine.loop_start({ runId, loop: loopId });
-  const bl = engine.artifact_record({ runId, role: 'baseline', name: 'baseline', content: target.baselineContent || `BASELINE ${loopId}` });
+  const bl = engine.artifact_record({ runId, role: 'baseline', name: 'baseline', content: resolveBaselineContent(target, loopId) });
   if (bl.status !== 'OK') return { blocked: true, code: bl.code, transcript };
 
   const baseContract = compilePhaseContract(loopId, 0, { kind: 'baseline', route: (target.routes || [])[0], task });
@@ -429,7 +473,7 @@ function runJudgeImproveTarget(engine, runId, target, ctx) {
     const chD = dispatchWorker(compilePhaseContract(loopId, 1, { kind: 'challenger', route, task }), worker, { log });
     if (!chD.accepted) { t('challenger_invalid', { reason: chD.reasons.join(',') }); noImprove++; continue; }
     ctx.onBatch();
-    const j = dispatchJudge(baselineOutput, chD.packet.finalOutput, rubric, judgeRoute, worker, log);
+    const j = dispatchJudge(baselineOutput, chD.packet.finalOutput, rubric, judgeRoute, worker, log, runPolicy);
     if (j.error) { t('judge_error', { reason: j.error }); noImprove++; continue; }
     t('judge_verdict', { winner: j.verdict.winner, score: j.verdict.score });
     if (j.verdict.winner === 'challenger' && j.verdict.score >= threshold) {

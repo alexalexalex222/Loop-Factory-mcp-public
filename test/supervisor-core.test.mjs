@@ -218,7 +218,7 @@ test('judge mode: an independent judge scores real outputs; a win QUEUES to the 
   assert.equal(r.stones.length, 0, 'judge wins are subjective → dashboard, NEVER auto-promoted to a Stone');
 });
 
-test('judge mode refuses a non-builder judge route (judge must be Opus/GLM)', () => {
+test('judge mode refuses a non-builder judge route (judge must match active modelPolicy builders)', () => {
   const { engine } = freshEngine();
   const judgeWorker = (contract) => contract.kind === 'judge'
     ? okPacket(contract.route, '<VERDICT>{"winner":"challenger","score":0.9}</VERDICT>')
@@ -228,7 +228,7 @@ test('judge mode refuses a non-builder judge route (judge must be Opus/GLM)', ()
     targets: [{ kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, routes: ['claude-opus-4-8', 'glm-5.2', 'claude-opus-4-8'],
       benchmark: { mode: 'judge', rubric: 'r', judgeRoute: 'gpt-5.5', threshold: 0.6 } }]
   }, { worker: judgeWorker, maxBatches: 3 });
-  assert.ok(r.transcript.some((t) => t.step === 'judge_error' && t.reason === 'JUDGE_ROUTE'), 'gpt-5.5 is a test worker, not a trusted judge');
+  assert.ok(r.transcript.some((t) => t.step === 'judge_error' && t.reason === 'JUDGE_ROUTE'), 'gpt-5.5 is a test worker, not a trusted judge under default modelPolicy');
   assert.ok(!r.transcript.some((t) => t.step === 'subjective_win_queued'));
 });
 
