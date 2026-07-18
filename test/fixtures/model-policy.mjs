@@ -2,7 +2,7 @@
 // hard-coded model hatred — defaults match today's historical banlist; mode "off"
 // accepts routes that mode "default" rejects.
 import {
-  defaultModelPolicy, normalizeModelPolicy, makePolicy
+  defaultModelPolicy, normalizeModelPolicy, modelPolicyPreset, makePolicy
 } from '../../src/models.mjs';
 import { DEFAULT_PRIMARY_MODEL, BUILDER_GATING_ROUTES } from '../../src/constants.mjs';
 
@@ -35,6 +35,9 @@ export const POLICY_STRICT = normalizeModelPolicy({
   allowUnknownFrontier: false
 });
 
+/** Build Week preset: GPT-5.6 Sol primary/test worker; trusted builders/judge preserved. */
+export const GPT56_POLICY = modelPolicyPreset('gpt-5.6-sol');
+
 /**
  * Apply a modelPolicy to a run after init (or at init via initialize_loop_run args).
  * Prefer init-time: engine.initialize_loop_run({ ..., modelPolicy }).
@@ -51,4 +54,4 @@ export function withPolicy(engine, runId, policy, { task } = {}) {
   });
 }
 
-export { defaultModelPolicy, normalizeModelPolicy, makePolicy, DEFAULT_PRIMARY_MODEL, BUILDER_GATING_ROUTES };
+export { defaultModelPolicy, normalizeModelPolicy, modelPolicyPreset, makePolicy, DEFAULT_PRIMARY_MODEL, BUILDER_GATING_ROUTES };

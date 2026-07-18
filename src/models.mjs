@@ -67,6 +67,16 @@ export const DEFAULT_FRONTIER_HINT_PATTERNS = [
 export const FRONTIER_HINT_PATTERNS = DEFAULT_FRONTIER_HINT_PATTERNS;
 
 const BANLIST_MODES = new Set(['default', 'strict', 'off']);
+export const MODEL_POLICY_PRESETS = Object.freeze({
+  GPT56_SOL: 'gpt-5.6-sol',
+  GPT56: 'gpt-5.6-sol'
+});
+
+function normalizePolicySource(source) {
+  const s = String(source || '').trim();
+  if (s === 'operator-init' || s === 'defaults' || /^preset:[a-z0-9._+-]+$/i.test(s)) return s;
+  return 'defaults';
+}
 
 /**
  * Default model policy — exactly today's historical behavior when the operator
@@ -75,7 +85,7 @@ const BANLIST_MODES = new Set(['default', 'strict', 'off']);
 export function defaultModelPolicy(source = 'defaults') {
   return {
     version: 1,
-    source: source === 'operator-init' ? 'operator-init' : 'defaults',
+    source: normalizePolicySource(source),
     primary: DEFAULT_PRIMARY_MODEL,
     testRoutes: [DEFAULT_PRIMARY_MODEL, 'gpt-5.5', 'glm-5.2'],
     builderRoutes: [...BUILDER_GATING_ROUTES],
@@ -118,9 +128,7 @@ export function normalizeModelPolicy(input, opts = {}) {
     ? input.judgeRoute.trim()
     : (builderRoutes[0] || primary || base.judgeRoute);
   const banlist = normalizeBanlist(input.banlist);
-  const source = input.source === 'operator-init' || opts.source === 'operator-init'
-    ? 'operator-init'
-    : (input.source === 'defaults' ? 'defaults' : (opts.source || base.source));
+  const source = normalizePolicySource(opts.source || input.source || base.source);
   return {
     version: 1,
     source,
@@ -131,6 +139,24 @@ export function normalizeModelPolicy(input, opts = {}) {
     banlist,
     allowUnknownFrontier: input.allowUnknownFrontier === false ? false : true
   };
+}
+
+/**
+ * Named policy presets are explicit operator conveniences. They never widen the
+ * builder/judge trust boundary unless the preset says so.
+ */
+export function modelPolicyPreset(name) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!['gpt-5.6-sol', 'gpt56-sol', 'gpt-5.6', 'gpt56', 'build-week-gpt-5.6', 'build-week'].includes(key)) return null;
+  return normalizeModelPolicy({
+    source: 'preset:gpt-5.6-sol',
+    primary: 'gpt-5.6-sol',
+    testRoutes: ['gpt-5.6-sol', DEFAULT_PRIMARY_MODEL, 'glm-5.2'],
+    builderRoutes: [...BUILDER_GATING_ROUTES],
+    judgeRoute: DEFAULT_PRIMARY_MODEL,
+    banlist: { mode: 'default', extraDeny: [], extraAllow: [] },
+    allowUnknownFrontier: true
+  }, { source: 'preset:gpt-5.6-sol' });
 }
 
 /**
@@ -323,6 +349,11 @@ export function parseModelChoiceText(text) {
     return { policy: defaultModelPolicy('defaults'), source: 'defaults', notes };
   }
   const lower = raw.toLowerCase();
+  if (/\b(?:gpt[-_ ]?5\.6(?:[-_ ]?sol)?|gpt56[-_ ]?sol)\b.*\bpreset\b|\bpreset\b.*\b(?:gpt[-_ ]?5\.6(?:[-_ ]?sol)?|gpt56[-_ ]?sol)\b|\bbuild[-_ ]?week\b/i.test(lower)) {
+    const policy = modelPolicyPreset('gpt-5.6-sol');
+    notes.push('gpt-5.6-sol preset selected: GPT-5.6 Sol primary/test worker; trusted builder and judge defaults preserved');
+    return { policy, source: policy.source, notes };
+  }
   if (/\bany models?\b|\bno ban(?:list)?\b|\bbanlist\s*off\b|\bdisable (?:the )?banlist\b|\ball models?\b/.test(lower)) {
     const pol = defaultModelPolicy('operator-init');
     pol.banlist.mode = 'off';

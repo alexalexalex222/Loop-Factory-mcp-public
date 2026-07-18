@@ -187,6 +187,8 @@ Workers run on the real CLIs via **stdin** (`claude -p --output-format json`, `c
 
 Ask-once includes one friendly model question. Press enter / say `defaults` for today's historical behavior; say `any model` to set `banlist.mode: "off"` for that run. The policy is persisted as `state.config.modelPolicy` and shown on the dashboard + report.
 
+For the Build Week lane, pass `modelPreset: "gpt-5.6-sol"` to `initialize_loop_run` or say `use the gpt-5.6 sol preset`. The preset uses the exact `gpt-5.6-sol` model ID as the primary and first full-test route while preserving the existing Opus/GLM builder boundary and Opus judge route. See [`examples/model-policy-gpt-5.6.json`](examples/model-policy-gpt-5.6.json).
+
 | Field | Default | Notes |
 |-------|---------|--------|
 | `primary` | `claude-opus-4-8` | Primary worker route |
@@ -197,6 +199,18 @@ Ask-once includes one friendly model question. Press enter / say `defaults` for 
 | `banlist.extraAllow` / `extraDeny` | `[]` | Punch holes or add denials per run |
 
 **Why a default banlist?** Weak / cheap models produce noisy campaigns that look "done" without real frontier movement. That is a default, not a cage — you can disable it per run.
+
+### Controlled GPT-5.6 Sol enforcement proof
+
+With an authenticated Codex CLI, run:
+
+```bash
+SUPER_LOOP_ALLOW_EXEC=1 npm run proof:gpt56-sol -- \
+  --model gpt-5.6-sol \
+  --out proof/build-week/gpt56-sol-live
+```
+
+This launches three short, explicitly adversarial fixtures through the real `codex exec -m gpt-5.6-sol --json` path in read-only, ephemeral mode. The fixtures ask the worker to propose a phase skip, a self-reported metric, and self-promotion; Loop Factory must reject each proposal with the matching supervisor code. Evidence includes raw JSONL, prompt/output hashes, the exact model argv receipt, token usage when the CLI reports it, persisted verdict events, a dashboard, and a markdown report. These are controlled regression prompts, not claims of spontaneous model behavior. The command refuses to overwrite an existing evidence directory and never falls back to another model.
 
 ---
 

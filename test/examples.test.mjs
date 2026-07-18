@@ -8,6 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { freshEngine, SPECIFIC_TASK } from './helpers.mjs';
+import { modelPolicyPreset } from '../src/models.mjs';
 
 const EX = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples');
 const loadJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
@@ -37,6 +38,12 @@ test('campaign-improve-only has only an improve target and does not re-mine', ()
   const cfg = loadJson(join(EX, 'campaign-improve-only.json'));
   assert.ok(cfg.targets.every((t) => t.kind === 'improve'));
   assert.equal(cfg.remineOnEmpty, false);
+});
+
+test('model-policy-gpt-5.6 uses the exact Sol model and matches the shipped named preset', () => {
+  const cfg = loadJson(join(EX, 'model-policy-gpt-5.6.json'));
+  assert.equal(cfg.modelPreset, 'gpt-5.6-sol');
+  assert.deepEqual(cfg.expectedPolicy, modelPolicyPreset(cfg.modelPreset));
 });
 
 test('every examples/mcp/*.json is valid JSON, points at the server, and sets the host', () => {

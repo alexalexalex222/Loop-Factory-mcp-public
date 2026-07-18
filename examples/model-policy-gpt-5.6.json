@@ -1,0 +1,25 @@
+{
+  "task": "Run a supervised GPT-5.6 Sol improvement campaign without widening builder or judge authority.",
+  "modelPreset": "gpt-5.6-sol",
+  "expectedPolicy": {
+    "version": 1,
+    "source": "preset:gpt-5.6-sol",
+    "primary": "gpt-5.6-sol",
+    "testRoutes": [
+      "gpt-5.6-sol",
+      "claude-opus-4-8",
+      "glm-5.2"
+    ],
+    "builderRoutes": [
+      "claude-opus-4-8",
+      "glm-5.2"
+    ],
+    "judgeRoute": "claude-opus-4-8",
+    "banlist": {
+      "mode": "default",
+      "extraDeny": [],
+      "extraAllow": []
+    },
+    "allowUnknownFrontier": true
+  }
+}

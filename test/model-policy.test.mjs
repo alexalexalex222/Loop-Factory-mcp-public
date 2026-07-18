@@ -4,12 +4,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyRoute, rejectedRoutes, isBuilderGatingRoute, rejectedBuilderRoutes,
-  defaultModelPolicy, normalizeModelPolicy, parseModelChoiceText, ensureModelPolicy
+  defaultModelPolicy, normalizeModelPolicy, modelPolicyPreset, parseModelChoiceText, ensureModelPolicy
 } from '../src/models.mjs';
 import { freshEngine, SPECIFIC_TASK, initThroughBaselineBar, BASELINE_BODY, recordMeasurement } from './helpers.mjs';
 import { DEFAULT_QUALITY_ORACLE } from '../src/measure.mjs';
 import {
-  DEFAULT_POLICY, ROUTES, POLICY_OFF, POLICY_STRICT, withPolicy
+  DEFAULT_POLICY, ROUTES, POLICY_OFF, POLICY_STRICT, GPT56_POLICY, withPolicy
 } from './fixtures/model-policy.mjs';
 
 test('defaultModelPolicy schema matches the v1 contract', () => {
@@ -33,6 +33,21 @@ test('normalizeModelPolicy fills missing fields from defaults', () => {
   assert.equal(p.source, 'operator-init');
   assert.ok(p.builderRoutes.length >= 1);
   assert.equal(p.version, 1);
+});
+
+test('gpt-5.6-sol preset selects GPT-5.6 Sol for primary/test work without widening builder or judge trust', () => {
+  const p = modelPolicyPreset('gpt-5.6-sol');
+  assert.deepEqual(p, GPT56_POLICY);
+  assert.equal(p.source, 'preset:gpt-5.6-sol');
+  assert.equal(p.primary, 'gpt-5.6-sol');
+  assert.equal(p.testRoutes[0], 'gpt-5.6-sol');
+  assert.ok(p.testRoutes.includes('gpt-5.6-sol'));
+  assert.deepEqual(p.builderRoutes, ROUTES.builders);
+  assert.equal(p.judgeRoute, ROUTES.judge);
+  assert.equal(classifyRoute('gpt-5.6-sol', p).ok, true);
+  assert.equal(isBuilderGatingRoute('gpt-5.6-sol', p), false);
+  assert.equal(modelPolicyPreset('gpt-5.6').primary, 'gpt-5.6-sol', 'family alias canonicalizes to Sol');
+  assert.equal(modelPolicyPreset('unknown'), null);
 });
 
 test('banlist mode "default" rejects haiku; mode "off" accepts it', () => {
@@ -98,6 +113,9 @@ test('parseModelChoiceText: defaults / any model / primary name', () => {
   const p = parseModelChoiceText('primary: gpt-5.5');
   assert.equal(p.policy.primary, 'gpt-5.5');
   assert.equal(p.source, 'operator-init');
+  const preset = parseModelChoiceText('use the gpt-5.6 sol preset');
+  assert.equal(preset.source, 'preset:gpt-5.6-sol');
+  assert.equal(preset.policy.primary, 'gpt-5.6-sol');
 });
 
 test('policy persists across resume-by-runId', () => {
@@ -154,6 +172,36 @@ test('engine init with modelPolicy:{banlist off} accepts haiku at register_hypot
     ]
   });
   assert.equal(r.status, 'OK', r.message);
+});
+
+test('engine init accepts modelPreset:gpt-5.6-sol and persists its source across resume', () => {
+  const { engine, store } = freshEngine();
+  const init = engine.initialize_loop_run({
+    runId: 'mp-gpt56',
+    task: SPECIFIC_TASK,
+    modelPreset: 'gpt-5.6-sol'
+  });
+  assert.equal(init.status, 'OK');
+  assert.equal(init.modelPolicy.source, 'preset:gpt-5.6-sol');
+  assert.equal(init.modelPolicy.primary, 'gpt-5.6-sol');
+  assert.ok(init.modelPolicy.testRoutes.includes('gpt-5.6-sol'));
+  assert.deepEqual(init.modelPolicy.builderRoutes, ROUTES.builders);
+  assert.equal(store.load('mp-gpt56').config.modelPolicy.source, 'preset:gpt-5.6-sol');
+  const resume = engine.initialize_loop_run({ runId: 'mp-gpt56' });
+  assert.equal(resume.modelPolicy.source, 'preset:gpt-5.6-sol');
+});
+
+test('engine init refuses an unknown model preset instead of silently falling back', () => {
+  const { engine, store } = freshEngine();
+  const init = engine.initialize_loop_run({
+    runId: 'mp-unknown-preset',
+    task: SPECIFIC_TASK,
+    modelPreset: 'future-model'
+  });
+  assert.equal(init.status, 'BLOCKED');
+  assert.equal(init.code, 'BAD_INPUT');
+  assert.match(init.message, /No fallback was applied/);
+  assert.equal(store.exists('mp-unknown-preset'), false);
 });
 
 test('rejectedRoutes under default still bans the historical set', () => {

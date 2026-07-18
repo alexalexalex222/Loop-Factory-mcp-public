@@ -95,6 +95,38 @@ export function parseJudgeVerdict(text) {
   return null;
 }
 
+// Parse a model-produced worker packet without trusting its evidence claims. The raw
+// captured CLI envelope remains the only runlog artifact; model-supplied `artifacts`
+// are ignored so the worker cannot manufacture tool ownership.
+export function parseWorkerPacket(text, { route = null, invocation = null } = {}) {
+  const raw = String(text || '');
+  const match = raw.match(/<WORKER_PACKET>([\s\S]*?)<\/WORKER_PACKET>/i)
+    || raw.match(/```json\s*([\s\S]*?)```/i);
+  const blob = (match ? match[1] : raw).trim();
+  let parsed = null;
+  try { parsed = JSON.parse(blob); } catch { /* malformed packet stays summary-only */ }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {
+      route,
+      artifacts: raw.trim() ? [{ role: 'runlog', content: raw }] : [],
+      finalOutput: '',
+      summaryOnly: true,
+      invocation
+    };
+  }
+  return {
+    route: route || (typeof parsed.route === 'string' ? parsed.route : null),
+    phase: Number.isInteger(parsed.phase) ? parsed.phase : undefined,
+    stoppedEarly: parsed.stoppedEarly === true,
+    summaryOnly: parsed.summaryOnly === true,
+    copiedFromPublic: parsed.copiedFromPublic === true,
+    claim: parsed.claim && typeof parsed.claim === 'object' ? parsed.claim : {},
+    artifacts: raw.trim() ? [{ role: 'runlog', content: raw }] : [],
+    finalOutput: typeof parsed.finalOutput === 'string' ? parsed.finalOutput : raw,
+    invocation
+  };
+}
+
 // Dispatch an independent judge to compare baseline vs challenger FINAL OUTPUTS under
 // a frozen rubric. The judge must be a trusted builder/gating route under the active
 // modelPolicy (defaults: Opus/GLM). The judge prompt is the rubric + the two outputs
@@ -170,7 +202,7 @@ export function validateWorkerPacket(contract, packet) {
 
 // The dispatch transaction with re-entry. On invalid output the supervisor
 // retries/replaces the worker up to maxRetries; it never accepts the bad packet.
-export function dispatchWorker(contract, worker, { maxRetries = 2, log = () => {} } = {}) {
+export function dispatchWorker(contract, worker, { maxRetries = 2, log = () => {}, onVerdict = () => {} } = {}) {
   let last = { accepted: false, reasons: ['NO_PACKET'] };
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let packet = null;
@@ -179,6 +211,20 @@ export function dispatchWorker(contract, worker, { maxRetries = 2, log = () => {
     try { packet = worker({ ...contract, attempt }); } catch (e) { packet = { __error: e && e.message }; }
     const v = validateWorkerPacket(contract, packet);
     last = { ...v, packet, attempt };
+    try {
+      onVerdict({
+        accepted: v.accepted,
+        reasons: [...v.reasons],
+        attempt,
+        contract: {
+          loopId: contract.loopId,
+          phase: contract.phase,
+          kind: contract.kind,
+          route: contract.route
+        },
+        invocation: packet && packet.invocation ? packet.invocation : null
+      });
+    } catch { /* evidence journaling cannot change the worker verdict */ }
     if (v.accepted) { log(`  worker ${contract.route || ''} phase ${contract.phase} accepted (attempt ${attempt + 1})`); return last; }
     log(`  worker ${contract.route || ''} REJECTED (${v.reasons.join(',')}) → re-enter (attempt ${attempt + 1}/${maxRetries + 1})`);
   }

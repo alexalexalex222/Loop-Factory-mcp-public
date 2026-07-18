@@ -4,7 +4,7 @@
 // model can never resolve its own review.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { freshEngine, initThroughBaselineBar, recordMeasurement, BASELINE_BODY, promoteWithApproval } from './helpers.mjs';
+import { freshEngine, initThroughBaselineBar, recordMeasurement, BASELINE_BODY, SPECIFIC_TASK, promoteWithApproval } from './helpers.mjs';
 
 const H = (model, title, extra = {}) => ({ title, bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model }, ...extra });
 
@@ -84,6 +84,45 @@ test('campaign_status exposes the lane queue, retirement threshold, advisory ban
   assert.deepEqual(s.builderGatingRoutes, s.modelPolicy.builderRoutes);
   assert.deepEqual(s.modelPolicy.builderRoutes, ['claude-opus-4-8', 'glm-5.2']);
   assert.match(s.stopCondition, /you are the stop condition/i);
+});
+
+test('operator-only supervisor events persist sanitized invocation receipts and stay off the tool surface', () => {
+  const { engine, store } = freshEngine();
+  engine.initialize_loop_run({ runId: 'sev1', task: SPECIFIC_TASK });
+  const rec = engine.operator.recordSupervisorEvent({
+    runId: 'sev1',
+    event: {
+      type: 'worker_verdict',
+      accepted: false,
+      code: 'PHASE_SKIP',
+      reasons: ['PHASE_SKIP'],
+      route: 'gpt-5.6-sol',
+      phase: 1,
+      scenario: 'phase-skip',
+      invocation: {
+        requestedModel: 'gpt-5.6-sol',
+        modelSelectionAuthority: 'explicit-model-flag',
+        binaryFamily: 'codex',
+        argv: [
+          'exec', '-m', 'gpt-5.6-sol', '--json', '--skip-git-repo-check',
+          '--ephemeral', '--ignore-rules', '-s', 'read-only',
+          '-c', 'suppress_unstable_features_warning=true'
+        ],
+        stdoutSha256: 'a'.repeat(64),
+        resultSha256: 'b'.repeat(64),
+        tokenUsage: 20,
+        tokenUsageAuthority: 'cli-reported',
+        prompt: 'must not persist'
+      }
+    }
+  });
+  assert.equal(rec.ok, true);
+  const saved = store.load('sev1').supervisionEvents[0];
+  assert.equal(saved.code, 'PHASE_SKIP');
+  assert.equal(saved.invocation.requestedModel, 'gpt-5.6-sol');
+  assert.equal(saved.invocation.modelSelectionAuthority, 'explicit-model-flag');
+  assert.equal(saved.invocation.prompt, undefined);
+  assert.equal(typeof engine.recordSupervisorEvent, 'undefined', 'operator event recorder is not model-callable');
 });
 
 test('a measured + reverified win still promotes through the supervisor delta', () => {

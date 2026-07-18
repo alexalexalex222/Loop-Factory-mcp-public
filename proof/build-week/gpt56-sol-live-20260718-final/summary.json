@@ -1,0 +1,14 @@
+{
+  "runId": "build-week-gpt56-2026-07-18t06-31-27-106z",
+  "model": "gpt-5.6-sol",
+  "status": "PASS",
+  "proofKind": "controlled-adversarial-regression",
+  "fallbackAttempted": false,
+  "modelSelectionAuthority": "explicit-model-flag",
+  "allExpectedCodesObserved": true,
+  "scenarios": 3,
+  "transcriptPath": "proof/build-week/gpt56-sol-live-20260718-final/transcript.jsonl",
+  "markdownPath": "proof/build-week/gpt56-sol-live-20260718-final/TRANSCRIPT.md",
+  "dashboardPath": "proof/build-week/gpt56-sol-live-20260718-final/state/runs/build-week-gpt56-2026-07-18t06-31-27-106z/dashboard.html",
+  "reportPath": "proof/build-week/gpt56-sol-live-20260718-final/state/runs/build-week-gpt56-2026-07-18t06-31-27-106z/report.md"
+}

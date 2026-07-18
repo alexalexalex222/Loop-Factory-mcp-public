@@ -23,6 +23,7 @@ export const TOOL_SPECS = [
       userMessages: { type: 'array', items: { type: 'string' }, description: 'verbatim operator messages — stored + hashed for the hook' },
       answers: { type: 'array', items: { type: 'string' }, description: 'answers to the ask-once questions (include the model-choice answer, or "defaults")' },
       model: { type: 'string', description: 'primary route; defaults to claude-opus-4-8 when omitted / "defaults"' },
+      modelPreset: { type: 'string', description: 'named operator preset; "gpt-5.6-sol" selects GPT-5.6 Sol as primary/test worker while preserving trusted builder/judge defaults' },
       modelPolicy: { type: 'object', description: 'optional full policy: { primary, testRoutes, builderRoutes, judgeRoute, banlist:{mode,extraDeny,extraAllow}, allowUnknownFrontier }. Omitted → defaults (today\'s historical behavior).' },
       acceptanceCriteria: { type: 'string' },
       config: { type: 'object', description: '{ failurePatience(10-15), comparisonRule, promotion:{...}, mode }' }

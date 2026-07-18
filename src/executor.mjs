@@ -23,6 +23,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveOnPath } from './host.mjs';
+import { sha256 } from './util.mjs';
 
 // Resolve worker binaries robustly even when the MCP server was launched with a
 // minimal PATH (the common case: a GUI/launchd-spawned host hands the stdio server
@@ -118,12 +119,21 @@ export function execSlugForRoute(model) {
 // argv — so untrusted text can never become a flag or be parsed by a shell. Verified
 // against the real CLIs: `claude -p --output-format json` reads the prompt from stdin
 // and returns a JSON array; `codex exec --json` runs non-interactively.
-function buildArgs(bin, slug) {
+export function buildArgs(bin, slug, model) {
   switch (bin) {
     case 'claude': return ['-p', '--output-format', 'json'];
     // `codex exec` refuses to run outside a trusted/git directory unless told to skip
     // that check; the supervisor's run dir is not a git repo, so the flag is required.
-    case 'codex': return ['exec', '--json', '--skip-git-repo-check'];
+    case 'codex': return [
+      'exec',
+      '-m', String(model || ''),
+      '--json',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--ignore-rules',
+      '-s', 'read-only',
+      '-c', 'suppress_unstable_features_warning=true'
+    ];
     // opencode drives the minimax/deepseek/mimo routes by model slug. `run` is its
     // non-interactive entry; the prompt is delivered on STDIN (never argv) like the others.
     // NOTE: opencode's exact non-interactive argv/stdin behavior is UNVERIFIED here (no live
@@ -133,6 +143,31 @@ function buildArgs(bin, slug) {
     case 'gemini': return ['-p'];
     default: return ['-p'];
   }
+}
+
+export function parseReportedModel(bin, stdout) {
+  const raw = String(stdout || '');
+  const candidates = [];
+  const collect = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const key of ['model', 'model_id', 'modelId']) {
+      if (typeof obj[key] === 'string' && obj[key].trim()) candidates.push(obj[key].trim());
+    }
+    if (obj.thread && typeof obj.thread === 'object') collect(obj.thread);
+    if (obj.item && typeof obj.item === 'object') collect(obj.item);
+    if (obj.message && typeof obj.message === 'object') collect(obj.message);
+  };
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) parsed.forEach(collect);
+    else collect(parsed);
+  } catch {
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try { collect(JSON.parse(line)); } catch { /* non-JSON line */ }
+    }
+  }
+  return candidates.length ? candidates[candidates.length - 1] : null;
 }
 
 // Extract the comparable FINAL OUTPUT (the answer text) from a CLI's structured
@@ -235,7 +270,13 @@ export function executorWorker(contract, env = process.env) {
   const r = runWorker({ model: contract.route, prompt, env });
   if (!r.ok) return { route: contract.route, __execReason: r.reason, artifacts: [], finalOutput: '' };
   // runlog = the raw captured envelope (evidence); finalOutput = the comparable answer text
-  return { route: contract.route, artifacts: [{ role: 'runlog', content: r.stdout }], finalOutput: r.resultText || r.stdout, realTokenUsage: r.tokenUsage };
+  return {
+    route: contract.route,
+    artifacts: [{ role: 'runlog', content: r.stdout }],
+    finalOutput: r.resultText || r.stdout,
+    realTokenUsage: r.tokenUsage,
+    invocation: r.invocation
+  };
 }
 
 /**
@@ -259,11 +300,17 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
   if (!binPath) {
     return { ok: false, model, bin, reason: 'BINARY_MISSING', message: `allowlisted binary "${bin}" not found on PATH (cannot execute route ${model})` };
   }
-  const args = buildArgs(bin, execSlugForRoute(model));
+  const args = buildArgs(bin, execSlugForRoute(model), model);
   // codex's wrapper alias unsets OPENAI_BASE_URL; replicate that for the child so a
   // stray base-url env can't redirect the worker to the wrong endpoint.
   const childEnv = { ...env };
   if (bin === 'codex') delete childEnv.OPENAI_BASE_URL;
+  const receiptBase = {
+    requestedModel: String(model || ''),
+    binaryFamily: bin,
+    argv: [...args],
+    modelSelectionAuthority: bin === 'codex' ? 'explicit-model-flag' : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary')
+  };
   const startNs = process.hrtime.bigint();
   try {
     const stdout = execFileSync(binPath, args, {
@@ -279,17 +326,51 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
       // by a shell. With the prompt on stdin, there is no untrusted text on argv at all.
     });
     const durationMs = Number((process.hrtime.bigint() - startNs) / 1000000n);
-    return { ok: true, model, bin, binPath, stdout: String(stdout), resultText: extractResult(bin, stdout), exitCode: 0, timedOut: false, tokenUsage: parseTokenUsage(stdout), durationMs };
+    const stdoutText = String(stdout);
+    const resultText = extractResult(bin, stdoutText);
+    const reportedModel = parseReportedModel(bin, stdoutText);
+    const tokenUsage = parseTokenUsage(stdoutText);
+    return {
+      ok: true, model, bin, binPath, stdout: stdoutText, resultText,
+      exitCode: 0, timedOut: false, tokenUsage, durationMs,
+      invocation: {
+        ...receiptBase,
+        reportedModel,
+        modelIdentityAuthority: reportedModel ? 'cli-reported' : receiptBase.modelSelectionAuthority,
+        reportedModelMatchesRequest: reportedModel == null ? null : reportedModel.toLowerCase() === String(model || '').toLowerCase(),
+        durationMs,
+        exitCode: 0,
+        stdoutSha256: sha256(stdoutText),
+        resultSha256: sha256(resultText),
+        tokenUsage,
+        tokenUsageAuthority: tokenUsage == null ? 'unavailable' : 'cli-reported'
+      }
+    };
   } catch (e) {
     const durationMs = Number((process.hrtime.bigint() - startNs) / 1000000n);
     const timedOut = e && (e.code === 'ETIMEDOUT' || e.signal === 'SIGKILL' || e.killed === true);
+    const stdoutText = e && e.stdout ? String(e.stdout) : '';
+    const reportedModel = parseReportedModel(bin, stdoutText);
+    const tokenUsage = parseTokenUsage(stdoutText);
     return {
       ok: false, model, bin, binPath,
       reason: timedOut ? 'TIMEOUT' : 'EXEC_FAILED',
       message: timedOut ? `worker ${bin} exceeded ${timeoutMs}ms and was killed` : `worker ${bin} failed: ${e && e.message ? e.message.split('\n')[0] : 'unknown error'}`,
-      stdout: e && e.stdout ? String(e.stdout) : '',
+      stdout: stdoutText,
       exitCode: e && typeof e.status === 'number' ? e.status : null,
-      timedOut, durationMs
+      timedOut, durationMs,
+      invocation: {
+        ...receiptBase,
+        reportedModel,
+        modelIdentityAuthority: receiptBase.modelSelectionAuthority,
+        reportedModelMatchesRequest: null,
+        durationMs,
+        exitCode: e && typeof e.status === 'number' ? e.status : null,
+        stdoutSha256: sha256(stdoutText),
+        resultSha256: null,
+        tokenUsage,
+        tokenUsageAuthority: tokenUsage == null ? 'unavailable' : 'cli-reported'
+      }
     };
   }
 }

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   MISSING_FULL_PRIVATE_LOOPS, requireFullLoops, compilePhaseContract,
   validateWorkerPacket, dispatchWorker, runFullTestBatch, runSupervisedCampaign,
-  parseCandidates, parseJudgeVerdict
+  parseCandidates, parseJudgeVerdict, parseWorkerPacket
 } from '../src/supervisor.mjs';
 import { loadLoop } from '../src/loops.mjs';
 import { DEFAULT_QUALITY_ORACLE, buildMeasuredContent } from '../src/measure.mjs';
@@ -76,6 +76,31 @@ test('worker invalidation: every bad-worker shape is rejected by the supervisor'
   assert.equal(validateWorkerPacket(c, okPacket('m', 'real output')).accepted, true);
 });
 
+test('structured worker packets keep tool-owned raw evidence and expose prohibited claims to the validator', () => {
+  const contract = compilePhaseContract('loop-de-loop', 0, { requires: ['runlog'] });
+  const packet = parseWorkerPacket(
+    '<WORKER_PACKET>{"phase":1,"claim":{"metrics":{"quality":1},"promoted":true},"finalOutput":"done"}</WORKER_PACKET>',
+    { route: 'gpt-5.6-sol', invocation: { requestedModel: 'gpt-5.6-sol' } }
+  );
+  assert.equal(packet.route, 'gpt-5.6-sol');
+  assert.equal(packet.artifacts.length, 1);
+  assert.match(packet.artifacts[0].content, /WORKER_PACKET/);
+  assert.equal(packet.phase, 1);
+  assert.equal(packet.claim.promoted, true);
+  const verdict = validateWorkerPacket(contract, packet);
+  assert.equal(verdict.accepted, false);
+  assert.deepEqual(verdict.reasons.sort(), ['MODEL_REPORTED_METRIC', 'PHASE_SKIP', 'SELF_PROMOTION']);
+});
+
+test('malformed worker packet is summary-only and cannot pass the enforcement boundary', () => {
+  const contract = compilePhaseContract('loop-de-loop', 0);
+  const packet = parseWorkerPacket('not-json', { route: 'gpt-5.6-sol' });
+  const verdict = validateWorkerPacket(contract, packet);
+  assert.equal(packet.summaryOnly, true);
+  assert.equal(verdict.accepted, false);
+  assert.ok(verdict.reasons.includes('SUMMARY_ONLY'));
+});
+
 test('dispatch transaction re-enters on a bad worker and never accepts it', () => {
   const c = compilePhaseContract('loop-de-loop', 1);
   let calls = 0;
@@ -87,6 +112,24 @@ test('dispatch transaction re-enters on a bad worker and never accepts it', () =
   const alwaysBad = () => ({ route: 'm', stoppedEarly: true, finalOutput: 'x', artifacts: [{ role: 'runlog', content: 'x' }] });
   const d2 = dispatchWorker(c, alwaysBad, { maxRetries: 2 });
   assert.equal(d2.accepted, false, 'a persistently bad worker is never accepted');
+});
+
+test('dispatch emits one immutable verdict event per attempt without changing acceptance', () => {
+  const contract = compilePhaseContract('loop-de-loop', 1);
+  const events = [];
+  let calls = 0;
+  const d = dispatchWorker(contract, () => {
+    calls++;
+    return calls === 1
+      ? { ...okPacket('gpt-5.6-sol', 'bad'), claim: { promoted: true } }
+      : { ...okPacket('gpt-5.6-sol', 'good'), invocation: { requestedModel: 'gpt-5.6-sol' } };
+  }, { onVerdict: (event) => events.push(event) });
+  assert.equal(d.accepted, true);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].accepted, false);
+  assert.deepEqual(events[0].reasons, ['SELF_PROMOTION']);
+  assert.equal(events[1].accepted, true);
+  assert.equal(events[1].invocation.requestedModel, 'gpt-5.6-sol');
 });
 
 test('dispatch passes ONE contract arg (attempt inside it) — a worker 2nd param is not clobbered', () => {

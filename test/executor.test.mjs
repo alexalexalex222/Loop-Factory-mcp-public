@@ -5,10 +5,10 @@
 // a FAKE allowlisted binary — a real frontier run is validated in an authed env.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
-import { isExecEnabled, execBinaryForRoute, parseTokenUsage, runWorker } from '../src/executor.mjs';
+import { buildArgs, isExecEnabled, execBinaryForRoute, parseTokenUsage, runWorker } from '../src/executor.mjs';
 import { freshEngine, initThroughBaselineBar } from './helpers.mjs';
 
 const H = (model, title) => ({ title, bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model } });
@@ -39,6 +39,59 @@ test('exec helpers: allowlist mapping + usage parsing + default-off', () => {
   assert.equal(parseTokenUsage('no usage here'), null);
   assert.equal(isExecEnabled({}), false);
   assert.equal(isExecEnabled({ SUPER_LOOP_ALLOW_EXEC: '1' }), true);
+  assert.deepEqual(buildArgs('codex', null, 'gpt-5.6-sol'), [
+    'exec', '-m', 'gpt-5.6-sol', '--json', '--skip-git-repo-check',
+    '--ephemeral', '--ignore-rules', '-s', 'read-only',
+    '-c', 'suppress_unstable_features_warning=true'
+  ]);
+});
+
+test('codex execution selects the requested model explicitly and returns a hashed invocation receipt', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-fakecodex-'));
+  const argvPath = join(dir, 'argv.txt');
+  const stdinPath = join(dir, 'stdin.txt');
+  const bin = join(dir, 'codex');
+  writeFileSync(bin, `#!/bin/sh
+printf '%s\\n' "$@" > "$ARGV_OUT"
+cat > "$STDIN_OUT"
+printf '%s\\n' '{"type":"thread.started","model":"gpt-5.6-sol"}'
+printf '%s\\n' '{"type":"agent_message","text":"verified output"}'
+printf '%s\\n' '{"type":"token_count","input_tokens":12,"output_tokens":8}'
+`);
+  chmodSync(bin, 0o755);
+  const prompt = 'prompt stays on stdin; $(touch SHOULD_NOT_RUN)';
+  try {
+    const res = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt,
+      env: {
+        ...process.env,
+        PATH: dir + delimiter + process.env.PATH,
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        ARGV_OUT: argvPath,
+        STDIN_OUT: stdinPath
+      }
+    });
+    assert.equal(res.ok, true, res.message);
+    assert.equal(readFileSync(stdinPath, 'utf8'), prompt);
+    const argv = readFileSync(argvPath, 'utf8').trim().split('\n');
+    assert.deepEqual(argv, [
+      'exec', '-m', 'gpt-5.6-sol', '--json', '--skip-git-repo-check',
+      '--ephemeral', '--ignore-rules', '-s', 'read-only',
+      '-c', 'suppress_unstable_features_warning=true'
+    ]);
+    assert.ok(!argv.includes(prompt), 'prompt never reaches argv');
+    assert.equal(res.invocation.requestedModel, 'gpt-5.6-sol');
+    assert.equal(res.invocation.reportedModel, 'gpt-5.6-sol');
+    assert.equal(res.invocation.reportedModelMatchesRequest, true);
+    assert.equal(res.invocation.modelSelectionAuthority, 'explicit-model-flag');
+    assert.equal(res.invocation.tokenUsage, 20);
+    assert.match(res.invocation.stdoutSha256, /^[a-f0-9]{64}$/);
+    assert.match(res.invocation.resultSha256, /^[a-f0-9]{64}$/);
+    assert.equal('prompt' in res.invocation, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('parseTokenUsage reads the FINAL usage + sums cache tokens (claude single result envelope)', () => {

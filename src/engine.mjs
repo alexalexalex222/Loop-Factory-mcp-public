@@ -9,7 +9,7 @@ import {
 import { sha256, hash8, nowIso, wordCount, round, mean, stdev, isSafeId, clone } from './util.mjs';
 import {
   classifyRoute, rejectedRoutes, rejectedBuilderRoutes,
-  defaultModelPolicy, normalizeModelPolicy, ensureModelPolicy, parseModelChoiceText
+  defaultModelPolicy, normalizeModelPolicy, ensureModelPolicy, parseModelChoiceText, modelPolicyPreset
 } from './models.mjs';
 import { evaluatePromotion, selectBestMeasuredTest } from './scorecard.mjs';
 import { resolveLoopId, loadLoop, loopSummary, makeCustomLoop, isMandatedId, verifyAllLoops } from './loops.mjs';
@@ -118,8 +118,8 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       // saturation/retirement the supervisor AUTO-TRANSITIONS to the next lane —
       // there is no pause/await/stop lane and no terminal campaign state.
       campaign: { lanes: [], activeLaneId: null, transitions: [] },
-      decisions: [], promotions: [], humanReviews: [], observations: [],
-      counters: { artifact: 0, observation: 0, hypothesis: 0, test: 0, review: 0, decision: 0, promotion: 0, benchmark: 0, continuation: 0, lane: 0, transition: 0, toolCall: 0 },
+      decisions: [], promotions: [], humanReviews: [], observations: [], supervisionEvents: [],
+      counters: { artifact: 0, observation: 0, hypothesis: 0, test: 0, review: 0, decision: 0, promotion: 0, benchmark: 0, continuation: 0, lane: 0, transition: 0, toolCall: 0, supervisionEvent: 0 },
       trajectory: [],
       skillsUsed: [],
       dashboardPath: null, reportPath: null,
@@ -742,8 +742,8 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     state.config.modelPolicy = pol;
     state.config.model = {
       primary: pol.primary,
-      declared: pol.source === 'operator-init',
-      autoSelected: pol.source !== 'operator-init',
+      declared: pol.source !== 'defaults',
+      autoSelected: pol.source === 'defaults',
       bannedUnderPolicy: false
     };
     state.pendingModelConfirmation = null;
@@ -836,7 +836,8 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     });
   }
   /**
-   * Build the run's modelPolicy from operator inputs (args.modelPolicy, args.model,
+   * Build the run's modelPolicy from operator inputs (args.modelPolicy,
+   * args.modelPreset, args.model,
    * free-form model answer text). Defaults when nothing is said = today's behavior.
    */
   function resolveModelPolicyFromInit(args, answers, questions) {
@@ -844,8 +845,17 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     let partial = null;
     let source = 'defaults';
 
+    if (args && typeof args.modelPreset === 'string' && args.modelPreset.trim()) {
+      const preset = modelPolicyPreset(args.modelPreset);
+      if (preset) {
+        partial = preset;
+        source = preset.source;
+        notes.push(`model preset "${args.modelPreset.trim()}" selected`);
+      }
+    }
+
     if (args && args.modelPolicy && typeof args.modelPolicy === 'object') {
-      partial = args.modelPolicy;
+      partial = { ...(partial || {}), ...args.modelPolicy };
       source = 'operator-init';
       notes.push('modelPolicy supplied in initialize_loop_run args');
     }
@@ -868,7 +878,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       const parsed = parseModelChoiceText(modelAnswer);
       partial = { ...(partial || {}), ...parsed.policy, banlist: parsed.policy.banlist };
       // If parse said defaults and we already had operator modelPolicy args, keep args.
-      if (parsed.source === 'operator-init') source = 'operator-init';
+      if (parsed.source === 'operator-init' || parsed.source.startsWith('preset:')) source = parsed.source;
       notes.push(...parsed.notes);
       if (parsed.source === 'defaults') notes.push('model answer resolved to defaults');
       else notes.push('model answer applied from operator reply');
@@ -1064,6 +1074,12 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   // ============================ TOOLS ====================================
 
   function initialize_loop_run(args = {}) {
+    if (typeof args.modelPreset === 'string' && args.modelPreset.trim() && !modelPolicyPreset(args.modelPreset)) {
+      return blocked(
+        BLOCK.BAD_INPUT,
+        `Unknown modelPreset "${args.modelPreset.trim()}". Supported preset: "gpt-5.6-sol". No fallback was applied.`
+      );
+    }
     const ts = clock();
     const runId = args.runId || `run-${hash8(String(args.task || '') + ts)}`;
     if (!isSafeId(runId)) return invalidIdBlock('runId', runId);
@@ -2707,6 +2723,62 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     const info = installLoopVersion(id, prev.content, { ts: clock(), from: { rollbackToVersion: prev.version } });
     return { ok: true, loopId: id, restoredFromVersion: prev.version, newVersion: info.version };
   }
+  function recordSupervisorEvent({ runId, event } = {}) {
+    if (!isSafeId(runId)) return { ok: false, reason: `invalid runId "${runId}"` };
+    if (!store.exists(runId)) return { ok: false, reason: `no run "${runId}"` };
+    const input = event && typeof event === 'object' ? event : {};
+    const type = String(input.type || 'worker_verdict');
+    if (!['worker_verdict', 'model_invocation', 'proof_checkpoint'].includes(type)) {
+      return { ok: false, reason: `unsupported supervisor event type "${type}"` };
+    }
+    const state = store.load(runId);
+    state.supervisionEvents = Array.isArray(state.supervisionEvents) ? state.supervisionEvents : [];
+    const receipt = input.invocation && typeof input.invocation === 'object'
+      ? {
+          requestedModel: input.invocation.requestedModel || null,
+          reportedModel: input.invocation.reportedModel || null,
+          modelSelectionAuthority: input.invocation.modelSelectionAuthority || null,
+          modelIdentityAuthority: input.invocation.modelIdentityAuthority || null,
+          reportedModelMatchesRequest: input.invocation.reportedModelMatchesRequest ?? null,
+          binaryFamily: input.invocation.binaryFamily || null,
+          argv: Array.isArray(input.invocation.argv) ? input.invocation.argv.map(String) : [],
+          durationMs: Number.isFinite(input.invocation.durationMs) ? input.invocation.durationMs : null,
+          exitCode: Number.isFinite(input.invocation.exitCode) ? input.invocation.exitCode : null,
+          stdoutSha256: input.invocation.stdoutSha256 || null,
+          resultSha256: input.invocation.resultSha256 || null,
+          tokenUsage: Number.isFinite(input.invocation.tokenUsage) ? input.invocation.tokenUsage : null,
+          tokenUsageAuthority: input.invocation.tokenUsageAuthority || null
+        }
+      : null;
+    const rec = {
+      id: nextId(state, 'supervisionEvent', 'sev'),
+      ts: clock(),
+      type,
+      accepted: input.accepted === true,
+      code: input.code ? String(input.code) : null,
+      reasons: Array.isArray(input.reasons) ? input.reasons.map(String) : [],
+      route: input.route ? String(input.route) : null,
+      phase: Number.isInteger(input.phase) ? input.phase : null,
+      workerKind: input.workerKind ? String(input.workerKind) : null,
+      attempt: Number.isInteger(input.attempt) ? input.attempt : null,
+      scenario: input.scenario ? String(input.scenario) : null,
+      invocation: receipt
+    };
+    state.supervisionEvents.push(rec);
+    logEvent(state, 'supervisor_event', {
+      id: rec.id,
+      type: rec.type,
+      accepted: rec.accepted,
+      code: rec.code,
+      reasons: rec.reasons,
+      route: rec.route,
+      phase: rec.phase,
+      scenario: rec.scenario
+    });
+    state.updatedAt = clock();
+    store.save(state);
+    return { ok: true, event: rec };
+  }
   function applyDashboardDecisions({ runId, decisions } = {}) {
     if (!isSafeId(runId)) return { ok: false, reason: `invalid runId "${runId}"` };
     if (!store.exists(runId)) return { ok: false, reason: `no run "${runId}"` };
@@ -2810,7 +2882,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   // Operator-only surface — consumed by the apply-decisions CLI and the autonomous
   // supervisor, NEVER by the model. It is an object (not a top-level function), so the
   // tools/call dispatch (`engine[name]`, function-typed only) cannot reach it.
-  api.operator = { adoptLoop, rollbackLoop, applyDashboardDecisions, applyInboxDecisions };
+  api.operator = { adoptLoop, rollbackLoop, recordSupervisorEvent, applyDashboardDecisions, applyInboxDecisions };
   // The autonomous supervisor: one call drives the whole campaign (intake → mine →
   // improve targets → bank Stones → advance/retire → re-mine) with the executor as
   // the real worker, validating every worker output through the enforcement boundary.
