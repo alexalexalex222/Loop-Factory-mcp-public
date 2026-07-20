@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Operator-only: APPLY the decisions you exported from the dashboard.
 //
-// The dashboard records your Approve / Sludge clicks and its "Export" button saves a
+// The dashboard records your Approve / Deny choices and its "Export" button saves a
 // decisions.json:
-//   { "runId": "...", "decisions": { "<reviewId>": { "decision": "approve"|"sludge", "notes": null } } }
+//   { "runId": "...", "decisions": { "<reviewId>": {
+//       "decision": "approve"|"sludge", "notes": null, "reviewSha256": "<64 hex>"
+//   } } }
 //
 // This script consumes that file and ACTUALLY APPLIES it: approving a loop-adoption
 // review installs the improved loop as a new VERSION of a custom loop (the prior
@@ -49,6 +51,10 @@ if (!runId) {
 
 const store = createStore(home);
 const engine = createEngine(store);
-const res = engine.operator.applyDashboardDecisions({ runId, decisions: payload.decisions || {} });
+const res = engine.operator.applyDashboardDecisions({
+  runId,
+  decisions: payload.decisions || {},
+  requireBinding: true
+});
 console.log(JSON.stringify(res, null, 2));
 process.exit(res.ok ? 0 : 1);

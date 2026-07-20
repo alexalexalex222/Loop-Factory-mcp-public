@@ -131,6 +131,38 @@ test('policy persists across resume-by-runId', () => {
   assert.equal(store.load('persist-1').config.modelPolicy.banlist.mode, 'off');
 });
 
+test('explicit modelPolicy survives model-looking answer text without route widening', () => {
+  const { engine, store } = freshEngine();
+  const exactPolicy = normalizeModelPolicy({
+    source: 'operator-init',
+    primary: 'gpt-5.6-sol',
+    testRoutes: ['gpt-5.6-sol'],
+    builderRoutes: ['gpt-5.6-sol'],
+    judgeRoute: 'gpt-5.6-sol',
+    banlist: { mode: 'strict', extraDeny: [], extraAllow: [] },
+    allowUnknownFrontier: false
+  }, { source: 'operator-init' });
+  const init = engine.initialize_loop_run({
+    runId: 'mp-explicit-policy-precedence',
+    task: SPECIFIC_TASK,
+    answers: [
+      'prove post-fix zero-inference idle',
+      'mine once, then idle',
+      'sealed empty corpus only',
+      'preserve operator control',
+      'gpt-5.6-sol only',
+      'operator stop-file'
+    ],
+    answerSource: 'config',
+    model: 'gpt-5.6-sol',
+    modelPolicy: exactPolicy
+  });
+
+  assert.equal(init.status, 'OK');
+  assert.deepEqual(init.modelPolicy, exactPolicy);
+  assert.deepEqual(store.load('mp-explicit-policy-precedence').config.modelPolicy, exactPolicy);
+});
+
 test('ensureModelPolicy backfills pre-redesign state without modelPolicy', () => {
   const legacy = {
     config: {

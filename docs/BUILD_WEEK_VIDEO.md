@@ -1,98 +1,104 @@
 # Build Week video plan
 
-Target length: 2 minutes 45 seconds. Public YouTube upload with spoken audio.
+Target length: 2 minutes 40 seconds. Public YouTube upload with spoken audio.
+Record the screen first and add voice-over afterward. A five-second face intro
+or outro is optional, not required.
 
 ## Shot list and narration
 
-### 0:00-0:20 - The problem
+### 0:00-0:15 - Product in one sentence
 
-Show the Loop Factory README and Campaign Console.
-
-Narration:
-
-> Agent improvement fails when the worker can skip phases, grade itself, or call
-> itself done. Loop Factory makes the worker propose while a local supervisor
-> owns progress, measurement, and promotion.
-
-### 0:20-0:40 - Honest extension split
-
-Show commits `19d9138`, `cbf2267`, and `8aabede`.
+Show the README headline and console image.
 
 Narration:
 
-> The MCP server, hash-locked loops, evidence gates, 313-test baseline, and
-> 47-check demo existed before this extension. During this Build Week task,
-> Codex added the exact GPT-5.6 Sol route and receipts, the live proof, the
-> Campaign Console, and the judge kit.
+> Loop Factory makes AI agents prove they got better. It freezes the old
+> workflow, tests the challenger against the baseline and an irrelevant sham,
+> verifies the receipts from disk, and leaves promotion with the operator.
 
-### 0:40-1:05 - Exact model proof
+### 0:15-0:40 - One-command judge proof
 
 Run:
 
 ```bash
-npm run judge:gpt56-sol
+npm run verify:submission
 ```
 
-Show the selected Codex CLI version, `gpt-5.6-sol`, sentinel PASS, and the evidence
-directory. Keep the model ID and `fallbackAttempted: false` visible.
+Show the top-level `PASS`, `experimentValid: true`, and the
+`productionSupplement: PASS` gate.
 
 Narration:
 
-> The command pins GPT-5.6 Sol. It does not use the family alias and never
-> substitutes another model. One sentinel proves the judge's auth and model
-> access before the controlled campaign starts.
+> This is the no-account judge path. It makes no model call. It re-opens the
+> public causal-canary transcripts, re-derives the result, and also checks the
+> final production packet against a pinned manifest.
 
-### 1:05-1:50 - Three gotcha moments
+### 0:40-1:25 - Real mined workflow improvement
 
-Open the generated `TRANSCRIPT.md` and raw JSONL.
+Open:
 
-1. `PHASE_SKIP`
-2. `MODEL_REPORTED_METRIC`
-3. `SELF_PROMOTION`
-
-Narration:
-
-> These are explicitly adversarial regression prompts. Sol is asked to emit
-> each prohibited packet. These are controlled regression fixtures, not claims of spontaneous model behavior.
-> The point is that the supervisor rejects the proposal every time, records the
-> exact invocation receipt, and does not let model output become campaign
-> authority.
-
-### 1:50-2:25 - Complete product experience
-
-Open the served Campaign Console. Show:
-
-- active lane and phase;
-- exact Sol policy;
-- verdict timeline and one invocation receipt;
-- score matrix and evidence panel;
-- a pending review;
-- mobile screenshot at 360px.
+- `submission/evidence/production-frontier-20260720/original-loop.md`
+- `submission/evidence/production-frontier-20260720/improved-loop-h1.md`
+- `submission/evidence/production-frontier-20260720/screenshots/score-table-desktop.png`
 
 Narration:
 
-> The console polls a sanitized allowlist API with ETags. It shows operational
-> facts and hashes, but never task text, prompts, user messages, artifacts,
-> environment values, or filesystem paths. Operator notes survive polling, and
-> approval remains outside the model-callable surface.
+> This workflow was mined from a real prior failure, not written as a fake weak
+> baseline. The original scored point six one nine across three runs. Loop
+> Factory generated two challengers. Both scored one point zero across three
+> independent replicas. The recommended version also used one point seven
+> eight percent fewer mean tokens.
 
-### 2:25-2:45 - Close
+### 1:25-1:55 - Execution and independent validity
 
-Show `npm test`, `npm run demo`, and `npm run verify` results.
+Show:
+
+- `submission/evidence/production-frontier-20260720/screenshots/experiment-validity-desktop.png`
+- `submission/evidence/production-frontier-20260720/verifier.json`
+- `submission/evidence/production-frontier-20260720/summary.json`
 
 Narration:
 
-> Loop Factory is the referee around the worker: phase-gated, measured from
-> captured bytes, re-verified from sealed evidence, and operator-controlled at
-> promotion. Judges can run the live Sol path in one command or the deterministic
-> no-auth demo without rebuilding the project.
+> The production run used twelve exact GPT-5.6 Sol calls at high reasoning,
+> with zero retries, zero exit failures, twelve isolated workspaces, and
+> thirty-four clean artifact rehashes. The independent run verifier passed
+> every publication gate.
+
+### 1:55-2:20 - Approval remains human
+
+Show:
+
+- `submission/evidence/production-frontier-20260720/screenshots/approval-desk-desktop.png`
+
+Narration:
+
+> Loop Factory still did not self-promote. Both measured wins are pending in
+> the approval desk. The system can keep mining and measuring, while adoption
+> authority stays with the operator.
+
+### 2:20-2:40 - Causal control and close
+
+Return to the `verify:submission` result and show `pairedTargetWins: 5`,
+`shamWins: 0`, and `controlRegressions: 0`.
+
+Narration:
+
+> The portable canary adds the causal control: five paired wins, zero sham
+> wins, and zero regressions. Loop Factory is the referee around the worker:
+> frozen baseline, negative control, disk-backed evidence, deterministic
+> verification, and operator-owned promotion.
 
 ## Capture checklist
 
 - Keep the final video under three minutes.
-- Use spoken audio; do not rely on text overlays alone.
-- Keep `gpt-5.6-sol` visible during the live proof.
-- Show the controlled-fixture disclosure.
-- Show the final test, demo, and hash verification counts.
+- Use spoken audio.
+- Keep `gpt-5.6-sol` visible in the production summary.
+- Show the original `0.6190` and improved `1.0000` scores.
+- Show `productionSupplement: PASS`.
+- Show `targetFullySolved: false`.
+- Show both reviews as pending and do not claim a promotion.
+- Show the no-paid path before describing the live production run.
 - Do not show account settings, tokens, environment values, or private paths.
-- Replace `[PUBLIC_YOUTUBE_URL]` only after the upload is public.
+- Show current verification outputs, not stale test/demo counts.
+- Keep `[PUBLIC_YOUTUBE_URL]` unresolved until the upload is public.
+- Keep `[CODEX_FEEDBACK_SESSION_ID]` unresolved until `/feedback` returns it.

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local-first Loop Factory supervisor/harness for evidence-gated agent loops. Holds the full private Strip Miner + Loop-de-loop inside the server, streams them phase-gated, owns the lane/target queue + transitions + stop policy, blocks spoofed human review, and blocks any promotion lacking a frozen benchmark plus tool-measured reverified frontier movement. Reactive MCP front-end + an autonomous driver (scripts/run-campaign.mjs) that drives the campaign itself. The operator is the only stop condition.",
+  "description": "Loop Factory makes AI agents prove they got better with frozen baselines, sham controls, disk-backed receipts, deterministic re-verification, and operator-controlled promotion.",
   "bin": {
     "super-loop-mcp": "src/server.mjs",
     "super-loop-run": "scripts/run-campaign.mjs"
@@ -15,6 +15,12 @@
   "scripts": {
     "start": "node src/server.mjs",
     "run-campaign": "node scripts/run-campaign.mjs",
+    "real-test": "node scripts/run-campaign.mjs --real-test",
+    "real-test:canary-plan": "node scripts/plan-real-test-canary.mjs",
+    "real-test:canary": "node scripts/run-real-test-canary.mjs",
+    "verify:canary": "node scripts/verify-canary.mjs",
+    "verify:run": "node scripts/verify-run.mjs",
+    "verify:submission": "node scripts/verify-submission.mjs",
     "judge:gpt56-sol": "node scripts/judge-build-week.mjs",
     "proof:gpt56-sol": "node scripts/build-week-gpt56-proof.mjs",
     "proof:gpt56": "node scripts/build-week-gpt56-proof.mjs",
@@ -24,10 +30,16 @@
   },
   "files": [
     "src/",
+    "!src/*.bak-*",
     "loops/",
     "scripts/",
     "hosts/",
     "examples/",
+    "docs/cover.png",
+    "docs/BUILD_WEEK_SUBMISSION.md",
+    "docs/BUILD_WEEK_VIDEO.md",
+    "docs/JUDGE_GUIDE.md",
+    "submission/",
     "README.md"
   ],
   "license": "MIT"

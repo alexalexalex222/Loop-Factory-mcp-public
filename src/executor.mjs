@@ -19,11 +19,14 @@
 //     refused, not guessed.
 //   - hard timeout + kill, bounded output buffer.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { resolveOnPath } from './host.mjs';
 import { sha256 } from './util.mjs';
+
+export const STRICT_CODEX_REASONING_EFFORT = 'high';
 
 // Resolve worker binaries robustly even when the MCP server was launched with a
 // minimal PATH (the common case: a GUI/launchd-spawned host hands the stdio server
@@ -144,21 +147,70 @@ export function execSlugForRoute(model) {
 // argv — so untrusted text can never become a flag or be parsed by a shell. Verified
 // against the real CLIs: `claude -p --output-format json` reads the prompt from stdin
 // and returns a JSON array; `codex exec --json` runs non-interactively.
-export function buildArgs(bin, slug, model) {
+export const STRICT_CODEX_DISABLED_FEATURES = Object.freeze([
+  'shell_tool',
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'computer_use',
+  'multi_agent',
+  'multi_agent_v2',
+  'hooks',
+  'plugins',
+  'plugin_sharing',
+  'remote_plugin',
+  'memories',
+  'apps',
+  'goals',
+  'tool_suggest',
+  'workspace_dependencies'
+]);
+
+const STRICT_SCHEMA_BY_KIND = Object.freeze({
+  mine: 'mine-output.schema.json',
+  proposal: 'proposal-output.schema.json',
+  evaluation: 'evaluation-output.schema.json',
+  baseline: 'baseline-output.schema.json',
+  challenger: 'challenger-output.schema.json'
+});
+
+export function schemaPathForContract(contract = {}) {
+  const filename = STRICT_SCHEMA_BY_KIND[contract.kind];
+  return filename
+    ? fileURLToPath(new URL(`./schemas/${filename}`, import.meta.url))
+    : null;
+}
+
+export function buildArgs(bin, slug, model, {
+  strictIsolation = false,
+  schemaPath = null,
+  workspaceRoot = null
+} = {}) {
   switch (bin) {
     case 'claude': return ['-p', '--output-format', 'json'];
     // `codex exec` refuses to run outside a trusted/git directory unless told to skip
     // that check; the supervisor's run dir is not a git repo, so the flag is required.
-    case 'codex': return [
-      'exec',
-      '-m', String(model || ''),
-      '--json',
-      '--skip-git-repo-check',
-      '--ephemeral',
-      '--ignore-rules',
-      '-s', 'read-only',
-      '-c', 'suppress_unstable_features_warning=true'
-    ];
+    case 'codex': {
+      const args = [
+        'exec',
+        '-m', String(model || ''),
+        '--json',
+        '--skip-git-repo-check',
+        '--ephemeral',
+        '--ignore-rules',
+        '-s', 'read-only',
+        '-c', 'suppress_unstable_features_warning=true'
+      ];
+      if (strictIsolation) {
+        args.push('-c', `model_reasoning_effort="${STRICT_CODEX_REASONING_EFFORT}"`);
+        args.push('--ignore-user-config');
+        for (const feature of STRICT_CODEX_DISABLED_FEATURES) args.push('--disable', feature);
+        if (schemaPath) args.push('--output-schema', schemaPath);
+        if (workspaceRoot) args.push('-C', workspaceRoot);
+        args.push('--color', 'never');
+      }
+      return args;
+    }
     // opencode drives the minimax/deepseek/mimo routes by model slug. `run` is its
     // non-interactive entry; the prompt is delivered on STDIN (never argv) like the others.
     // NOTE: opencode's exact non-interactive argv/stdin behavior is UNVERIFIED here (no live
@@ -286,21 +338,309 @@ export function parseTokenUsage(stdout) {
   return null;
 }
 
+export function parseTokenUsageDetails(stdout) {
+  const usage = finalUsage(String(stdout || ''));
+  if (!usage) return null;
+  const read = (key) => Number.isFinite(Number(usage[key])) ? Number(usage[key]) : 0;
+  const details = {
+    inputTokens: read('input_tokens') || read('prompt_tokens'),
+    outputTokens: read('output_tokens') || read('completion_tokens'),
+    cacheCreationInputTokens: read('cache_creation_input_tokens'),
+    cacheReadInputTokens: read('cache_read_input_tokens')
+  };
+  details.totalTokens = usageTotal(usage);
+  return details.totalTokens && details.totalTokens > 0 ? details : null;
+}
+
+const TOOL_EVENT_TYPES = new Set([
+  'tool_use',
+  'tool_result',
+  'command_execution',
+  'mcp_tool_call',
+  'web_search',
+  'web_search_request',
+  'web_fetch',
+  'file_search',
+  'computer_use',
+  'shell'
+]);
+
+const CONTEXT_DIAGNOSTIC_PATTERNS = Object.freeze([
+  Object.freeze({
+    code: 'WORKER_HOOK_CONTEXT',
+    pattern: /\bhooks?\s+(?:config|context|trust)\b|failed to parse hooks config/i
+  }),
+  Object.freeze({
+    code: 'WORKER_SKILL_CONTEXT',
+    pattern: /\bskill descriptions?\b|\bskills? context budget\b|can still see every skill/i
+  }),
+  Object.freeze({
+    code: 'WORKER_PLUGIN_CONTEXT',
+    pattern: /\bplugins?\s+(?:catalog|context|loaded|loading)\b/i
+  })
+]);
+
+export function inspectWorkerIsolation(stdout) {
+  const events = [];
+  const contextDiagnostics = [];
+  const seenDiagnostics = new Set();
+  let malformedLines = 0;
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    const type = typeof value.type === 'string' ? value.type.toLowerCase() : '';
+    if (TOOL_EVENT_TYPES.has(type)) {
+      events.push({
+        type,
+        name: String(value.name || value.tool_name || value.toolName || value.command || '').slice(0, 160) || null
+      });
+    }
+    const message = typeof value.message === 'string' ? value.message : '';
+    for (const diagnostic of CONTEXT_DIAGNOSTIC_PATTERNS) {
+      if (!message || !diagnostic.pattern.test(message)) continue;
+      const key = `${diagnostic.code}:${message}`;
+      if (seenDiagnostics.has(key)) continue;
+      seenDiagnostics.add(key);
+      contextDiagnostics.push({
+        code: diagnostic.code,
+        message: message.slice(0, 320)
+      });
+    }
+    for (const nested of Object.values(value)) visit(nested);
+  };
+  const raw = String(stdout || '');
+  try {
+    visit(JSON.parse(raw));
+  } catch {
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try { visit(JSON.parse(line)); } catch { malformedLines++; }
+    }
+  }
+  const reasons = [];
+  if (events.length) reasons.push('WORKER_TOOL_CALL');
+  if (malformedLines) reasons.push('WORKER_TRANSCRIPT_UNPARSEABLE');
+  reasons.push(...new Set(contextDiagnostics.map((item) => item.code)));
+  return {
+    status: events.length === 0 && malformedLines === 0 && contextDiagnostics.length === 0 ? 'PASS' : 'FAIL',
+    toolCalls: events,
+    contextDiagnostics,
+    malformedLines,
+    reasons
+  };
+}
+
+export function buildExecutorPrompt(contract = {}) {
+  const target = contract.target || null;
+  const hypothesis = contract.hypothesis || null;
+  const kind = contract.kind || 'challenger';
+  const targetText = target
+    ? JSON.stringify({
+        findingId: target.findingId,
+        title: target.title,
+        baselineArtifactId: target.baselineArtifactId,
+        baselineSha256: target.baselineSha256
+      }, null, 2)
+    : 'NONE';
+  const evidenceText = target && Array.isArray(target.evidenceRefs) && target.evidenceRefs.length
+    ? target.evidenceRefs.map((ref) => `- ${ref.path} :: ${ref.locator}`).join('\n')
+    : 'NONE';
+  const capsuleText = Array.isArray(contract.evidenceCapsule) && contract.evidenceCapsule.length
+    ? contract.evidenceCapsule.map((item) => [
+        `--- ${item.path} (sha256 ${item.sha256}) ---`,
+        String(item.content || ''),
+        `--- end ${item.path} ---`
+      ].join('\n')).join('\n\n')
+    : 'NONE';
+  const hypothesisText = hypothesis ? JSON.stringify(hypothesis, null, 2) : 'NONE';
+  const procedureText = typeof contract.procedureContent === 'string'
+    ? contract.procedureContent
+    : (target && target.baselineContent ? String(target.baselineContent) : 'NONE');
+  const casesText = Array.isArray(contract.frozenCases) && contract.frozenCases.length
+    ? JSON.stringify(contract.frozenCases, null, 2)
+    : (contract.requirements || []).filter((item) => /FROZEN CASES/i.test(String(item))).join('\n') || 'NONE';
+  const caseResultShape = '{"caseId":"case id","disposition":"ACCEPTED or REJECTED only","code":"observed supervisor code","evidencePaths":["repository-relative evidence path"]}';
+  const structuredOutput = contract.outputSchemaMode === true;
+  const requiredSchema = kind === 'proposal'
+    ? `${structuredOutput ? '' : '<IMPROVEMENT>\n'}{"findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","revisedContent":"complete revised procedure","changeSummary":"specific hypothesis-linked change"}${structuredOutput ? '' : '\n</IMPROVEMENT>'}`
+    : (kind === 'evaluation'
+        ? `${structuredOutput ? '' : '<EVALUATION>\n'}{"arm":"${contract.evaluationArm || ''}","findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","procedureSha256":"${contract.procedureSha256 || ''}","caseResults":[${caseResultShape}]}${structuredOutput ? '' : '\n</EVALUATION>'}`
+        : (kind === 'baseline'
+            ? `${structuredOutput ? '' : '<BASELINE_RESULT>\n'}{"findingId":"${target && target.findingId || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","caseResults":[${caseResultShape}]}${structuredOutput ? '' : '\n</BASELINE_RESULT>'}`
+            : (kind === 'challenger'
+                ? `${structuredOutput ? '' : '<IMPROVEMENT>\n'}{"findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","revisedContent":"complete revised procedure","changeSummary":"specific change","caseResults":[${caseResultShape}]}${structuredOutput ? '' : '\n</IMPROVEMENT>'}`
+                : (structuredOutput
+                    ? '{"candidates":[{"loop":"loop-de-loop","title":"substantial finding","baselineContent":"complete baseline procedure","evidenceRefs":[{"path":"sealed/path","locator":"exact locator"}],"hypotheses":[{"title":"hypothesis one","bottleneck":"specific mechanism","operation":"specific change","expectedMovement":"predeclared movement","falsifier":"rejecting observation"},{"title":"hypothesis two","bottleneck":"specific mechanism","operation":"specific change","expectedMovement":"predeclared movement","falsifier":"rejecting observation"}]}]}'
+                    : '<CANDIDATES>[...]</CANDIDATES>'))));
+  const phaseInstruction = kind === 'proposal'
+    ? 'Revise the locked baseline only according to the assigned hypothesis. Do not evaluate cases in this proposal phase.'
+    : (kind === 'evaluation'
+        ? 'Apply the active procedure exactly as written to every frozen case. Do not revise the procedure or add proposal fields.'
+        : (kind === 'baseline'
+            ? 'Apply the locked baseline procedure exactly as written to every frozen case. Do not revise it.'
+            : (kind === 'challenger'
+                ? 'Revise the locked baseline only according to the assigned hypothesis, then apply that complete revised procedure to every frozen case.'
+                : 'Perform only the assigned mining phase and emit evidence-backed candidates.')));
+  return [
+    'TARGET',
+    targetText,
+    '',
+    'LOCKED BASELINE',
+    target && target.baselineContent ? String(target.baselineContent) : 'NONE',
+    '',
+    'ACTIVE PROCEDURE',
+    procedureText,
+    '',
+    'EVIDENCE SOURCES',
+    evidenceText,
+    '',
+    'SEALED EVIDENCE CAPSULE',
+    capsuleText,
+    '',
+    'HYPOTHESIS',
+    hypothesisText,
+    '',
+    'FROZEN CASES',
+    casesText,
+    '',
+    'REQUIRED OUTPUT SCHEMA',
+    requiredSchema,
+    '',
+    'FORBIDDEN OUTPUTS',
+    '- Do not emit a mining <CANDIDATES> block during baseline or challenger work.',
+    '- Do not emit a baseline wrapper during challenger work or an improvement wrapper during baseline work.',
+    '- Do not combine proposal and evaluation fields in one output.',
+    '- Do not grade yourself, report metrics, claim promotion, declare completion, or stop the campaign.',
+    ...(structuredOutput ? ['- Return only the JSON object required by the CLI output schema. Do not add tags, fences, or prose.'] : []),
+    '',
+    'PHASE PROCEDURE',
+    String(contract.slice || ''),
+    '',
+    'TASK',
+    String(contract.task || ''),
+    '',
+    'REQUIREMENTS',
+    (contract.requirements || []).map((requirement) => `- ${requirement}`).join('\n') || 'NONE',
+    '',
+    phaseInstruction,
+    '',
+    'HARD EXECUTION CONTRACT',
+    'You are a single benchmark worker, not an open-ended agent. Produce the deliverable as your single final message in one turn. Do not spawn subagents or sub-tasks, call campaign tools, browse files, use memory, search the web, or manufacture evidence. Use only the sealed evidence capsule printed above. Be concise and finish quickly.'
+  ].join('\n');
+}
+
+function parseStructuredObject(text) {
+  const raw = String(text || '').trim();
+  const fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  try {
+    const parsed = JSON.parse(fenced ? fenced[1] : raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeStructuredWorkerOutput(contract = {}, text = '') {
+  const payload = parseStructuredObject(text);
+  if (!payload) return null;
+  const inferredKind = Array.isArray(payload.candidates)
+    ? 'mine'
+    : (payload.arm ? 'evaluation'
+      : (payload.revisedContent ? (Array.isArray(payload.caseResults) ? 'challenger' : 'proposal')
+        : (Array.isArray(payload.caseResults) ? 'baseline' : null)));
+  const kind = contract.kind || inferredKind;
+  if (kind === 'mine' && Array.isArray(payload.candidates)) {
+    return `<CANDIDATES>${JSON.stringify(payload.candidates)}</CANDIDATES>`;
+  }
+  if (kind === 'proposal' && typeof payload.revisedContent === 'string' && !Array.isArray(payload.caseResults)) {
+    return `<IMPROVEMENT>${JSON.stringify(payload)}</IMPROVEMENT>`;
+  }
+  if (kind === 'evaluation' && payload.arm && Array.isArray(payload.caseResults)) {
+    return `<EVALUATION>${JSON.stringify(payload)}</EVALUATION>`;
+  }
+  if (kind === 'baseline' && Array.isArray(payload.caseResults)) {
+    return `<BASELINE_RESULT>${JSON.stringify(payload)}</BASELINE_RESULT>`;
+  }
+  if (kind === 'challenger' && typeof payload.revisedContent === 'string' && Array.isArray(payload.caseResults)) {
+    return `<IMPROVEMENT>${JSON.stringify(payload)}</IMPROVEMENT>`;
+  }
+  return null;
+}
+
 // Adapter: turn the real executor into a supervisor worker(contract) → packet. The
 // supervisor sends only the phase SLICE; this runs the allowlisted CLI on it and
-// returns the captured output as a packet. A failed launch yields an empty packet
-// that the supervisor's validator rejects (→ invalid batch, does not count).
+// returns the captured output as a packet. A failed launch preserves supervisor-
+// owned diagnostics while the validator still rejects it as an invalid batch.
 export function executorWorker(contract, env = process.env) {
-  const prompt = `${contract.slice || ''}\n\nTASK: ${contract.task || ''}\n${(contract.requirements || []).map((r) => `- ${r}`).join('\n')}\n\nHARD EXECUTION CONTRACT (you are a single benchmark worker, not an open-ended agent): produce your deliverable as your SINGLE final message in ONE turn. Do NOT spawn subagents or sub-tasks, do NOT open-endedly explore the filesystem or web, and do NOT call any super-loop / campaign tools. Be concise and finish quickly. Your final message IS the artifact that will be scored.`;
-  const r = runWorker({ model: contract.route, prompt, env });
-  if (!r.ok) return { route: contract.route, __execReason: r.reason, artifacts: [], finalOutput: '' };
+  const strictCodex = contract.toolPolicy === 'none'
+    && execBinaryForRoute(contract.route, env) === 'codex'
+    && !!schemaPathForContract(contract);
+  const effectiveContract = strictCodex ? { ...contract, outputSchemaMode: true } : contract;
+  const prompt = buildExecutorPrompt(effectiveContract);
+  const r = runWorker({
+    model: contract.route,
+    prompt,
+    env,
+    executionContract: strictCodex ? effectiveContract : null
+  });
+  if (!r.ok) {
+    const failedRunlog = [
+      r.stdout ? `STDOUT\n${r.stdout}` : '',
+      r.stderr ? `STDERR\n${r.stderr}` : ''
+    ].filter(Boolean).join('\n');
+    return {
+      route: contract.route,
+      phase: contract.phase,
+      __execReason: r.reason,
+      artifacts: failedRunlog ? [{ role: 'runlog', content: failedRunlog }] : [],
+      executorOwned: true,
+      rawStdout: r.stdout || '',
+      rawStderr: r.stderr || '',
+      finalOutput: '',
+      realTokenUsage: r.tokenUsage,
+      isolation: r.isolation,
+      invocation: r.invocation
+    };
+  }
+  const finalOutput = strictCodex
+    ? normalizeStructuredWorkerOutput(contract, r.resultText)
+    : (r.resultText || r.stdout);
+  if (!finalOutput) {
+    return {
+      route: contract.route,
+      phase: contract.phase,
+      __execReason: 'OUTPUT_SCHEMA_INVALID',
+      artifacts: [{ role: 'runlog', content: r.stdout }],
+      executorOwned: true,
+      rawStdout: r.stdout,
+      finalOutput: '',
+      realTokenUsage: r.tokenUsage,
+      isolation: r.isolation,
+      invocation: r.invocation
+    };
+  }
+  const invocation = strictCodex
+    ? {
+        ...r.invocation,
+        rawResultSha256: r.invocation.resultSha256,
+        resultSha256: sha256(finalOutput),
+        resultNormalization: 'json-schema-v1'
+      }
+    : r.invocation;
   // runlog = the raw captured envelope (evidence); finalOutput = the comparable answer text
   return {
     route: contract.route,
+    phase: contract.phase,
     artifacts: [{ role: 'runlog', content: r.stdout }],
-    finalOutput: r.resultText || r.stdout,
+    executorOwned: true,
+    rawStdout: r.stdout,
+    finalOutput,
     realTokenUsage: r.tokenUsage,
-    invocation: r.invocation
+    isolation: r.isolation,
+    invocation
   };
 }
 
@@ -309,7 +649,14 @@ export function executorWorker(contract, env = process.env) {
  * (matches the rest of the engine; one tool call runs at a time over stdio).
  * @returns {{ ok, model, bin, binPath, stdout, exitCode, timedOut, tokenUsage, reason? }}
  */
-export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = process.env } = {}) {
+export function runWorker({
+  model,
+  prompt,
+  timeoutMs = 600000,
+  cwd,
+  env = process.env,
+  executionContract = null
+} = {}) {
   if (!isExecEnabled(env)) {
     return { ok: false, model, bin: null, reason: 'EXEC_DISABLED', message: 'Live execution is off. Set SUPER_LOOP_ALLOW_EXEC=1 to let Loop Factory launch and meter workers itself.' };
   }
@@ -335,28 +682,47 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
     }
     return { ok: false, model, bin, reason: 'BINARY_MISSING', message: `allowlisted binary "${bin}" not found on PATH (cannot execute route ${model})` };
   }
-  const args = buildArgs(bin, execSlugForRoute(model), model);
+  const strictIsolation = bin === 'codex' && executionContract?.toolPolicy === 'none';
+  const schemaPath = strictIsolation ? schemaPathForContract(executionContract) : null;
+  const workspaceRoot = strictIsolation
+    ? mkdtempSync(join(tmpdir(), 'loop-factory-worker-'))
+    : (cwd || null);
+  const args = buildArgs(bin, execSlugForRoute(model), model, {
+    strictIsolation,
+    schemaPath,
+    workspaceRoot
+  });
   // codex's wrapper alias unsets OPENAI_BASE_URL; replicate that for the child so a
   // stray base-url env can't redirect the worker to the wrong endpoint.
   const childEnv = { ...env };
   if (bin === 'codex') delete childEnv.OPENAI_BASE_URL;
+  // Operator-only authority and plan-lock values belong to the supervisor process,
+  // never to a spawned worker. A worker cannot be allowed to inherit the credentials
+  // that distinguish operator decisions from model proposals.
+  delete childEnv.SUPER_LOOP_OPERATOR_AUTHORITY;
+  delete childEnv.SUPER_LOOP_REAL_TEST_APPROVAL;
   const receiptBase = {
     requestedModel: String(model || ''),
     binaryFamily: bin,
     argv: [...args],
-    modelSelectionAuthority: bin === 'codex' ? 'explicit-model-flag' : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary')
+    modelSelectionAuthority: bin === 'codex' ? 'explicit-model-flag' : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary'),
+    strictIsolation,
+    disabledFeatures: strictIsolation ? [...STRICT_CODEX_DISABLED_FEATURES] : [],
+    workspaceRoot,
+    outputSchemaSha256: schemaPath ? sha256(readFileSync(schemaPath)) : null
   };
   const startNs = process.hrtime.bigint();
   try {
     const stdout = execFileSync(binPath, args, {
       input: String(prompt == null ? '' : prompt), // prompt on STDIN, never argv → no injection
-      cwd: cwd || undefined,
+      cwd: workspaceRoot || undefined,
       env: childEnv,
       timeout: timeoutMs,
       killSignal: 'SIGKILL',
       maxBuffer: 64 * 1024 * 1024,
       encoding: 'utf8',
-      windowsHide: true
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe']
       // No `shell` option → execFile semantics → args passed literally, never parsed
       // by a shell. With the prompt on stdin, there is no untrusted text on argv at all.
     });
@@ -365,9 +731,11 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
     const resultText = extractResult(bin, stdoutText);
     const reportedModel = parseReportedModel(bin, stdoutText);
     const tokenUsage = parseTokenUsage(stdoutText);
+    const tokenUsageDetails = parseTokenUsageDetails(stdoutText);
+    const isolation = inspectWorkerIsolation(stdoutText);
     return {
       ok: true, model, bin, binPath, stdout: stdoutText, resultText,
-      exitCode: 0, timedOut: false, tokenUsage, durationMs,
+      exitCode: 0, timedOut: false, tokenUsage, tokenUsageDetails, durationMs, isolation,
       invocation: {
         ...receiptBase,
         reportedModel,
@@ -378,33 +746,49 @@ export function runWorker({ model, prompt, timeoutMs = 600000, cwd, env = proces
         stdoutSha256: sha256(stdoutText),
         resultSha256: sha256(resultText),
         tokenUsage,
-        tokenUsageAuthority: tokenUsage == null ? 'unavailable' : 'cli-reported'
+        tokenUsageDetails,
+        tokenUsageAuthority: tokenUsage == null ? 'unavailable' : 'cli-reported',
+        isolation
       }
     };
   } catch (e) {
     const durationMs = Number((process.hrtime.bigint() - startNs) / 1000000n);
     const timedOut = e && (e.code === 'ETIMEDOUT' || e.signal === 'SIGKILL' || e.killed === true);
     const stdoutText = e && e.stdout ? String(e.stdout) : '';
+    const stderrText = e && e.stderr ? String(e.stderr) : '';
+    const exitCode = e && typeof e.status === 'number' ? e.status : null;
+    const processErrorCode = e && typeof e.code === 'string' ? e.code : null;
     const reportedModel = parseReportedModel(bin, stdoutText);
     const tokenUsage = parseTokenUsage(stdoutText);
+    const tokenUsageDetails = parseTokenUsageDetails(stdoutText);
+    const isolation = inspectWorkerIsolation(stdoutText);
     return {
       ok: false, model, bin, binPath,
       reason: timedOut ? 'TIMEOUT' : 'EXEC_FAILED',
-      message: timedOut ? `worker ${bin} exceeded ${timeoutMs}ms and was killed` : `worker ${bin} failed: ${e && e.message ? e.message.split('\n')[0] : 'unknown error'}`,
+      message: timedOut
+        ? `worker ${bin} exceeded ${timeoutMs}ms and was killed`
+        : `worker ${bin} failed${exitCode == null ? '' : ` with exit code ${exitCode}`}${processErrorCode ? ` (${processErrorCode})` : ''}`,
       stdout: stdoutText,
-      exitCode: e && typeof e.status === 'number' ? e.status : null,
-      timedOut, durationMs,
+      stderr: stderrText,
+      exitCode,
+      timedOut, tokenUsage, tokenUsageDetails, durationMs, isolation,
       invocation: {
         ...receiptBase,
         reportedModel,
-        modelIdentityAuthority: receiptBase.modelSelectionAuthority,
-        reportedModelMatchesRequest: null,
+        modelIdentityAuthority: reportedModel ? 'cli-reported' : receiptBase.modelSelectionAuthority,
+        reportedModelMatchesRequest: reportedModel == null
+          ? null
+          : reportedModel.toLowerCase() === String(model || '').toLowerCase(),
         durationMs,
-        exitCode: e && typeof e.status === 'number' ? e.status : null,
+        exitCode,
+        processErrorCode,
         stdoutSha256: sha256(stdoutText),
+        stderrSha256: sha256(stderrText),
         resultSha256: null,
         tokenUsage,
-        tokenUsageAuthority: tokenUsage == null ? 'unavailable' : 'cli-reported'
+        tokenUsageDetails,
+        tokenUsageAuthority: tokenUsage == null ? 'unavailable' : 'cli-reported',
+        isolation
       }
     };
   }

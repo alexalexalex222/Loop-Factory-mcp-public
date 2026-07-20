@@ -125,20 +125,31 @@ export function buildScoreMatrix(state) {
     if (!best) {
       return {
         hypothesisId: h.id, title: h.title, route: h.route, status: h.status,
-        measured: false, tokenCost: null, quality: null, source: null, qualityAuthority: null, reverified: false,
+        measured: false, tokenCost: null, artifactOutputTokenEstimate: null, cliReceiptTokenCost: null,
+        quality: null, source: null, qualityAuthority: null, reverified: false,
         deltaQuality: null, deltaCostPct: null, verdict: 'NO_MEASUREMENT', promotable: false
       };
     }
     const deltaQuality = baseline ? round(best.agg.quality - baseline.quality) : null;
     const deltaCostPct = baseline && baseline.tokenCost > 0 ? round((best.agg.tokenCost - baseline.tokenCost) / baseline.tokenCost) : null;
     const qualityAuthority = best.qualityAuthority || 'caller-reported';
+    const promotionDecision = promotionDecisionForTest(
+      best,
+      baseline,
+      state.config?.promotion,
+      state.config?.comparisonRule
+    );
     return {
       hypothesisId: h.id, title: h.title, route: h.route, status: h.status,
       measured: true, tokenCost: round(best.agg.tokenCost), quality: round(best.agg.quality),
+      artifactOutputTokenEstimate: round(best.agg.artifactOutputTokenEstimate ?? best.agg.tokenCost),
+      cliReceiptTokenCost: Number.isFinite(best.agg.cliReceiptTokenCost)
+        ? round(best.agg.cliReceiptTokenCost)
+        : null,
       source: best.source, qualityAuthority, reverified: !!best.reverified,
       deltaQuality, deltaCostPct, verdict: best.verdict,
       // A win only auto-promotes when quality is tool-verifiable; subjective → dashboard.
-      promotable: best.verdict === 'MOVED_FRONTIER' && !!best.reverified && qualityAuthority === 'tool-computed'
+      promotable: promotionDecision.promote === true && !!best.reverified && qualityAuthority === 'tool-computed'
     };
   });
 }

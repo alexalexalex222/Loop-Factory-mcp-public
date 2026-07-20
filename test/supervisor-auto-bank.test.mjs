@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { runSupervisedCampaign } from '../src/supervisor.mjs';
 import { DEFAULT_QUALITY_ORACLE, buildMeasuredContent } from '../src/measure.mjs';
 import { freshEngine, BASELINE_BODY } from './helpers.mjs';
+import { reviewDecisionBinding } from '../src/review-decisions.mjs';
 
 const okPacket = (route, out) => ({ route, artifacts: [{ role: 'runlog', content: out }], finalOutput: out });
 const benchmark = { name: 'b', taskValueDimensions: ['quality'], resourceDimensions: ['token-cost'], cases: [{ id: 'c1' }], oracle: DEFAULT_QUALITY_ORACLE };
@@ -32,7 +33,16 @@ function injectDecision(store, runId, decision) {
         if (!store.exists(sub)) continue;
         const rev = (store.load(sub).humanReviews || []).find((r) => r.kind === 'promotion' && r.status === 'PENDING');
         if (rev) {
-          store.writeRunFile(sub, 'inbox-decisions.json', JSON.stringify({ runId: sub, decisions: { [rev.id]: { decision } } }));
+          const state = store.load(sub);
+          store.writeRunFile(sub, 'inbox-decisions.json', JSON.stringify({
+            runId: sub,
+            decisions: {
+              [rev.id]: {
+                decision,
+                reviewSha256: reviewDecisionBinding(state, rev)
+              }
+            }
+          }));
           dropped = true;
         }
       }

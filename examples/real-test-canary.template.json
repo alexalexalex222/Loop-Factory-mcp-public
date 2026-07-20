@@ -1,0 +1,137 @@
+{
+  "model": "gpt-5.6-sol",
+  "routes": [
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol"
+  ],
+  "evidenceSources": [
+    "[REPOSITORY_RELATIVE_EVIDENCE_PATH]",
+    "src/supervisor.mjs",
+    "src/real-test.mjs",
+    "test/real-test.test.mjs"
+  ],
+  "target": {
+    "findingId": "finding-001",
+    "baselineContent": "[SUBSTANTIAL_IMMUTABLE_BASELINE_PROCEDURE]",
+    "evidenceRefs": [
+      {
+        "path": "[REPOSITORY_RELATIVE_EVIDENCE_PATH]",
+        "locator": "[EXACT_SUBSTRING_OR_LINE_LOCATOR]"
+      }
+    ],
+    "hypothesis": {
+      "title": "[SUBSTANTIVE_HYPOTHESIS_TITLE]",
+      "bottleneck": "[SPECIFIC_OBSERVED_FAILURE_MECHANISM]",
+      "operation": "[ONE_CONCRETE_PROCEDURE_CHANGE]",
+      "expectedMovement": "[PREDECLARED_TARGET_CASE_MOVEMENT]",
+      "falsifier": "[OBSERVATION_THAT_WOULD_REJECT_THE_HYPOTHESIS]"
+    },
+    "shamContent": "[BASELINE_PLUS_IRRELEVANT_NON_BEHAVIORAL_EDIT]"
+  },
+  "benchmark": {
+    "name": "[OPERATOR_SUPPLIED_CANARY_BENCHMARK]",
+    "taskValueDimensions": [
+      "[REAL_TARGET_CASE_ACCURACY]",
+      "control_case_stability"
+    ],
+    "resourceDimensions": [
+      "tokenCost"
+    ],
+    "cases": [
+      {
+        "id": "target-1",
+        "prompt": "[TARGET_CASE_1]"
+      },
+      {
+        "id": "target-2",
+        "prompt": "[TARGET_CASE_2]"
+      },
+      {
+        "id": "target-3",
+        "prompt": "[TARGET_CASE_3]"
+      },
+      {
+        "id": "target-4",
+        "prompt": "[TARGET_CASE_4]"
+      },
+      {
+        "id": "control-1",
+        "prompt": "[CONTROL_CASE_1]"
+      },
+      {
+        "id": "control-2",
+        "prompt": "[CONTROL_CASE_2]"
+      }
+    ],
+    "oracle": {
+      "kind": "case-results-v2",
+      "passMark": 1,
+      "cases": [
+        {
+          "caseId": "target-1",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "target-2",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "target-3",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "target-4",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "control-1",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ],
+          "group": "control"
+        },
+        {
+          "caseId": "control-2",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ],
+          "group": "control"
+        }
+      ]
+    },
+    "negativeControl": {
+      "content": "<CASE_RESULTS>[]</CASE_RESULTS>",
+      "passMark": 0.6
+    },
+    "routeIndependence": "required",
+    "requiredRoutes": 5,
+    "outputClass": "prose"
+  }
+}

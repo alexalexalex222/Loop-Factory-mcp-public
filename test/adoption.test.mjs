@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshEngine, SPECIFIC_TASK } from './helpers.mjs';
 import { runSupervisedCampaign } from '../src/supervisor.mjs';
+import { reviewDecisionBinding } from '../src/review-decisions.mjs';
 
 const LOOP_A = [
   'PHASE ONE INTAKE',
@@ -32,6 +33,12 @@ const LOOP_B = [
 
 function initd(engine, runId) {
   engine.initialize_loop_run({ runId, task: SPECIFIC_TASK, userMessages: ['go'] });
+}
+
+function boundDecision(store, runId, reviewId, decision, notes = null) {
+  const state = store.load(runId);
+  const review = state.humanReviews.find((item) => item.id === reviewId);
+  return { decision, notes, reviewSha256: reviewDecisionBinding(state, review) };
 }
 
 test('operator adopts an improved loop → installed as a versioned custom loop → loop_start streams it', () => {
@@ -137,7 +144,10 @@ test('inbox auto-apply: dropping decisions into the run inbox adopts, then archi
     item: { kind: 'loop-adoption', loopId: 'inbox-miner', loopContent: LOOP_A }
   });
   // the operator saves the dashboard's exported decisions.json into the run inbox
-  store.writeRunFile('rin', 'inbox-decisions.json', JSON.stringify({ runId: 'rin', decisions: { [q.reviewId]: { decision: 'approve' } } }));
+  store.writeRunFile('rin', 'inbox-decisions.json', JSON.stringify({
+    runId: 'rin',
+    decisions: { [q.reviewId]: boundDecision(store, 'rin', q.reviewId, 'approve') }
+  }));
 
   const r = engine.operator.applyInboxDecisions('rin');
   assert.equal(r.ok, true);
@@ -169,6 +179,52 @@ test('inbox auto-apply archives invalid JSON without throwing or applying', () =
   assert.equal(store.runFileExists('rbad', 'inbox-decisions.json'), false, 'bad inbox is archived, not left to re-trigger');
 });
 
+test('inbox auto-apply rejects an unbound approval without changing review or loop state', () => {
+  const { engine, store } = freshEngine();
+  initd(engine, 'runbound');
+  const q = engine.human_review_request({
+    runId: 'runbound', action: 'add',
+    item: { kind: 'loop-adoption', loopId: 'unbound-loop', loopContent: LOOP_A }
+  });
+  store.writeRunFile('runbound', 'inbox-decisions.json', JSON.stringify({
+    runId: 'runbound',
+    decisions: { [q.reviewId]: { decision: 'approve' } }
+  }));
+  const result = engine.operator.applyInboxDecisions('runbound');
+  assert.equal(result.ok, false);
+  assert.equal(result.applied[0].code, 'REVIEW_BINDING_REQUIRED');
+  const review = store.load('runbound').humanReviews.find((item) => item.id === q.reviewId);
+  assert.equal(review.status, 'PENDING');
+  assert.equal(review.lastDecisionError.code, 'REVIEW_BINDING_REQUIRED');
+  assert.equal(store.readLoop('unbound-loop'), null);
+  assert.equal(store.runFileExists('runbound', 'inbox-decisions.json'), false);
+});
+
+test('inbox auto-apply rejects a stale decision binding when reviewed bytes change before drain', () => {
+  const { engine, store } = freshEngine();
+  initd(engine, 'rstale');
+  const q = engine.human_review_request({
+    runId: 'rstale', action: 'add',
+    item: { kind: 'loop-adoption', loopId: 'stale-loop', loopContent: LOOP_A }
+  });
+  const decision = boundDecision(store, 'rstale', q.reviewId, 'approve');
+  store.writeRunFile('rstale', 'inbox-decisions.json', JSON.stringify({
+    runId: 'rstale',
+    decisions: { [q.reviewId]: decision }
+  }));
+  const changed = store.load('rstale');
+  changed.humanReviews.find((item) => item.id === q.reviewId).loopContent = LOOP_B;
+  store.save(changed);
+
+  const result = engine.operator.applyInboxDecisions('rstale');
+  assert.equal(result.ok, false);
+  assert.equal(result.applied[0].code, 'REVIEW_BINDING_CHANGED');
+  const review = store.load('rstale').humanReviews.find((item) => item.id === q.reviewId);
+  assert.equal(review.status, 'PENDING');
+  assert.equal(review.lastDecisionError.code, 'REVIEW_BINDING_CHANGED');
+  assert.equal(store.readLoop('stale-loop'), null);
+});
+
 test('the SUPERVISOR drains the inbox each tick — an approval dropped in is auto-applied with no command', () => {
   const { engine, store } = freshEngine();
   // a pending loop-adoption review + an approve dropped into the inbox, before any campaign runs
@@ -177,7 +233,10 @@ test('the SUPERVISOR drains the inbox each tick — an approval dropped in is au
     runId: 'sup', action: 'add',
     item: { kind: 'loop-adoption', loopId: 'sup-miner', loopContent: LOOP_A }
   });
-  store.writeRunFile('sup', 'inbox-decisions.json', JSON.stringify({ decisions: { [q.reviewId]: { decision: 'approve' } } }));
+  store.writeRunFile('sup', 'inbox-decisions.json', JSON.stringify({
+    runId: 'sup',
+    decisions: { [q.reviewId]: boundDecision(store, 'sup', q.reviewId, 'approve') }
+  }));
 
   // run the supervisor on that run with NO targets → it performs its per-tick inbox
   // drain and returns. No CLI, no model action — the supervisor applied the decision.
@@ -187,4 +246,15 @@ test('the SUPERVISOR drains the inbox each tick — an approval dropped in is au
   assert.equal(store.readLoop('sup-miner').content, LOOP_A, 'supervisor auto-adopted the approved loop');
   assert.equal(store.load('sup').humanReviews.find((x) => x.id === q.reviewId).status, 'APPROVED');
   assert.equal(store.runFileExists('sup', 'inbox-decisions.json'), false, 'inbox consumed by the supervisor');
+});
+
+test('the supervisor records a corrupt inbox as an operator decision error and applies nothing', () => {
+  const { engine, store } = freshEngine();
+  initd(engine, 'sup-bad');
+  store.writeRunFile('sup-bad', 'inbox-decisions.json', '{not valid json');
+  const mockWorker = (contract) => ({ route: contract?.route || 'claude-opus-4-8', artifacts: [{ role: 'runlog', content: 'ok' }], finalOutput: 'ok' });
+  const result = runSupervisedCampaign(engine, { runId: 'sup-bad', targets: [] }, { worker: mockWorker, maxBatches: 1 });
+  assert.ok(result.transcript.some((entry) => entry.step === 'operator_decisions_error' && /invalid/i.test(entry.reason)));
+  assert.equal(store.runFileExists('sup-bad', 'inbox-decisions.json'), false);
+  assert.equal(store.load('sup-bad').humanReviews.length, 0);
 });

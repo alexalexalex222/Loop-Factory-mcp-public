@@ -1,0 +1,503 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "loop-factory-build-week-context-isolation-canary-20260719",
+  "runId": "context-isolation-canary-20260719",
+  "generatedOn": "2026-07-20",
+  "sourceProofRoot": "proof/real-test/context-isolation-canary-20260719",
+  "sourceConfigSha256": "562a481a2eb8899039eec313acf6433733e679035d6874e380d741c9de816974",
+  "sourceStateSha256": "5704e9f5d1385fe8ce459e3e48d673edd512b65693b4c20536f2a4e07ccb14b7",
+  "sourcePlanSha256": "112da9ae56754d364dcb5a833f976aba09d6ec3ef06471b5ee9f36cea10f0550",
+  "publicPlanSha256": "b8e75584c62ddf7e3d1a467db397a78d0f0fdeba24e4b9e9d140ca4319956b3d",
+  "projection": {
+    "disclosure": "Public config, state, and source excerpts are transformed projections; worker artifacts are byte-preserved.",
+    "transformations": [
+      "Replace the operator home prefix with /Users/[USER]/ in public text fields.",
+      "Replace ephemeral worker roots with deterministic capsule://worker-NN identifiers.",
+      "Collapse the private three-file source capsule into one disclosed public excerpt.",
+      "Remove precomputed verdict/report fields and recompute the portable plan hash and blind labels."
+    ],
+    "bytePreservedArtifactCount": 47
+  },
+  "expected": {
+    "model": "gpt-5.6-sol",
+    "proposalCount": 1,
+    "evaluationCount": 15,
+    "callCount": 16,
+    "armCounts": {
+      "baseline": 5,
+      "challenger": 5,
+      "sham": 5
+    },
+    "pairedTargetWins": 5,
+    "shamWins": 0,
+    "controlRegressions": 0,
+    "proposalTokens": 28368,
+    "evaluationTokens": 413259,
+    "totalTokens": 441627,
+    "promotionEnabled": false,
+    "promotionRecorded": false,
+    "experimentValid": true,
+    "targetFullySolved": false
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "kind": "documentation",
+      "bytes": 1628,
+      "sha256": "ca31a457ad5e5f30f9205babb61d8c6e58fdceaea397f807ad7e7bc0b9c36e91",
+      "sourcePath": null,
+      "sourceSha256": null,
+      "bytePreserved": false
+    },
+    {
+      "path": "canary-inputs.json",
+      "kind": "public-canary-inputs",
+      "bytes": 21152,
+      "sha256": "8fd7facc63b1a3190226fca4e199be0b35d482c985db937798c8ecb7cbf693ce",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/canary.json",
+      "sourceSha256": "562a481a2eb8899039eec313acf6433733e679035d6874e380d741c9de816974",
+      "bytePreserved": false
+    },
+    {
+      "path": "source-evidence/sealed-evidence-excerpts.txt",
+      "kind": "public-source-projection",
+      "bytes": 6084,
+      "sha256": "202458bf66354698869cffdc4b6276061f94e28ae88bfb372add0ed737267b25",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/sealed-evidence-excerpts.txt",
+      "sourceSha256": "205d2829c08dd7403c04e9c6fdeeb14b6f101a240e42a5cea36c8434b291348a",
+      "bytePreserved": false
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p1-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "9a9a115c5123ad2e587d5793da7f716964d5ae860b990557aa19b7c3e79cac12",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p1-evaluation.json",
+      "sourceSha256": "9a9a115c5123ad2e587d5793da7f716964d5ae860b990557aa19b7c3e79cac12",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p1-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "46c304fa716f2775babb10080b11414aa3023a456b0da7209accf7b44f937b74",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p1-final.json",
+      "sourceSha256": "46c304fa716f2775babb10080b11414aa3023a456b0da7209accf7b44f937b74",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p1-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "8be52785f143217c47e41a957f3c8446f0864a33178e6836fd8d18829057c20d",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p1-raw.json",
+      "sourceSha256": "8be52785f143217c47e41a957f3c8446f0864a33178e6836fd8d18829057c20d",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p2-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1954,
+      "sha256": "0081f5f176173329b60a6b0714202da8fed3d261673ae4da392af439658a473a",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p2-evaluation.json",
+      "sourceSha256": "0081f5f176173329b60a6b0714202da8fed3d261673ae4da392af439658a473a",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p2-final.json",
+      "kind": "worker-final",
+      "bytes": 1897,
+      "sha256": "4c6c7811a194788e9509998c0082c769d2202f96909a2a4cca71d428585fa1ef",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p2-final.json",
+      "sourceSha256": "4c6c7811a194788e9509998c0082c769d2202f96909a2a4cca71d428585fa1ef",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p2-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2464,
+      "sha256": "0b6083ccf788e471245e0f9134a49ff116f55be0af004a345867dcac064da650",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p2-raw.json",
+      "sourceSha256": "0b6083ccf788e471245e0f9134a49ff116f55be0af004a345867dcac064da650",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p3-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "afcaf1def03a56a2a0c2d87c6c4824b5aaa1db4ad068ea8602bb7cbf09945f26",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p3-evaluation.json",
+      "sourceSha256": "afcaf1def03a56a2a0c2d87c6c4824b5aaa1db4ad068ea8602bb7cbf09945f26",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p3-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "93583529bf778eea464f4d42e9bc3d79a7bb691a188c277589ddfc898cf3f3ac",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p3-final.json",
+      "sourceSha256": "93583529bf778eea464f4d42e9bc3d79a7bb691a188c277589ddfc898cf3f3ac",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p3-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2426,
+      "sha256": "3238c681b7cc61373109a02ec856d9543d16008f04bf770f3be2abc550dff90b",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r1-p3-raw.json",
+      "sourceSha256": "3238c681b7cc61373109a02ec856d9543d16008f04bf770f3be2abc550dff90b",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p1-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1997,
+      "sha256": "3c78a8bfb26651e33ab58a4e4605abb7bce50b4e87378eb81a866f3b6f8ccec9",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p1-evaluation.json",
+      "sourceSha256": "3c78a8bfb26651e33ab58a4e4605abb7bce50b4e87378eb81a866f3b6f8ccec9",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p1-final.json",
+      "kind": "worker-final",
+      "bytes": 1940,
+      "sha256": "2d8fdde14467224a0e83834b5601b351be915e586b501545d37a4d20d8fa7089",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p1-final.json",
+      "sourceSha256": "2d8fdde14467224a0e83834b5601b351be915e586b501545d37a4d20d8fa7089",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p1-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2509,
+      "sha256": "3bc8358762d746dec554868a55b3a953880620a20d8681698741a9297ae1ecc6",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p1-raw.json",
+      "sourceSha256": "3bc8358762d746dec554868a55b3a953880620a20d8681698741a9297ae1ecc6",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p2-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "7f7a327d570b51ca3a08d390ec05e6d468ddb85b06ea1c12b0cea16896c24d99",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p2-evaluation.json",
+      "sourceSha256": "7f7a327d570b51ca3a08d390ec05e6d468ddb85b06ea1c12b0cea16896c24d99",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p2-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "f8450afc263e1d570adf36ae476354480ef3c6adfebca23453708830fbe52394",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p2-final.json",
+      "sourceSha256": "f8450afc263e1d570adf36ae476354480ef3c6adfebca23453708830fbe52394",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p2-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "d15492729fa2dae7c57f1e36687828196c0f5c2d021e048e25e31ed424d2f601",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p2-raw.json",
+      "sourceSha256": "d15492729fa2dae7c57f1e36687828196c0f5c2d021e048e25e31ed424d2f601",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p3-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "d5fd8a9940fc9d5573beede9152c9b55c005c7bf305f4624508f881f48d35d89",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p3-evaluation.json",
+      "sourceSha256": "d5fd8a9940fc9d5573beede9152c9b55c005c7bf305f4624508f881f48d35d89",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p3-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "0dc8dc88ccd9fe5375ea7e9d98cc9b852f6ddb5f7c5bf2bcb57291b30fd98c90",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p3-final.json",
+      "sourceSha256": "0dc8dc88ccd9fe5375ea7e9d98cc9b852f6ddb5f7c5bf2bcb57291b30fd98c90",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p3-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "bbfd71abab5440c04d3bf8dea0ad51701fce0c4adca72eecfb2de2cbc25d992a",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r2-p3-raw.json",
+      "sourceSha256": "bbfd71abab5440c04d3bf8dea0ad51701fce0c4adca72eecfb2de2cbc25d992a",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p1-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "376159c29e427b7d06f04e1196bafbec9af487512cd1a16c1a8a2e83f365063d",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p1-evaluation.json",
+      "sourceSha256": "376159c29e427b7d06f04e1196bafbec9af487512cd1a16c1a8a2e83f365063d",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p1-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "d5df35eda9bf9c97d135830f59bb7cc17445ddf88addf502ec7b5ca33c98c9d2",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p1-final.json",
+      "sourceSha256": "d5df35eda9bf9c97d135830f59bb7cc17445ddf88addf502ec7b5ca33c98c9d2",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p1-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "5466c72d6b4c7d5733f1bdc34a65c44acd4c85c02cf1704b55cf546ff15c889c",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p1-raw.json",
+      "sourceSha256": "5466c72d6b4c7d5733f1bdc34a65c44acd4c85c02cf1704b55cf546ff15c889c",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p2-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "b43be3eacc01f339b06d762c4aa88860657df933a11b78e01b54e36d30e87874",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p2-evaluation.json",
+      "sourceSha256": "b43be3eacc01f339b06d762c4aa88860657df933a11b78e01b54e36d30e87874",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p2-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "a88f01dcea23d1b17a4e3046c1ae215779ad2f1b40251dc479c6180dad165b45",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p2-final.json",
+      "sourceSha256": "a88f01dcea23d1b17a4e3046c1ae215779ad2f1b40251dc479c6180dad165b45",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p2-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2426,
+      "sha256": "b3ccec8a22560eb20db26588b171c25425c5ab033406dad0daacff0adab5988c",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p2-raw.json",
+      "sourceSha256": "b3ccec8a22560eb20db26588b171c25425c5ab033406dad0daacff0adab5988c",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p3-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 2017,
+      "sha256": "b2bccc449931d5242e6cf62129d31d50c7a1867b4ce1b8c73df853a29999ba07",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p3-evaluation.json",
+      "sourceSha256": "b2bccc449931d5242e6cf62129d31d50c7a1867b4ce1b8c73df853a29999ba07",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p3-final.json",
+      "kind": "worker-final",
+      "bytes": 1960,
+      "sha256": "c572b8e57de0215d174d2f158a6274dba44c6cab0fed90194a034e9430230c10",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p3-final.json",
+      "sourceSha256": "c572b8e57de0215d174d2f158a6274dba44c6cab0fed90194a034e9430230c10",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p3-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2529,
+      "sha256": "69478289ea8ceaca5f2b163400399d8a552271a294da675355c485504c5cfe8d",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r3-p3-raw.json",
+      "sourceSha256": "69478289ea8ceaca5f2b163400399d8a552271a294da675355c485504c5cfe8d",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p1-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "09b46c8422bbb76a6b4acee4ac1c2435e3d28727958b22c9475c5a44cd95e580",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p1-evaluation.json",
+      "sourceSha256": "09b46c8422bbb76a6b4acee4ac1c2435e3d28727958b22c9475c5a44cd95e580",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p1-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "e3ac707dfeda5fc8c700ebce785e7890a3991146b918bebdef4930388b68b4cb",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p1-final.json",
+      "sourceSha256": "e3ac707dfeda5fc8c700ebce785e7890a3991146b918bebdef4930388b68b4cb",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p1-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2426,
+      "sha256": "6e04387cf0318297b9bb483354dcfa66e51267eec547adf533a8a0a00c913f61",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p1-raw.json",
+      "sourceSha256": "6e04387cf0318297b9bb483354dcfa66e51267eec547adf533a8a0a00c913f61",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p2-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "d055f044ae0c4fe6a12c9bff6b2c5e75f35aa336c579fbf04aa831448d23dde1",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p2-evaluation.json",
+      "sourceSha256": "d055f044ae0c4fe6a12c9bff6b2c5e75f35aa336c579fbf04aa831448d23dde1",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p2-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "5262c286e96a01d6a7b75e01fe1fd67d281db5bbec9fad37ea303d0295af7ca8",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p2-final.json",
+      "sourceSha256": "5262c286e96a01d6a7b75e01fe1fd67d281db5bbec9fad37ea303d0295af7ca8",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p2-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "975ba6f27dbe0885275877de54add5fef698f2d74ebdad307beec3fadbcd41cd",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p2-raw.json",
+      "sourceSha256": "975ba6f27dbe0885275877de54add5fef698f2d74ebdad307beec3fadbcd41cd",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p3-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 2017,
+      "sha256": "a93cca3f983f758c66afd8d815320dd8e070c802ff78a35c57e0ccde8ae89302",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p3-evaluation.json",
+      "sourceSha256": "a93cca3f983f758c66afd8d815320dd8e070c802ff78a35c57e0ccde8ae89302",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p3-final.json",
+      "kind": "worker-final",
+      "bytes": 1960,
+      "sha256": "201b6143dd7c893425333dcd15875b2e2f754c79fcbe635b7a96445957f88072",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p3-final.json",
+      "sourceSha256": "201b6143dd7c893425333dcd15875b2e2f754c79fcbe635b7a96445957f88072",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p3-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2529,
+      "sha256": "61d63f7b0dc42d24e1ee4cf97c211ee5a9061c6c953b3ff0d72ab5945e4acffa",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r4-p3-raw.json",
+      "sourceSha256": "61d63f7b0dc42d24e1ee4cf97c211ee5a9061c6c953b3ff0d72ab5945e4acffa",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p1-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1954,
+      "sha256": "706eaea8da7f147dca2fe31c2f57e6a02a3f523a7d3d14cb6da8b1ee93ac7766",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p1-evaluation.json",
+      "sourceSha256": "706eaea8da7f147dca2fe31c2f57e6a02a3f523a7d3d14cb6da8b1ee93ac7766",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p1-final.json",
+      "kind": "worker-final",
+      "bytes": 1897,
+      "sha256": "c7e1565dcf953ceb65f612ebdd76bc2e205823cc701f516eb726a16b73f56a63",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p1-final.json",
+      "sourceSha256": "c7e1565dcf953ceb65f612ebdd76bc2e205823cc701f516eb726a16b73f56a63",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p1-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2466,
+      "sha256": "72fbb1dd6ed6c017884c7e9518b6c6145b1b5506b9ad8269ff6fee7325d6c4fc",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p1-raw.json",
+      "sourceSha256": "72fbb1dd6ed6c017884c7e9518b6c6145b1b5506b9ad8269ff6fee7325d6c4fc",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p2-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "2cc523a1858ad6df08dd4b713bc8e3fc019ce9dea088804a232c59b4d5929fa3",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p2-evaluation.json",
+      "sourceSha256": "2cc523a1858ad6df08dd4b713bc8e3fc019ce9dea088804a232c59b4d5929fa3",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p2-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "b08405bc6fcf6edc1b29d1377a0fa6eec3f569b966645a00624747fe035a21fc",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p2-final.json",
+      "sourceSha256": "b08405bc6fcf6edc1b29d1377a0fa6eec3f569b966645a00624747fe035a21fc",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p2-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "01c91e32e9b3f4310be60393c0d42519bef0aad178b1828ae0797c30d8a90d05",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p2-raw.json",
+      "sourceSha256": "01c91e32e9b3f4310be60393c0d42519bef0aad178b1828ae0797c30d8a90d05",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p3-evaluation.json",
+      "kind": "evaluation",
+      "bytes": 1908,
+      "sha256": "b2639afbffa259a51d72f72bc926f61433913096edd257176f7a7f7b4df20ec3",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p3-evaluation.json",
+      "sourceSha256": "b2639afbffa259a51d72f72bc926f61433913096edd257176f7a7f7b4df20ec3",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p3-final.json",
+      "kind": "worker-final",
+      "bytes": 1859,
+      "sha256": "224ed0372a3934d5a3e5105caadeefb2ba568630c32549653bee450f8c4ef65b",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p3-final.json",
+      "sourceSha256": "224ed0372a3934d5a3e5105caadeefb2ba568630c32549653bee450f8c4ef65b",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p3-raw.json",
+      "kind": "worker-raw",
+      "bytes": 2427,
+      "sha256": "c7568b3034bd2b0909ab6bdc49faa14b0d186f1b129288bec0edc919a743513f",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/eval-r5-p3-raw.json",
+      "sourceSha256": "c7568b3034bd2b0909ab6bdc49faa14b0d186f1b129288bec0edc919a743513f",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/proposal-final.json",
+      "kind": "worker-final",
+      "bytes": 4872,
+      "sha256": "157f9c34d0dc33f22f38c3adabd060cae22df66676582688101b5785d28a7816",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/proposal-final.json",
+      "sourceSha256": "157f9c34d0dc33f22f38c3adabd060cae22df66676582688101b5785d28a7816",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/artifacts/proposal-raw.json",
+      "kind": "worker-raw",
+      "bytes": 5297,
+      "sha256": "0fa6a54b77967b642fc7ecac8945f36fc7aba7168e31bfc8be1373c32431ca06",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/artifacts/proposal-raw.json",
+      "sourceSha256": "0fa6a54b77967b642fc7ecac8945f36fc7aba7168e31bfc8be1373c32431ca06",
+      "bytePreserved": true
+    },
+    {
+      "path": "state/runs/context-isolation-canary-20260719/state.json",
+      "kind": "public-state-projection",
+      "bytes": 66511,
+      "sha256": "158b79110250b09e86c676ed8df81b9819e7b04ae74fa877c9b557836e60900b",
+      "sourcePath": "proof/real-test/context-isolation-canary-20260719/state/runs/context-isolation-canary-20260719/state.json",
+      "sourceSha256": "5704e9f5d1385fe8ce459e3e48d673edd512b65693b4c20536f2a4e07ccb14b7",
+      "bytePreserved": false
+    }
+  ]
+}

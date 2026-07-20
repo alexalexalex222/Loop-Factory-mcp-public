@@ -1,0 +1,74 @@
+{
+  "task": "[OPERATOR_SUPPLIED_TASK]",
+  "routes": [
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol"
+  ],
+  "remineOnEmpty": false,
+  "evidenceSources": [
+    "[REPOSITORY_RELATIVE_EVIDENCE_PATH]",
+    "src/supervisor.mjs",
+    "src/real-test.mjs",
+    "test/real-test.test.mjs"
+  ],
+  "benchmark": {
+    "name": "[OPERATOR_SUPPLIED_BENCHMARK_NAME]",
+    "taskValueDimensions": [
+      "[REAL_TASK_VALUE_DIMENSION]",
+      "evidence_quality"
+    ],
+    "resourceDimensions": [
+      "tokenCost"
+    ],
+    "cases": [
+      {
+        "id": "working",
+        "prompt": "[OPERATOR_SUPPLIED_WORKING_CASE]"
+      },
+      {
+        "id": "boundary",
+        "prompt": "[OPERATOR_SUPPLIED_BOUNDARY_CASE]"
+      }
+    ],
+    "oracle": {
+      "kind": "case-results-v2",
+      "passMark": 1,
+      "cases": [
+        {
+          "caseId": "working",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ]
+        },
+        {
+          "caseId": "boundary",
+          "accepted": false,
+          "code": "[EXPECTED_CODE]",
+          "requiredEvidencePaths": [
+            "[REPOSITORY_RELATIVE_EVIDENCE_PATH]"
+          ]
+        }
+      ]
+    },
+    "negativeControl": {
+      "content": "[OPERATOR_SUPPLIED_FAILING_NEGATIVE_CONTROL]",
+      "passMark": 0.6
+    },
+    "routeIndependence": "required",
+    "requiredRoutes": 3,
+    "outputClass": "prose"
+  },
+  "targets": [
+    {
+      "kind": "mine",
+      "routes": [
+        "gpt-5.6-sol",
+        "gpt-5.6-sol",
+        "gpt-5.6-sol"
+      ]
+    }
+  ]
+}

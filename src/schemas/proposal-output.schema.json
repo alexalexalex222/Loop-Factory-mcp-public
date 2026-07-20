@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "findingId",
+    "hypothesisId",
+    "baselineSha256",
+    "revisedContent",
+    "changeSummary"
+  ],
+  "properties": {
+    "findingId": { "type": "string", "pattern": "^finding-[0-9]{3}$" },
+    "hypothesisId": { "type": "string", "minLength": 5 },
+    "baselineSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "revisedContent": { "type": "string", "minLength": 120 },
+    "changeSummary": { "type": "string", "minLength": 24 }
+  }
+}

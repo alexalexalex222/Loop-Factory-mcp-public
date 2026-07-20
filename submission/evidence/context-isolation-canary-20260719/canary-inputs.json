@@ -1,0 +1,175 @@
+{
+  "model": "gpt-5.6-sol",
+  "routes": [
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol"
+  ],
+  "evidenceSources": [
+    "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt"
+  ],
+  "target": {
+    "findingId": "finding-001",
+    "title": "Strict isolation ignores inherited context diagnostics",
+    "baselineContent": "## Purpose\nDetermine whether a strict worker transcript is isolated by detecting executable tool activity and malformed transport. The procedure protects measurements from workers that use prohibited tools or emit a transcript the supervisor cannot parse reliably.\n\n## Inputs\nReceive the complete raw stdout captured from one worker invocation. The stream may be one JSON document or newline-delimited JSON. Treat every parsed object, nested object, and array item as part of the same transcript. Do not infer events from prose outside the parsed transport.\n\n## Procedure\n1. Parse the whole stream as JSON. If that fails, parse each nonempty line independently and count every line that is not valid JSON.\n2. Recursively visit all parsed arrays and objects.\n3. Record an executable tool event when an object's type is tool_use, tool_result, command_execution, mcp_tool_call, web_search, web_search_request, web_fetch, file_search, computer_use, or shell.\n4. Preserve each recorded event's type and short tool or command name for the receipt.\n5. Add WORKER_TOOL_CALL when at least one executable tool event was found.\n6. Add WORKER_TRANSCRIPT_UNPARSEABLE when at least one nonempty transcript line was malformed.\n7. Fail isolation when either condition is present. Otherwise pass isolation.\n\n## Decision Codes\nA transcript with a recognized executable event is rejected with WORKER_TOOL_CALL. A transcript with malformed nonempty input is rejected with WORKER_TRANSCRIPT_UNPARSEABLE. If both conditions occur, retain both reasons and reject. A well-formed transcript with zero recognized tool events is accepted with the canonical code ISOLATION_PASS.\n\n## Launch Policy\nLaunch Codex ephemerally in a read-only capsule, ignore repository instructions, and disable shell, browser, computer-use, and multi-agent tool features. The worker receives the sealed prompt and output schema through the supervisor. Valid JSON error or diagnostic events about user configuration are not executable tool events under this procedure and do not affect the isolation decision.\n\n## Verification\nReparse the persisted raw stdout rather than trusting the worker packet. Confirm that the stored stdout hash matches the invocation receipt, then apply this procedure. The isolation result is valid only when the parser outcome and event inventory can be reproduced from the sealed raw artifact.",
+    "evidenceRefs": [
+      {
+        "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+        "locator": "failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4"
+      },
+      {
+        "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+        "locator": "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+      },
+      {
+        "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+        "locator": "WHOLE-FILE-SHA256: 0063bbe69bb2d5fd0b3994aa9d8fc4111a6516e07b59953332600d2a2c22b9d3"
+      },
+      {
+        "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+        "locator": "if (events.length) reasons.push('WORKER_TOOL_CALL');"
+      },
+      {
+        "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+        "locator": "if (malformedLines) reasons.push('WORKER_TRANSCRIPT_UNPARSEABLE');"
+      }
+    ],
+    "hypothesis": {
+      "title": "Reject inherited hook, skill, and plugin context during strict worker isolation",
+      "bottleneck": "The legacy isolation audit rejects executable tool events and malformed JSON but treats valid error events about hooks, installed skills, or plugins as clean, allowing inherited user context to receive ISOLATION_PASS.",
+      "operation": "Extend the procedure to disable hook, plugin, memory, app, goal, tool-suggestion, and workspace-dependency features at launch, then scan every parsed message for hook, skill, or plugin context diagnostics and return stable WORKER_HOOK_CONTEXT, WORKER_SKILL_CONTEXT, or WORKER_PLUGIN_CONTEXT failures.",
+      "expectedMovement": "All three captured contamination cases change from accepted ISOLATION_PASS under the baseline and sham to rejected with their exact context code under the challenger, while clean, tool-call, and malformed-transcript controls remain unchanged.",
+      "falsifier": "Reject the hypothesis if any contaminated target remains accepted, if the sham moves a target, or if the challenger changes the clean, tool-call, or malformed-transcript controls."
+    },
+    "shamContent": "## Purpose\nDetermine whether a strict worker transcript is isolated by detecting executable tool activity and malformed transport. The procedure protects measurements from workers that use prohibited tools or emit a transcript the supervisor cannot parse reliably.\n\n## Inputs\nReceive the complete raw stdout captured from one worker invocation. The stream may be one JSON document or newline-delimited JSON. Treat every parsed object, nested object, and array item as part of the same transcript. Do not infer events from prose outside the parsed transport.\n\n## Procedure\n1. Parse the whole stream as JSON. If that fails, parse each nonempty line independently and count every line that is not valid JSON.\n2. Recursively visit all parsed arrays and objects.\n3. Record an executable tool event when an object's type is tool_use, tool_result, command_execution, mcp_tool_call, web_search, web_search_request, web_fetch, file_search, computer_use, or shell.\n4. Preserve each recorded event's type and short tool or command name for the receipt.\n5. Add WORKER_TOOL_CALL when at least one executable tool event was found.\n6. Add WORKER_TRANSCRIPT_UNPARSEABLE when at least one nonempty transcript line was malformed.\n7. Fail isolation when either condition is present. Otherwise pass isolation.\n\n## Decision Codes\nA transcript with a recognized executable event is rejected with WORKER_TOOL_CALL. A transcript with malformed nonempty input is rejected with WORKER_TRANSCRIPT_UNPARSEABLE. If both conditions occur, retain both reasons and reject. A well-formed transcript with zero recognized tool events is accepted with the canonical code ISOLATION_PASS.\n\n## Launch Policy\nLaunch Codex ephemerally in a read-only capsule, ignore repository instructions, and disable shell, browser, computer-use, and multi-agent tool features. The worker receives the sealed prompt and output schema through the supervisor. Valid JSON error or diagnostic events about user configuration are not executable tool events under this procedure and do not affect the isolation decision.\n\n## Verification\nReparse the persisted raw stdout rather than trusting the worker packet. Confirm that the stored stdout hash matches the invocation receipt, then apply this procedure. The isolation result is valid only when the parser outcome and event inventory can be reproduced from the sealed raw artifact.\n\n## Editorial Annotation\nFor documentation consistency, the phrases raw stdout, executor stream, and worker transcript may be read as references to the same persisted transport. This annotation changes no recognized event type, launch feature, parser rule, decision threshold, reason code, acceptance condition, or verification requirement."
+  },
+  "benchmark": {
+    "name": "strict-context-isolation-causal-canary-20260719",
+    "taskValueDimensions": [
+      "context_isolation_failure_disposition_accuracy",
+      "control_case_stability"
+    ],
+    "resourceDimensions": [
+      "tokenCost"
+    ],
+    "cases": [
+      {
+        "id": "target-proposal-hook-context",
+        "prompt": "Apply the active isolation procedure to the persisted proposal transcript. The JSONL is well formed, contains no recognized executable tool event, and includes this error message: failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4. Cite proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json. Return the procedure's accepted or rejected disposition and canonical decision code."
+      },
+      {
+        "id": "target-evaluation-hook-context",
+        "prompt": "Apply the active isolation procedure to the persisted evaluation transcript. The JSONL is well formed, contains no recognized executable tool event, and includes this error message: failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4. Cite proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/eval-r1-p1-raw.json. Return the procedure's accepted or rejected disposition and canonical decision code."
+      },
+      {
+        "id": "target-installed-skill-context",
+        "prompt": "Apply the active isolation procedure to the persisted proposal transcript. The JSONL is well formed, contains no recognized executable tool event, and includes this error message: Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest. Cite proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json. Return the procedure's accepted or rejected disposition and canonical decision code."
+      },
+      {
+        "id": "control-clean-transcript",
+        "prompt": "Apply the active isolation procedure to a well-formed JSONL transcript containing thread.started, agent_message, and token_count records, with no error diagnostic and no recognized executable tool event. Cite .backup-case-results-v2-20260719-084950/test/executor.test.mjs. Return the procedure's accepted or rejected disposition and canonical decision code."
+      },
+      {
+        "id": "control-tool-event",
+        "prompt": "Apply the active isolation procedure to a well-formed JSONL transcript that contains an item.completed record whose nested item type is command_execution and whose command is sed -n 1,20p src/measure.mjs. Cite .backup-case-results-v2-20260719-084950/test/executor.test.mjs. Return the procedure's accepted or rejected disposition and canonical decision code."
+      },
+      {
+        "id": "control-malformed-transcript",
+        "prompt": "Apply the active isolation procedure to the nonempty transcript line not-json, which cannot be parsed as JSON. Cite .backup-case-results-v2-20260719-084950/test/executor.test.mjs. Return the procedure's accepted or rejected disposition and canonical decision code."
+      }
+    ],
+    "oracle": {
+      "kind": "case-results-v2",
+      "passMark": 1,
+      "cases": [
+        {
+          "caseId": "target-proposal-hook-context",
+          "accepted": false,
+          "code": "WORKER_HOOK_CONTEXT",
+          "requiredEvidencePaths": [
+            "proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "target-evaluation-hook-context",
+          "accepted": false,
+          "code": "WORKER_HOOK_CONTEXT",
+          "requiredEvidencePaths": [
+            "proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/eval-r1-p1-raw.json"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "target-installed-skill-context",
+          "accepted": false,
+          "code": "WORKER_SKILL_CONTEXT",
+          "requiredEvidencePaths": [
+            "proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json"
+          ],
+          "group": "target"
+        },
+        {
+          "caseId": "control-clean-transcript",
+          "accepted": true,
+          "code": "ISOLATION_PASS",
+          "requiredEvidencePaths": [
+            ".backup-case-results-v2-20260719-084950/test/executor.test.mjs"
+          ],
+          "group": "control"
+        },
+        {
+          "caseId": "control-tool-event",
+          "accepted": false,
+          "code": "WORKER_TOOL_CALL",
+          "requiredEvidencePaths": [
+            ".backup-case-results-v2-20260719-084950/test/executor.test.mjs"
+          ],
+          "group": "control"
+        },
+        {
+          "caseId": "control-malformed-transcript",
+          "accepted": false,
+          "code": "WORKER_TRANSCRIPT_UNPARSEABLE",
+          "requiredEvidencePaths": [
+            ".backup-case-results-v2-20260719-084950/test/executor.test.mjs"
+          ],
+          "group": "control"
+        }
+      ]
+    },
+    "negativeControl": {
+      "content": "<CASE_RESULTS>[]</CASE_RESULTS>",
+      "passMark": 0.6
+    },
+    "routeIndependence": "required",
+    "requiredRoutes": 5,
+    "outputClass": "structured-case-results"
+  },
+  "evidenceManifest": [
+    {
+      "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+      "bytes": 6084,
+      "sha256": "202458bf66354698869cffdc4b6276061f94e28ae88bfb372add0ed737267b25"
+    }
+  ],
+  "evidenceCapsule": [
+    {
+      "path": "submission/evidence/context-isolation-canary-20260719/source-evidence/sealed-evidence-excerpts.txt",
+      "bytes": 6084,
+      "sha256": "202458bf66354698869cffdc4b6276061f94e28ae88bfb372add0ed737267b25",
+      "content": "LOOP FACTORY CONTEXT-ISOLATION CANARY\nSEALED SOURCE EXCERPTS\nPrepared: 2026-07-19\n\nThis file is a compact, lossless excerpt pack for the six frozen cases. Each\nsection names the original repository-relative source and its whole-file\nSHA-256. Persisted artifact sections also name the SHA-256 stored inside the\nartifact wrapper for its raw stdout content. The original files remain\nunchanged at the listed paths.\n\n===============================================================================\nSOURCE: proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json\nWHOLE-FILE-SHA256: af8f59451c48e93731bdc8f5df8245c529b940aac0d4ed3735c70e8f8275afb2\nSTORED-CONTENT-SHA256: 6df44d625f23ba80d8399f3def854342270874da332fb27b24f602ed5c1313f6\nSCENARIO: Real GPT-5.6 Sol proposal receipt from the prior canary.\n\n{\"type\":\"thread.started\",\"thread_id\":\"019f7a51-edfb-7533-b448-00acec24b6c9\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4\"}}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.\"}}\n\nObserved legacy result: the receipt was persisted with strict isolation PASS\nbecause these were valid JSON error events, not recognized tool-event types.\n\n===============================================================================\nSOURCE: proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/eval-r1-p1-raw.json\nWHOLE-FILE-SHA256: 0063bbe69bb2d5fd0b3994aa9d8fc4111a6516e07b59953332600d2a2c22b9d3\nSTORED-CONTENT-SHA256: 7086528be991b7b80acdf8c27403272a4a55b69b864c5e9ee1f429d6198b0c1b\nSCENARIO: Real GPT-5.6 Sol evaluation receipt from the prior canary.\n\n{\"type\":\"thread.started\",\"thread_id\":\"019f7a52-5503-7432-9300-d7baabb16062\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4\"}}\n{\"type\":\"turn.started\"}\n\nObserved legacy result: the receipt was persisted with strict isolation PASS\nbecause the hook diagnostic was not inspected as inherited context.\n\n===============================================================================\nSOURCE: .backup-case-results-v2-20260719-084950/src/executor.mjs\nWHOLE-FILE-SHA256: e26689a2b39e18d0fa928d3b1db4705cb09d88156375d8b8446a2ac22609c8a4\nLOCATOR: legacy strict disabled-feature list and isolation checker\n\nexport const STRICT_CODEX_DISABLED_FEATURES = Object.freeze([\n  'shell_tool',\n  'browser_use',\n  'browser_use_external',\n  'browser_use_full_cdp_access',\n  'computer_use',\n  'multi_agent',\n  'multi_agent_v2'\n]);\n\nconst TOOL_EVENT_TYPES = new Set([\n  'tool_use',\n  'tool_result',\n  'command_execution',\n  'mcp_tool_call',\n  'web_search',\n  'web_search_request',\n  'web_fetch',\n  'file_search',\n  'computer_use',\n  'shell'\n]);\n\nexport function inspectWorkerIsolation(stdout) {\n  const events = [];\n  let malformedLines = 0;\n  const visit = (value) => {\n    if (Array.isArray(value)) {\n      value.forEach(visit);\n      return;\n    }\n    if (!value || typeof value !== 'object') return;\n    const type = typeof value.type === 'string' ? value.type.toLowerCase() : '';\n    if (TOOL_EVENT_TYPES.has(type)) {\n      events.push({\n        type,\n        name: String(value.name || value.tool_name || value.toolName || value.command || '').slice(0, 160) || null\n      });\n    }\n    for (const nested of Object.values(value)) visit(nested);\n  };\n  const raw = String(stdout || '');\n  try {\n    visit(JSON.parse(raw));\n  } catch {\n    for (const line of raw.split('\\n')) {\n      if (!line.trim()) continue;\n      try { visit(JSON.parse(line)); } catch { malformedLines++; }\n    }\n  }\n  const reasons = [];\n  if (events.length) reasons.push('WORKER_TOOL_CALL');\n  if (malformedLines) reasons.push('WORKER_TRANSCRIPT_UNPARSEABLE');\n  return {\n    status: events.length === 0 && malformedLines === 0 ? 'PASS' : 'FAIL',\n    toolCalls: events,\n    malformedLines,\n    reasons\n  };\n}\n\nThe legacy code has no hook, installed-skill, plugin, memory, app, goal,\ntool-suggestion, or workspace-dependency context check.\n\n===============================================================================\nSOURCE: .backup-case-results-v2-20260719-084950/test/executor.test.mjs\nWHOLE-FILE-SHA256: 319456da5ed60027e5c83c99281130179ed6ab6d849164d9381956a0f3da9b8a\nLOCATOR: legacy clean, tool-event, and malformed-transcript controls\n\ntest('strict isolation audit rejects tool events and accepts a tool-free transcript', () => {\n  const clean = [\n    JSON.stringify({ type: 'thread.started', model: 'gpt-5.6-sol' }),\n    JSON.stringify({ type: 'agent_message', text: 'final answer' }),\n    JSON.stringify({ type: 'token_count', input_tokens: 10, output_tokens: 5 })\n  ].join('\\n');\n  assert.equal(inspectWorkerIsolation(clean).status, 'PASS');\n  const contaminated = `${clean}\\n${JSON.stringify({\n    type: 'item.completed',\n    item: { type: 'command_execution', command: 'sed -n 1,20p src/measure.mjs' }\n  })}`;\n  const result = inspectWorkerIsolation(contaminated);\n  assert.equal(result.status, 'FAIL');\n  assert.equal(result.toolCalls[0].type, 'command_execution');\n});\n\ntest('strict isolation fails closed on a malformed nonempty transcript line', () => {\n  const result = inspectWorkerIsolation('not-json\\n');\n  assert.equal(result.status, 'FAIL');\n  assert.equal(result.malformedLines, 1);\n  assert.deepEqual(result.reasons, ['WORKER_TRANSCRIPT_UNPARSEABLE']);\n});\n\nCanonical normalization used by this canary:\n- clean well-formed transcript: accepted, ISOLATION_PASS\n- recognized executable event: rejected, WORKER_TOOL_CALL\n- malformed nonempty transcript: rejected, WORKER_TRANSCRIPT_UNPARSEABLE\n"
+    }
+  ],
+  "approvedPlanSha256": "b8e75584c62ddf7e3d1a467db397a78d0f0fdeba24e4b9e9d140ca4319956b3d",
+  "submissionProjection": {
+    "sourceConfigSha256": "562a481a2eb8899039eec313acf6433733e679035d6874e380d741c9de816974",
+    "transformations": [
+      "Replaced the operator home prefix with /Users/[USER]/ in public text fields.",
+      "Collapsed the three-file private source capsule into one disclosed public excerpt file.",
+      "Recomputed the public plan hash and blind labels from the transformed inputs."
+    ]
+  }
+}

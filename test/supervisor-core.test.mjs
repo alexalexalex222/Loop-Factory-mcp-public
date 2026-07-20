@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   MISSING_FULL_PRIVATE_LOOPS, requireFullLoops, compilePhaseContract,
   validateWorkerPacket, dispatchWorker, runFullTestBatch, runSupervisedCampaign,
-  parseCandidates, parseJudgeVerdict, parseWorkerPacket
+  parseCandidates, parseJudgeVerdict, parseWorkerPacket, standardSupervisorHypotheses
 } from '../src/supervisor.mjs';
 import { loadLoop } from '../src/loops.mjs';
 import { DEFAULT_QUALITY_ORACLE, buildMeasuredContent } from '../src/measure.mjs';
@@ -169,7 +169,7 @@ test('an invalid worker makes the whole batch invalid and it does NOT count', ()
 
 // ---- continuous campaign behaviors --------------------------------------
 test('improve campaign measures baseline first, then QUEUES a measured win for operator approval (Step 2: no auto-promotion)', () => {
-  const { engine } = freshEngine();
+  const { engine, store } = freshEngine();
   const r = runSupervisedCampaign(engine, {
     runId: 'c-win', task: 'improve the loop',
     targets: [{ kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, benchmark, routes: ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2'] }]
@@ -183,6 +183,31 @@ test('improve campaign measures baseline first, then QUEUES a measured win for o
   assert.ok(steps.indexOf('baseline_measured') < steps.indexOf('full_test_batch'), 'baseline measured BEFORE any challenger batch');
   assert.ok(steps.includes('promotion_queued'), 'the measured win is queued to the dashboard for operator Approve');
   assert.ok(!steps.includes('stone_banked'), 'the supervisor does not bank a Stone without operator approval');
+  const child = store.load('c-win-t1');
+  assert.ok(child.hypotheses.every((item) => (
+    item.title !== 'h0'
+    && item.bottleneck !== 'b'
+    && item.operation !== 'o'
+    && item.expectedMovement
+    && item.falsifier
+  )));
+});
+
+test('standard supervisor hypotheses are substantive and route-bound before any worker runs', () => {
+  const hypotheses = standardSupervisorHypotheses(
+    { loop: 'loop-de-loop' },
+    ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2'],
+    'Improve phase integrity without raising benchmark cost.'
+  );
+  assert.equal(hypotheses.length, 3);
+  assert.deepEqual(hypotheses.map((item) => item.route.model), ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2']);
+  assert.ok(hypotheses.every((item) => (
+    item.title.length > 20
+    && item.bottleneck.length > 80
+    && item.operation.length > 80
+    && item.expectedMovement.length > 60
+    && item.falsifier.length > 60
+  )));
 });
 
 test('Strip Miner saturation auto-transitions (phase edge, NOT completion)', () => {
@@ -197,6 +222,210 @@ test('Strip Miner saturation auto-transitions (phase edge, NOT completion)', () 
   // saturation did NOT stop the campaign — it proceeded to the improve target
   assert.ok(r.transcript.some((t) => t.step === 'baseline_measured'));
   assert.doesNotMatch(r.stoppedBy, /saturat|complete/i);
+});
+
+test('remineOnEmpty enters zero-inference idle after one accepted empty mining pass', () => {
+  const { engine } = freshEngine();
+  let workerCalls = 0;
+  const r = runSupervisedCampaign(engine, {
+    runId: 'c-idle-empty',
+    task: 'mine',
+    routes: ['claude-opus-4-8'],
+    remineOnEmpty: true,
+    targets: [{ kind: 'mine', routes: ['claude-opus-4-8'], benchmark }]
+  }, {
+    worker: (contract) => {
+      workerCalls++;
+      return {
+        route: contract.route,
+        artifacts: [{ role: 'runlog', content: 'no novel candidates' }],
+        finalOutput: 'no novel candidates',
+        candidates: []
+      };
+    },
+    maxBatches: 10
+  });
+
+  assert.equal(workerCalls, 1, 'accepted saturation must not launch another paid mining call');
+  assert.equal(r.status, 'OK');
+  assert.equal(r.idle, true);
+  assert.equal(r.idleReason, 'NO_CANDIDATES');
+  assert.equal(r.campaignContinues, true);
+  assert.equal(r.stoppedBy, 'idle-no-new-work (NOT completion)');
+  assert.equal(r.transcript.filter((entry) => entry.step === 'campaign_idle').length, 1);
+});
+
+test('idle polling keeps the scheduler alive without making another worker call', () => {
+  const { engine } = freshEngine();
+  let workerCalls = 0;
+  let idlePolls = 0;
+  let stopped = false;
+  const r = runSupervisedCampaign(engine, {
+    runId: 'c-idle-poll',
+    task: 'mine',
+    routes: ['claude-opus-4-8'],
+    remineOnEmpty: true,
+    targets: [{ kind: 'mine', routes: ['claude-opus-4-8'], benchmark }]
+  }, {
+    worker: (contract) => {
+      workerCalls++;
+      return {
+        route: contract.route,
+        artifacts: [{ role: 'runlog', content: 'saturated once' }],
+        finalOutput: 'saturated once',
+        candidates: []
+      };
+    },
+    idleWait: () => {
+      idlePolls++;
+      if (idlePolls === 3) stopped = true;
+      return null;
+    },
+    stopCheck: () => stopped,
+    maxBatches: 10
+  });
+
+  assert.equal(workerCalls, 1, 'idle polls are scheduler work, not model work');
+  assert.equal(idlePolls, 3);
+  assert.equal(r.stoppedBy, 'operator-stop');
+  assert.equal(r.transcript.filter((entry) => entry.step === 'campaign_idle').length, 1);
+});
+
+test('a new target wakes an idle campaign and resumes automatically', () => {
+  const { engine } = freshEngine();
+  let miningCalls = 0;
+  let idlePolls = 0;
+  let stopped = false;
+  const worker = (contract) => {
+    if (contract.kind === 'mine') {
+      miningCalls++;
+      return {
+        route: contract.route,
+        artifacts: [{ role: 'runlog', content: 'saturated mining pass' }],
+        finalOutput: 'saturated mining pass',
+        candidates: []
+      };
+    }
+    if (contract.kind === 'baseline') return okPacket(contract.route, buildMeasuredContent(1000, 0.70));
+    return okPacket(contract.route, buildMeasuredContent(1000, 0.70));
+  };
+  const r = runSupervisedCampaign(engine, {
+    runId: 'c-idle-wake',
+    task: 'improve',
+    routes: ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2'],
+    remineOnEmpty: true,
+    noImprovePolicy: 1,
+    targets: [{ kind: 'mine', routes: ['claude-opus-4-8'], benchmark }]
+  }, {
+    worker,
+    idleWait: () => {
+      idlePolls++;
+      if (idlePolls === 1) {
+        return {
+          sourceSha256: 'a'.repeat(64),
+          archivedAs: 'inbox-targets.applied-test.json',
+          targets: [{
+            kind: 'improve',
+            loop: 'loop-de-loop',
+            baselineContent: BASELINE_BODY,
+            benchmark,
+            routes: ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2']
+          }]
+        };
+      }
+      stopped = true;
+      return null;
+    },
+    stopCheck: () => stopped,
+    maxBatches: 10
+  });
+
+  assert.equal(miningCalls, 2, 'one initial mine plus one fresh-epoch mine after improvement');
+  assert.ok(r.transcript.some((entry) => entry.step === 'campaign_wake' && entry.count === 1));
+  assert.ok(r.transcript.some((entry) => entry.step === 'baseline_measured'));
+  assert.equal(r.stoppedBy, 'operator-stop');
+});
+
+test('repeated mined candidates are deduplicated and cannot restart the same branch forever', () => {
+  const { engine } = freshEngine();
+  let miningCalls = 0;
+  const worker = (contract) => {
+    if (contract.kind === 'mine') {
+      miningCalls++;
+      return {
+        route: contract.route,
+        artifacts: [{ role: 'runlog', content: `same candidate phrasing ${miningCalls}` }],
+        finalOutput: `same candidate phrasing ${miningCalls}`,
+        candidates: [{
+          loop: 'loop-de-loop',
+          title: miningCalls === 1 ? 'same-candidate' : 'paraphrased presentation of the same candidate',
+          baselineContent: miningCalls === 1
+            ? BASELINE_BODY
+            : BASELINE_BODY.replace(/\n/g, '\n  '),
+          hypotheses: [{
+            title: `presentation-only hypothesis ${miningCalls}`,
+            operation: `word the same work differently ${miningCalls}`
+          }]
+        }]
+      };
+    }
+    if (contract.kind === 'baseline') return okPacket(contract.route, buildMeasuredContent(1000, 0.70));
+    return okPacket(contract.route, buildMeasuredContent(1000, 0.70));
+  };
+  const r = runSupervisedCampaign(engine, {
+    runId: 'c-idle-duplicate',
+    task: 'improve',
+    routes: ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2'],
+    remineOnEmpty: true,
+    noImprovePolicy: 1,
+    targets: [{ kind: 'mine', routes: ['claude-opus-4-8'], benchmark }]
+  }, { worker, maxBatches: 10 });
+
+  assert.equal(miningCalls, 2, 'the duplicate mining result is observed once, then retired');
+  assert.equal(r.idle, true);
+  assert.equal(r.idleReason, 'DUPLICATE_CANDIDATES');
+  assert.equal(r.transcript.filter((entry) => entry.step === 'baseline_measured').length, 1);
+  assert.ok(r.transcript.some((entry) => entry.step === 'mine_candidates_deduplicated' && entry.count === 1));
+});
+
+test('mining cannot rediscover and rerun an improve target already queued by the operator', () => {
+  const { engine } = freshEngine();
+  let miningCalls = 0;
+  const worker = (contract) => {
+    if (contract.kind === 'mine') {
+      miningCalls++;
+      return {
+        route: contract.route,
+        artifacts: [{ role: 'runlog', content: 'rediscovered configured target' }],
+        finalOutput: 'rediscovered configured target',
+        candidates: [{
+          loop: 'loop-de-loop',
+          title: 'renamed-but-identical-target',
+          baselineContent: BASELINE_BODY
+        }]
+      };
+    }
+    if (contract.kind === 'baseline') return okPacket(contract.route, buildMeasuredContent(1000, 0.70));
+    return okPacket(contract.route, buildMeasuredContent(1000, 0.70));
+  };
+  const r = runSupervisedCampaign(engine, {
+    runId: 'c-idle-configured-duplicate',
+    task: 'improve',
+    routes: ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2'],
+    remineOnEmpty: true,
+    noImprovePolicy: 1,
+    targets: [{
+      kind: 'improve',
+      loop: 'loop-de-loop',
+      baselineContent: BASELINE_BODY,
+      benchmark,
+      routes: ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2']
+    }]
+  }, { worker, maxBatches: 10 });
+
+  assert.equal(miningCalls, 1);
+  assert.equal(r.idleReason, 'DUPLICATE_CANDIDATES');
+  assert.equal(r.transcript.filter((entry) => entry.step === 'baseline_measured').length, 1);
 });
 
 test('branch retirement pivots to the next target instead of stopping the campaign', () => {

@@ -1,0 +1,138 @@
+LOOP FACTORY CONTEXT-ISOLATION CANARY
+SEALED SOURCE EXCERPTS
+Prepared: 2026-07-19
+
+This file is a compact, lossless excerpt pack for the six frozen cases. Each
+section names the original repository-relative source and its whole-file
+SHA-256. Persisted artifact sections also name the SHA-256 stored inside the
+artifact wrapper for its raw stdout content. The original files remain
+unchanged at the listed paths.
+
+===============================================================================
+SOURCE: proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json
+WHOLE-FILE-SHA256: af8f59451c48e93731bdc8f5df8245c529b940aac0d4ed3735c70e8f8275afb2
+STORED-CONTENT-SHA256: 6df44d625f23ba80d8399f3def854342270874da332fb27b24f602ed5c1313f6
+SCENARIO: Real GPT-5.6 Sol proposal receipt from the prior canary.
+
+{"type":"thread.started","thread_id":"019f7a51-edfb-7533-b448-00acec24b6c9"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."}}
+
+Observed legacy result: the receipt was persisted with strict isolation PASS
+because these were valid JSON error events, not recognized tool-event types.
+
+===============================================================================
+SOURCE: proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/eval-r1-p1-raw.json
+WHOLE-FILE-SHA256: 0063bbe69bb2d5fd0b3994aa9d8fc4111a6516e07b59953332600d2a2c22b9d3
+STORED-CONTENT-SHA256: 7086528be991b7b80acdf8c27403272a4a55b69b864c5e9ee1f429d6198b0c1b
+SCENARIO: Real GPT-5.6 Sol evaluation receipt from the prior canary.
+
+{"type":"thread.started","thread_id":"019f7a52-5503-7432-9300-d7baabb16062"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"failed to parse hooks config /Users/[USER]/.codex/hooks.json: invalid type: map, expected a sequence at line 3 column 4"}}
+{"type":"turn.started"}
+
+Observed legacy result: the receipt was persisted with strict isolation PASS
+because the hook diagnostic was not inspected as inherited context.
+
+===============================================================================
+SOURCE: .backup-case-results-v2-20260719-084950/src/executor.mjs
+WHOLE-FILE-SHA256: e26689a2b39e18d0fa928d3b1db4705cb09d88156375d8b8446a2ac22609c8a4
+LOCATOR: legacy strict disabled-feature list and isolation checker
+
+export const STRICT_CODEX_DISABLED_FEATURES = Object.freeze([
+  'shell_tool',
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'computer_use',
+  'multi_agent',
+  'multi_agent_v2'
+]);
+
+const TOOL_EVENT_TYPES = new Set([
+  'tool_use',
+  'tool_result',
+  'command_execution',
+  'mcp_tool_call',
+  'web_search',
+  'web_search_request',
+  'web_fetch',
+  'file_search',
+  'computer_use',
+  'shell'
+]);
+
+export function inspectWorkerIsolation(stdout) {
+  const events = [];
+  let malformedLines = 0;
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    const type = typeof value.type === 'string' ? value.type.toLowerCase() : '';
+    if (TOOL_EVENT_TYPES.has(type)) {
+      events.push({
+        type,
+        name: String(value.name || value.tool_name || value.toolName || value.command || '').slice(0, 160) || null
+      });
+    }
+    for (const nested of Object.values(value)) visit(nested);
+  };
+  const raw = String(stdout || '');
+  try {
+    visit(JSON.parse(raw));
+  } catch {
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try { visit(JSON.parse(line)); } catch { malformedLines++; }
+    }
+  }
+  const reasons = [];
+  if (events.length) reasons.push('WORKER_TOOL_CALL');
+  if (malformedLines) reasons.push('WORKER_TRANSCRIPT_UNPARSEABLE');
+  return {
+    status: events.length === 0 && malformedLines === 0 ? 'PASS' : 'FAIL',
+    toolCalls: events,
+    malformedLines,
+    reasons
+  };
+}
+
+The legacy code has no hook, installed-skill, plugin, memory, app, goal,
+tool-suggestion, or workspace-dependency context check.
+
+===============================================================================
+SOURCE: .backup-case-results-v2-20260719-084950/test/executor.test.mjs
+WHOLE-FILE-SHA256: 319456da5ed60027e5c83c99281130179ed6ab6d849164d9381956a0f3da9b8a
+LOCATOR: legacy clean, tool-event, and malformed-transcript controls
+
+test('strict isolation audit rejects tool events and accepts a tool-free transcript', () => {
+  const clean = [
+    JSON.stringify({ type: 'thread.started', model: 'gpt-5.6-sol' }),
+    JSON.stringify({ type: 'agent_message', text: 'final answer' }),
+    JSON.stringify({ type: 'token_count', input_tokens: 10, output_tokens: 5 })
+  ].join('\n');
+  assert.equal(inspectWorkerIsolation(clean).status, 'PASS');
+  const contaminated = `${clean}\n${JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'command_execution', command: 'sed -n 1,20p src/measure.mjs' }
+  })}`;
+  const result = inspectWorkerIsolation(contaminated);
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.toolCalls[0].type, 'command_execution');
+});
+
+test('strict isolation fails closed on a malformed nonempty transcript line', () => {
+  const result = inspectWorkerIsolation('not-json\n');
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.malformedLines, 1);
+  assert.deepEqual(result.reasons, ['WORKER_TRANSCRIPT_UNPARSEABLE']);
+});
+
+Canonical normalization used by this canary:
+- clean well-formed transcript: accepted, ISOLATION_PASS
+- recognized executable event: rejected, WORKER_TOOL_CALL
+- malformed nonempty transcript: rejected, WORKER_TRANSCRIPT_UNPARSEABLE

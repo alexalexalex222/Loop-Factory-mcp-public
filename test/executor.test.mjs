@@ -8,7 +8,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
-import { buildArgs, isExecEnabled, execBinaryForRoute, parseTokenUsage, resolveWorkerBinary, runWorker } from '../src/executor.mjs';
+import {
+  STRICT_CODEX_DISABLED_FEATURES, STRICT_CODEX_REASONING_EFFORT,
+  buildArgs, buildExecutorPrompt, execBinaryForRoute, inspectWorkerIsolation, isExecEnabled,
+  executorWorker, normalizeStructuredWorkerOutput, parseTokenUsage, parseTokenUsageDetails,
+  resolveWorkerBinary, runWorker, schemaPathForContract
+} from '../src/executor.mjs';
+import { sha256 } from '../src/util.mjs';
 import { freshEngine, initThroughBaselineBar } from './helpers.mjs';
 
 const H = (model, title) => ({ title, bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model } });
@@ -54,9 +60,10 @@ test('codex execution selects the requested model explicitly and returns a hashe
   writeFileSync(bin, `#!/bin/sh
 printf '%s\\n' "$@" > "$ARGV_OUT"
 cat > "$STDIN_OUT"
-printf '%s\\n' '{"type":"thread.started","model":"gpt-5.6-sol"}'
-printf '%s\\n' '{"type":"agent_message","text":"verified output"}'
-printf '%s\\n' '{"type":"token_count","input_tokens":12,"output_tokens":8}'
+printf '%s\\n' '{"type":"thread.started","thread_id":"thread-real-shape"}'
+printf '%s\\n' '{"type":"turn.started"}'
+printf '%s\\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"verified output"}}'
+printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":8,"reasoning_output_tokens":0}}'
 `);
   chmodSync(bin, 0o755);
   const prompt = 'prompt stays on stdin; $(touch SHOULD_NOT_RUN)';
@@ -82,9 +89,10 @@ printf '%s\\n' '{"type":"token_count","input_tokens":12,"output_tokens":8}'
     ]);
     assert.ok(!argv.includes(prompt), 'prompt never reaches argv');
     assert.equal(res.invocation.requestedModel, 'gpt-5.6-sol');
-    assert.equal(res.invocation.reportedModel, 'gpt-5.6-sol');
-    assert.equal(res.invocation.reportedModelMatchesRequest, true);
+    assert.equal(res.invocation.reportedModel, null);
+    assert.equal(res.invocation.reportedModelMatchesRequest, null);
     assert.equal(res.invocation.modelSelectionAuthority, 'explicit-model-flag');
+    assert.equal(res.invocation.modelIdentityAuthority, 'explicit-model-flag');
     assert.equal(res.invocation.tokenUsage, 20);
     assert.match(res.invocation.stdoutSha256, /^[a-f0-9]{64}$/);
     assert.match(res.invocation.resultSha256, /^[a-f0-9]{64}$/);
@@ -92,6 +100,141 @@ printf '%s\\n' '{"type":"token_count","input_tokens":12,"output_tokens":8}'
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a failed Codex launch preserves supervisor-owned stderr and invocation hashes without becoming valid output', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-failed-codex-'));
+  const bin = join(dir, 'codex');
+  writeFileSync(bin, `#!/bin/sh
+printf '%s\\n' '{"type":"thread.started","thread_id":"thread-failed-real-shape"}'
+printf '%s\\n' 'deterministic OAuth transport failure' >&2
+exit 17
+`);
+  chmodSync(bin, 0o755);
+  const env = {
+    ...process.env,
+    SUPER_LOOP_ALLOW_EXEC: '1',
+    SUPER_LOOP_CODEX_BIN: bin
+  };
+  try {
+    const result = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt: 'x',
+      env
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'EXEC_FAILED');
+    assert.equal(result.exitCode, 17);
+    assert.match(result.stdout, /thread\.started/);
+    assert.equal(result.stderr, 'deterministic OAuth transport failure\n');
+    assert.equal(result.invocation.reportedModel, null);
+    assert.equal(result.invocation.reportedModelMatchesRequest, null);
+    assert.equal(result.invocation.modelIdentityAuthority, 'explicit-model-flag');
+    assert.equal(result.invocation.stdoutSha256, sha256(result.stdout));
+    assert.equal(result.invocation.stderrSha256, sha256(result.stderr));
+
+    const packet = executorWorker({
+      route: 'gpt-5.6-sol',
+      phase: 1,
+      kind: 'proposal',
+      toolPolicy: 'none',
+      slice: 'Produce one proposal.',
+      target: {
+        findingId: 'finding-001',
+        baselineSha256: 'a'.repeat(64),
+        baselineContent: '## Purpose\nBaseline procedure.',
+        evidenceRefs: []
+      },
+      hypothesis: {
+        id: 'finding-001-canary-h1',
+        title: 'Preserve launch evidence',
+        bottleneck: 'Failed launches discard diagnostics.',
+        operation: 'Persist stderr and its hash.',
+        expectedMovement: 'The blocked run remains independently diagnosable.'
+      },
+      frozenCases: []
+    }, env);
+    assert.equal(packet.__execReason, 'EXEC_FAILED');
+    assert.equal(packet.phase, 1);
+    assert.equal(packet.executorOwned, true);
+    assert.equal(packet.rawStderr, result.stderr);
+    assert.equal(packet.invocation.stderrSha256, sha256(packet.rawStderr));
+    assert.match(packet.artifacts[0].content, /STDERR\ndeterministic OAuth transport failure/);
+    assert.equal(packet.finalOutput, '');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('strict Codex argv disables tool surfaces, ignores ambient config, and binds a JSON schema + capsule cwd', () => {
+  const schemaPath = schemaPathForContract({ kind: 'evaluation' });
+  const args = buildArgs('codex', null, 'gpt-5.6-sol', {
+    strictIsolation: true,
+    schemaPath,
+    workspaceRoot: '/tmp/loop-factory-capsule'
+  });
+  const reasoningConfigIndex = args.indexOf('model_reasoning_effort="high"');
+  assert.equal(STRICT_CODEX_REASONING_EFFORT, 'high');
+  assert.equal(args[reasoningConfigIndex - 1], '-c');
+  assert.ok(args.includes('--ignore-user-config'));
+  assert.ok(args.includes('--output-schema'));
+  assert.ok(args.includes(schemaPath));
+  assert.deepEqual(
+    args.filter((value, index) => args[index - 1] === '--disable'),
+    [...STRICT_CODEX_DISABLED_FEATURES]
+  );
+  assert.deepEqual(args.slice(args.indexOf('-C'), args.indexOf('-C') + 2), ['-C', '/tmp/loop-factory-capsule']);
+});
+
+test('schema-constrained JSON is normalized into the existing supervisor wrapper and remains hashable', () => {
+  const payload = {
+    arm: 'challenger',
+    findingId: 'finding-001',
+    hypothesisId: 'finding-001-h1',
+    baselineSha256: 'a'.repeat(64),
+    procedureSha256: 'b'.repeat(64),
+    caseResults: [{
+      caseId: 'case-1',
+      disposition: 'BLOCKED',
+      code: 'CASE_OK',
+      evidencePaths: ['fixture/case-1.json']
+    }]
+  };
+  assert.equal(
+    normalizeStructuredWorkerOutput({ kind: 'evaluation' }, JSON.stringify(payload)),
+    `<EVALUATION>${JSON.stringify(payload)}</EVALUATION>`
+  );
+  assert.equal(normalizeStructuredWorkerOutput({ kind: 'evaluation' }, 'not json'), null);
+  const challenger = {
+    findingId: 'finding-001',
+    hypothesisId: 'finding-001-h1',
+    baselineSha256: 'a'.repeat(64),
+    revisedContent: '## Purpose\n' + 'substantial revision '.repeat(20),
+    changeSummary: 'Apply the assigned evidence-bound challenger operation.',
+    caseResults: payload.caseResults
+  };
+  assert.ok(schemaPathForContract({ kind: 'challenger' }).endsWith('challenger-output.schema.json'));
+  assert.equal(
+    normalizeStructuredWorkerOutput({}, JSON.stringify(challenger)),
+    `<IMPROVEMENT>${JSON.stringify(challenger)}</IMPROVEMENT>`
+  );
+});
+
+test('strict evaluation prompt requires canonical decision words', () => {
+  const prompt = buildExecutorPrompt({
+    kind: 'evaluation',
+    evaluationArm: 'challenger',
+    outputSchemaMode: true,
+    target: {
+      findingId: 'finding-001',
+      baselineSha256: 'a'.repeat(64),
+      baselineContent: '## Baseline\n\nApply the original procedure.'
+    },
+    hypothesis: { id: 'finding-001-h1' },
+    procedureSha256: 'b'.repeat(64),
+    frozenCases: [{ id: 'case-1', prompt: 'Evaluate the case.' }]
+  });
+  assert.match(prompt, /"disposition":"ACCEPTED or REJECTED only"/);
 });
 
 test('explicit Codex binary override is absolute, basename-locked, and used without widening execution', () => {
@@ -118,6 +261,32 @@ printf '%s\\n' '{"type":"agent_message","text":"override output"}'
     });
     assert.equal(result.ok, true, result.message);
     assert.equal(result.resultText, 'override output');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('spawned workers never inherit operator authority or real-test approval values', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-worker-env-'));
+  const bin = join(dir, 'codex');
+  writeFileSync(bin, `#!/bin/sh
+printf '%s\\n' "{\\"type\\":\\"agent_message\\",\\"text\\":\\"\${SUPER_LOOP_OPERATOR_AUTHORITY:-clean}:\${SUPER_LOOP_REAL_TEST_APPROVAL:-clean}\\"}"
+`);
+  chmodSync(bin, 0o755);
+  try {
+    const result = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt: 'x',
+      env: {
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        SUPER_LOOP_CODEX_BIN: bin,
+        SUPER_LOOP_OPERATOR_AUTHORITY: 'operator-secret',
+        SUPER_LOOP_REAL_TEST_APPROVAL: 'plan-secret',
+        PATH: ''
+      }
+    });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.resultText, 'clean:clean');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -152,6 +321,68 @@ test('parseTokenUsage reads the last codex token_count line (JSON Lines)', () =>
     JSON.stringify({ type: 'token_count', input_tokens: 120, output_tokens: 80 })
   ].join('\n');
   assert.equal(parseTokenUsage(jsonl), 200);
+  assert.deepEqual(parseTokenUsageDetails(jsonl), {
+    inputTokens: 120,
+    outputTokens: 80,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    totalTokens: 200
+  });
+});
+
+test('strict isolation audit rejects tool events and accepts a tool-free transcript', () => {
+  const clean = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'thread-isolation-real-shape' }),
+    JSON.stringify({ type: 'agent_message', text: 'final answer' }),
+    JSON.stringify({ type: 'token_count', input_tokens: 10, output_tokens: 5 })
+  ].join('\n');
+  assert.equal(inspectWorkerIsolation(clean).status, 'PASS');
+  const contaminated = `${clean}\n${JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'command_execution', command: 'sed -n 1,20p src/measure.mjs' }
+  })}`;
+  const result = inspectWorkerIsolation(contaminated);
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.toolCalls[0].type, 'command_execution');
+});
+
+test('strict isolation fails on hook, plugin, or installed-skill context diagnostics', () => {
+  const hook = inspectWorkerIsolation(JSON.stringify({
+    type: 'item.completed',
+    item: {
+      type: 'error',
+      message: 'failed to parse hooks config /Users/example/.codex/hooks.json'
+    }
+  }));
+  assert.equal(hook.status, 'FAIL');
+  assert.ok(hook.reasons.includes('WORKER_HOOK_CONTEXT'));
+
+  const skills = inspectWorkerIsolation(JSON.stringify({
+    type: 'item.completed',
+    item: {
+      type: 'error',
+      message: 'Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill.'
+    }
+  }));
+  assert.equal(skills.status, 'FAIL');
+  assert.ok(skills.reasons.includes('WORKER_SKILL_CONTEXT'));
+
+  const plugins = inspectWorkerIsolation(JSON.stringify({
+    type: 'item.completed',
+    item: {
+      type: 'error',
+      message: 'Plugin catalog loaded into worker context.'
+    }
+  }));
+  assert.equal(plugins.status, 'FAIL');
+  assert.ok(plugins.reasons.includes('WORKER_PLUGIN_CONTEXT'));
+});
+
+test('strict isolation fails closed on a malformed nonempty transcript line', () => {
+  const result = inspectWorkerIsolation('not-json\n');
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.malformedLines, 1);
+  assert.deepEqual(result.reasons, ['WORKER_TRANSCRIPT_UNPARSEABLE']);
 });
 
 test('execute_full_test is OFF by default (EXEC_DISABLED) — preserves the no-exec posture', () => {

@@ -13,7 +13,7 @@ import { sha256 } from '../src/util.mjs';
 import { DEFAULT_QUALITY_ORACLE, QUALITY_PROBES, buildMeasuredContent } from '../src/measure.mjs';
 import { MANDATED_LOOPS } from '../src/constants.mjs';
 import {
-  SEALED, WORKER_MSG, ARTIFACT_CLASS,
+  SEALED, WORKER_MSG, ARTIFACT_CLASS, DETERMINISTIC_CLASSES, normalizeOutputClass,
   answerKeyEchoGuard, markerCharShare, negativeControlVerdict, standardNegativeControl,
   routeShaCollapse, evidenceBindingCheck, solutionPressureCheck, classifyArtifact, classifyObjectiveWork
 } from '../src/integrity.mjs';
@@ -100,6 +100,11 @@ test('routeShaCollapse: identical SHAs collapse; deterministic-command is exempt
   const same = [{ content: 'X' }, { content: 'X' }, { content: 'X' }];
   assert.equal(routeShaCollapse(same, { requiredRoutes: 3 }).collapsed, true);
   assert.equal(routeShaCollapse(same, { requiredRoutes: 3, deterministicCommand: true }).collapsed, false);
+  assert.equal(DETERMINISTIC_CLASSES.has(normalizeOutputClass('structured-case-results')), true);
+  assert.equal(routeShaCollapse(same, {
+    requiredRoutes: 3,
+    deterministicCommand: DETERMINISTIC_CLASSES.has(normalizeOutputClass('structured-case-results'))
+  }).collapsed, false);
   assert.equal(routeShaCollapse([{ content: 'A' }, { content: 'B' }, { content: 'C' }], { requiredRoutes: 3 }).collapsed, false);
 });
 

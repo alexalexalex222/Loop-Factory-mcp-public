@@ -58,6 +58,24 @@ test('operator Approve on the dashboard lets the next promotion_request record t
   assert.equal(store.load('pa2').promotions.length, 1, 'exactly one champion recorded after approval');
 });
 
+test('promotion_request rechecks the unchanged gate after approval and refuses stale evidence', () => {
+  const { engine, store } = freshEngine();
+  const hyp = readyToPromote(engine, 'pa2-stale');
+  const queued = engine.promotion_request({ runId: 'pa2-stale', hypothesisId: hyp });
+  engine.operator.applyDashboardDecisions({
+    runId: 'pa2-stale',
+    decisions: { [queued.queuedReviewId]: { decision: 'approve' } }
+  });
+  const state = store.load('pa2-stale');
+  state.tests.find((testRun) => testRun.hypothesisId === hyp).reverified = false;
+  store.save(state);
+
+  const promotion = engine.promotion_request({ runId: 'pa2-stale', hypothesisId: hyp });
+  assert.equal(promotion.status, 'BLOCKED');
+  assert.equal(promotion.code, 'NOT_REVERIFIED');
+  assert.equal(store.load('pa2-stale').promotions.length, 0);
+});
+
 test('operator Sludge on the dashboard rejects the champion (PROMOTION_REJECTED)', () => {
   const { engine, store } = freshEngine();
   const hyp = readyToPromote(engine, 'pa3');

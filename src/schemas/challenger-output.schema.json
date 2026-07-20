@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "findingId",
+    "hypothesisId",
+    "baselineSha256",
+    "revisedContent",
+    "changeSummary",
+    "caseResults"
+  ],
+  "properties": {
+    "findingId": { "type": "string", "pattern": "^finding-[0-9]{3}$" },
+    "hypothesisId": { "type": "string", "minLength": 5 },
+    "baselineSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "revisedContent": { "type": "string", "minLength": 120 },
+    "changeSummary": { "type": "string", "minLength": 24 },
+    "caseResults": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "disposition", "code", "evidencePaths"],
+        "properties": {
+          "caseId": { "type": "string", "minLength": 1 },
+          "disposition": { "type": "string", "minLength": 1 },
+          "code": { "type": "string", "minLength": 1 },
+          "evidencePaths": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}

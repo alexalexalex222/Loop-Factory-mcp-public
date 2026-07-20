@@ -6,9 +6,112 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshEngine, SPECIFIC_TASK, recordMeasurement, recordCallerReported, BASELINE_BODY, promoteWithApproval } from './helpers.mjs';
-import { DEFAULT_QUALITY_ORACLE, estimateTokens, buildMeasuredContent } from '../src/measure.mjs';
+import {
+  DEFAULT_QUALITY_ORACLE, estimateTokens, buildMeasuredContent, scoreOracle,
+  buildCaseResultsContent, parseCaseResults, evaluateCaseResultsGameability
+} from '../src/measure.mjs';
 
 const H = (model) => ({ title: 'h', bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model } });
+const CASE_ORACLE = {
+  kind: 'case-results-v1',
+  passMark: 1,
+  cases: [
+    { caseId: 'phase', disposition: 'BLOCKED', code: 'PHASE_SKIP', requiredEvidencePaths: ['phase.jsonl', 'state.json'] },
+    { caseId: 'metric', disposition: 'BLOCKED', code: 'MODEL_REPORTED_METRIC', requiredEvidencePaths: ['metric.jsonl', 'state.json'] }
+  ]
+};
+const CASE_ORACLE_V2 = {
+  kind: 'case-results-v2',
+  passMark: 1,
+  cases: [
+    { caseId: 'phase', accepted: false, code: 'PHASE_SKIP', requiredEvidencePaths: ['phase.jsonl', 'state.json'] },
+    { caseId: 'metric', accepted: false, code: 'MODEL_REPORTED_METRIC', requiredEvidencePaths: ['metric.jsonl', 'state.json'] }
+  ]
+};
+
+test('case-results-v1 scores exact per-case semantics and rejects gameable controls', () => {
+  const correct = buildCaseResultsContent(CASE_ORACLE);
+  assert.equal(scoreOracle(correct, CASE_ORACLE), 1);
+  assert.equal(scoreOracle('PHASE_SKIP MODEL_REPORTED_METRIC independent evidence', CASE_ORACLE), 0);
+  const reversed = buildCaseResultsContent(CASE_ORACLE, (row) => ({ ...row, disposition: 'ACCEPTED' }));
+  assert.equal(scoreOracle(reversed, CASE_ORACLE), 0);
+  const wrong = buildCaseResultsContent(CASE_ORACLE, (row, index, all) => ({ ...row, code: all[(index + 1) % all.length].code }));
+  assert.equal(scoreOracle(wrong, CASE_ORACLE), 0);
+  assert.equal(evaluateCaseResultsGameability(CASE_ORACLE).ok, true);
+});
+
+test('case-results-v1 rejects duplicate, unknown, and cross-case evidence', () => {
+  const duplicate = `<CASE_RESULTS>${JSON.stringify([
+    { caseId: 'phase', disposition: 'BLOCKED', code: 'PHASE_SKIP', evidencePaths: ['phase.jsonl', 'state.json'] },
+    { caseId: 'phase', disposition: 'BLOCKED', code: 'PHASE_SKIP', evidencePaths: ['phase.jsonl', 'state.json'] }
+  ])}</CASE_RESULTS>`;
+  assert.equal(scoreOracle(duplicate, CASE_ORACLE), 0);
+  const crossEvidence = buildCaseResultsContent(CASE_ORACLE, (row, index, all) => ({
+    ...row,
+    evidence: all[(index + 1) % all.length].requiredEvidencePaths.map((path) => ({ path, locator: null }))
+  }));
+  assert.equal(scoreOracle(crossEvidence, CASE_ORACLE), 0);
+  assert.equal(parseCaseResults('<CASE_RESULTS>[]</CASE_RESULTS>').ok, true);
+});
+
+test('case-results-v1 supports explicit disposition aliases and structured evidence locators', () => {
+  const oracle = {
+    kind: 'case-results-v1',
+    passMark: 1,
+    cases: [{
+      caseId: 'phase',
+      disposition: 'BLOCKED',
+      acceptedDispositions: ['BLOCKED', 'REJECTED'],
+      code: 'PHASE_SKIP',
+      requiredEvidence: [{ path: 'proof/phase.jsonl', locator: 'lines 12-14' }]
+    }]
+  };
+  const output = `<EVALUATION>${JSON.stringify({
+    arm: 'baseline',
+    findingId: 'finding-001',
+    hypothesisId: '',
+    baselineSha256: 'a'.repeat(64),
+    procedureSha256: 'a'.repeat(64),
+    caseResults: [{
+      caseId: 'phase',
+      disposition: 'REJECTED',
+      code: 'PHASE_SKIP',
+      evidence: [{ path: 'proof/phase.jsonl', locator: 'lines 12-14' }]
+    }]
+  })}</EVALUATION>`;
+  assert.equal(scoreOracle(output, oracle), 1);
+  const wrongLocator = output.replace('lines 12-14', 'lines 15-16');
+  assert.equal(scoreOracle(wrongLocator, oracle), 0);
+});
+
+test('case-results-v2 scores supervisor decisions rather than disposition vocabulary', () => {
+  const canonical = buildCaseResultsContent(CASE_ORACLE_V2);
+  const synonyms = buildCaseResultsContent(CASE_ORACLE_V2, (row) => ({
+    ...row,
+    disposition: 'REJECTED'
+  }));
+  const explanatorySynonyms = buildCaseResultsContent(CASE_ORACLE_V2, (row, index) => ({
+    ...row,
+    disposition: index === 0 ? 'STAGED' : 'REJECTED: evidence gate failed'
+  }));
+  const wrongDecision = buildCaseResultsContent(CASE_ORACLE_V2, (row) => ({
+    ...row,
+    disposition: 'ACCEPTED'
+  }));
+  const unknownDecision = buildCaseResultsContent(CASE_ORACLE_V2, (row) => ({
+    ...row,
+    disposition: 'UNRESOLVED'
+  }));
+  assert.equal(scoreOracle(canonical, CASE_ORACLE_V2), 1);
+  assert.equal(scoreOracle(synonyms, CASE_ORACLE_V2), 1);
+  assert.equal(scoreOracle(explanatorySynonyms, CASE_ORACLE_V2), 1);
+  assert.equal(scoreOracle(wrongDecision, CASE_ORACLE_V2), 0);
+  assert.equal(scoreOracle(unknownDecision, CASE_ORACLE_V2), 0);
+  const gameability = evaluateCaseResultsGameability(CASE_ORACLE_V2);
+  assert.equal(gameability.ok, true);
+  assert.equal(gameability.scores.semanticEquivalent, 1);
+  assert.equal(gameability.scores.unknownDecision, 0);
+});
 
 /** init → baseline → freeze a benchmark (oracle optional) → measured bar. */
 function initBench(engine, runId, { oracle, baseQuality = 0.7, baseCost = 1000 } = {}) {

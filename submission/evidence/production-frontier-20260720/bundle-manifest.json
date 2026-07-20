@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "loop-factory-build-week-production-frontier-20260720",
+  "runId": "production-frontier-20260720-r3",
+  "files": [
+    {
+      "path": "FINAL_PRODUCTION_REPORT.md",
+      "bytes": 4952,
+      "sha256": "92e0e0da1f9d062944bc155b895edd68b827e894109ea691593a9627cf704774"
+    },
+    {
+      "path": "improved-loop-h1.md",
+      "bytes": 3957,
+      "sha256": "a3fab38c5f5dcb8443579122e338048f7ecaf392a7a13e9371d428f77a783444"
+    },
+    {
+      "path": "improved-loop-h2.md",
+      "bytes": 4210,
+      "sha256": "4093ff37c6de0ab7c92671eead16f1d65ea032345dfeede46126e44b4ecc1380"
+    },
+    {
+      "path": "original-loop.md",
+      "bytes": 2129,
+      "sha256": "c8d4598f06dcff7fe4d5559c6adc3c96484f717671ea130607d86c310999ddfa"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2902,
+      "sha256": "f686867cc44f28eb432d4dcc06d88a7ceafd03c08fefa227f4f9f9866fd98c8c"
+    },
+    {
+      "path": "screenshots/approval-desk-desktop.png",
+      "bytes": 136224,
+      "sha256": "16c8b95e6d36b048f19b26d8dfb33499ec66917886cde93ee733d980ce14b708"
+    },
+    {
+      "path": "screenshots/experiment-validity-desktop.png",
+      "bytes": 29462,
+      "sha256": "28bd56ce0a0bae680fc88b7ebdd22387f6a035ca1e9552bad5c8aa4bf67d66e2"
+    },
+    {
+      "path": "screenshots/score-table-desktop.png",
+      "bytes": 20725,
+      "sha256": "5efd9ee2ce5fa70f4fb4fc280a25896bd994f14065905fb039d7addb40f99ba4"
+    },
+    {
+      "path": "summary.json",
+      "bytes": 2219,
+      "sha256": "dcd1380f34b93ddfe60aee588d140ff0634788230a86bae4ebee82dab26545ab"
+    },
+    {
+      "path": "verifier.json",
+      "bytes": 1043,
+      "sha256": "467342d352107e2f48c6fd57ac908663ef25a696b0ef13f0725800eab0511b37"
+    }
+  ]
+}

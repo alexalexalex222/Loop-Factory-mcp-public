@@ -1,22 +1,26 @@
 #!/usr/bin/env node
-// Zero-dep SERVED dashboard for click-and-done operator review.
+// Zero-dep served dashboard for explicit operator review.
 //
-// Open it in a browser and just click Approve / Sludge — no files, no commands. Each
-// click POSTs to /apply, which MERGES the decision into that run's inbox
+// Open it in a browser, choose Approve or Deny, then confirm the local queue action.
+// The POST to /apply MERGES the decision into that run's inbox
 // (runs/<runId>/inbox-decisions.json). The running campaign's per-tick drain then
-// adopts it (operator-driven, model-independent, non-blocking). The model can never
-// reach this surface; only you click.
+// revalidates it (operator-driven, model-independent, non-blocking). The MCP tool
+// surface cannot resolve reviews; the served browser path requires a session token
+// plus the exact reviewed-state hash.
 //
 //   node scripts/dashboard-server.mjs [--port 8787] [--home <dir>]
 //
-// Binds to 127.0.0.1 only (never the network). A cross-origin POST is rejected, so a
-// random web page cannot drive your reviews; only the served dashboard itself can.
+// Binds to 127.0.0.1 only. Non-loopback Host values, missing/cross-origin browser
+// Origins, missing session tokens, and stale review bindings are rejected.
 import { createServer } from 'node:http';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { createStore } from '../src/store.mjs';
 import { buildConsoleSnapshot } from '../src/console.mjs';
+import { renderDashboard, renderRunSelector } from '../src/dashboard.mjs';
 import { isSafeId, sha256 } from '../src/util.mjs';
+import { isReviewDecisionBinding, reviewDecisionBinding } from '../src/review-decisions.mjs';
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -38,27 +42,76 @@ const send = (res, code, type, body, headers = {}) => {
 };
 const json = (res, code, obj, headers) => send(res, code, 'application/json', JSON.stringify(obj), headers);
 
-export function buildDashboardServer(theStore = store, thePort = port) {
-  // Only same-origin (the served dashboard) may POST. A browser attaches Origin on
-  // cross-origin requests; we allow a missing Origin (curl/our own page) or one that
-  // matches THIS server's port, and reject anything else — a basic CSRF guard for a
-  // local tool so a random web page cannot drive your reviews.
+function readInbox(theStore, runId) {
+  const raw = theStore.readRunFile(runId, 'inbox-decisions.json');
+  if (raw == null) return { status: 'NONE', runId, decisions: {} };
+  try {
+    const payload = JSON.parse(raw);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { status: 'INVALID', runId, decisions: {} };
+    }
+    const decisions = payload.decisions == null ? payload : payload.decisions;
+    if (!decisions || typeof decisions !== 'object' || Array.isArray(decisions)) {
+      return { status: 'INVALID', runId, decisions: {} };
+    }
+    if (payload.runId != null && payload.runId !== runId) {
+      return { status: 'INVALID', runId, decisions: {} };
+    }
+    return { status: 'OK', runId, decisions };
+  } catch {
+    return { status: 'INVALID', runId, decisions: {} };
+  }
+}
+
+function buildServedSnapshot(theStore, runId, state = theStore.load(runId)) {
+  const snapshot = buildConsoleSnapshot(state);
+  if (!snapshot.reviews || !Array.isArray(snapshot.reviews.items)) return snapshot;
+  const inbox = readInbox(theStore, runId);
+  let queued = 0;
+  let stale = 0;
+  for (const review of snapshot.reviews.items) {
+    if (review.status !== 'PENDING') continue;
+    const decision = inbox.decisions[review.id];
+    if (!decision || !['approve', 'sludge'].includes(decision.decision)) continue;
+    review.queuedDecision = decision.decision;
+    review.queuedAt = typeof decision.queuedAt === 'string' && !/[\0\r\n]/.test(decision.queuedAt)
+      ? decision.queuedAt.slice(0, 40)
+      : null;
+    review.queueBindingValid = decision.reviewSha256 === review.decisionBindingSha256;
+    if (review.queueBindingValid) queued += 1;
+    else stale += 1;
+  }
+  snapshot.reviews.queued = queued;
+  snapshot.reviews.stale = stale;
+  snapshot.reviews.awaiting = Math.max(0, snapshot.reviews.pending - queued);
+  snapshot.reviews.inboxStatus = inbox.status;
+  return snapshot;
+}
+
+export function buildDashboardServer(theStore = store, thePort = port, options = {}) {
+  const decisionToken = String(options.decisionToken || randomBytes(32).toString('hex'));
+  const hostOk = (req) => /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(String(req.headers.host || ''));
   const originOk = (req) => {
     const o = req.headers.origin;
-    if (!o) return true;
+    if (!o) return false;
     const host = String(req.headers.host || '');
-    if (!/^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(host)) return false;
     return o === `http://${host}`;
+  };
+  const decisionTokenOk = (req) => {
+    const supplied = Buffer.from(String(req.headers['x-super-loop-decision-token'] || ''), 'utf8');
+    const expected = Buffer.from(decisionToken, 'utf8');
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
   };
   return createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
+    if (!hostOk(req)) return json(res, 403, { ok: false, error: 'non-loopback Host refused' });
 
     if (req.method === 'GET' && u.pathname === '/api/run') {
       const runId = String(u.searchParams.get('run') || '');
       if (!isSafeId(runId) || !theStore.exists(runId)) {
         return json(res, 404, { ok: false, error: 'unknown run' }, { 'cache-control': 'no-store' });
       }
-      const snapshot = buildConsoleSnapshot(theStore.load(runId));
+      const snapshot = buildServedSnapshot(theStore, runId);
       const body = JSON.stringify(snapshot);
       const etag = `"${sha256(body)}"`;
       const headers = { etag, 'cache-control': 'no-store' };
@@ -70,7 +123,8 @@ export function buildDashboardServer(theStore = store, thePort = port) {
     }
 
     if (req.method === 'POST' && u.pathname === '/apply') {
-      if (!originOk(req)) return json(res, 403, { ok: false, error: 'cross-origin POST refused' });
+      if (!originOk(req)) return json(res, 403, { ok: false, error: 'same-origin browser POST required' });
+      if (!decisionTokenOk(req)) return json(res, 403, { ok: false, error: 'decision session token required' });
       let buf = '';
       req.on('data', (c) => { buf += c; if (buf.length > 1e6) req.destroy(); });
       req.on('end', () => {
@@ -78,15 +132,81 @@ export function buildDashboardServer(theStore = store, thePort = port) {
         try { body = JSON.parse(buf || '{}'); } catch { return json(res, 400, { ok: false, error: 'bad json' }); }
         const runId = String(body.runId || '');
         if (!runId || !theStore.exists(runId)) return json(res, 404, { ok: false, error: 'unknown run' });
+        const state = theStore.load(runId);
+        const reviews = new Map((Array.isArray(state.humanReviews) ? state.humanReviews : []).map((review) => [review.id, review]));
+        const incoming = [];
+        if (body.decisions && typeof body.decisions === 'object' && !Array.isArray(body.decisions)) {
+          for (const [reviewId, value] of Object.entries(body.decisions)) {
+            incoming.push([String(reviewId), value]);
+          }
+        } else if (body.reviewId && body.decision) {
+          incoming.push([String(body.reviewId), {
+            decision: body.decision,
+            notes: body.notes,
+            reviewSha256: body.reviewSha256
+          }]);
+        } else {
+          return json(res, 400, { ok: false, error: 'need { reviewId, decision } or { decisions }' });
+        }
+        if (incoming.length === 0) {
+          return json(res, 400, { ok: false, error: 'decisions must contain at least one review' });
+        }
+        const validated = {};
+        for (const [reviewId, value] of incoming) {
+          if (!isSafeId(reviewId)) return json(res, 400, { ok: false, error: 'invalid review id' });
+          const review = reviews.get(reviewId);
+          if (!review) return json(res, 404, { ok: false, error: `unknown review ${reviewId}` });
+          if (review.status !== 'PENDING') {
+            return json(res, 409, { ok: false, error: `review ${reviewId} is already ${review.status}` });
+          }
+          const decision = String(value && value.decision || '');
+          if (!['approve', 'sludge'].includes(decision)) {
+            return json(res, 400, { ok: false, error: 'decision must be approve or sludge' });
+          }
+          const notes = value && value.notes;
+          if (notes != null && typeof notes !== 'string') {
+            return json(res, 400, { ok: false, error: 'notes must be a string or null' });
+          }
+          const reviewSha256 = String(value && value.reviewSha256 || '').toLowerCase();
+          const currentReviewSha256 = reviewDecisionBinding(state, review);
+          if (!isReviewDecisionBinding(reviewSha256) || reviewSha256 !== currentReviewSha256) {
+            return json(res, 409, {
+              ok: false,
+              error: 'review changed or is not bound; reload before deciding',
+              code: isReviewDecisionBinding(reviewSha256) ? 'REVIEW_BINDING_CHANGED' : 'REVIEW_BINDING_REQUIRED'
+            });
+          }
+          validated[reviewId] = {
+            decision,
+            notes: notes ? notes.slice(0, 4000) : null,
+            reviewSha256,
+            queuedAt: new Date().toISOString()
+          };
+        }
         // merge into the existing inbox so multiple clicks accumulate before the next drain
-        const inbox = { runId, decisions: {} };
-        const cur = theStore.readRunFile(runId, 'inbox-decisions.json');
-        if (cur) { try { const p = JSON.parse(cur); if (p && p.decisions) inbox.decisions = p.decisions; } catch { /* overwrite a corrupt inbox */ } }
-        if (body.decisions && typeof body.decisions === 'object') Object.assign(inbox.decisions, body.decisions);
-        else if (body.reviewId && body.decision) inbox.decisions[String(body.reviewId)] = { decision: String(body.decision), notes: body.notes || null };
-        else return json(res, 400, { ok: false, error: 'need { reviewId, decision } or { decisions }' });
+        const currentInbox = readInbox(theStore, runId);
+        if (currentInbox.status === 'INVALID') {
+          return json(res, 409, {
+            ok: false,
+            error: 'decision inbox is invalid; let the supervisor archive it before retrying'
+          });
+        }
+        const inbox = { runId, decisions: { ...currentInbox.decisions } };
+        const replaced = Object.keys(validated).filter((reviewId) => inbox.decisions[reviewId] != null);
+        Object.assign(inbox.decisions, validated);
         theStore.writeRunFile(runId, 'inbox-decisions.json', JSON.stringify(inbox, null, 2));
-        return json(res, 200, { ok: true, queued: Object.keys(inbox.decisions).length, note: 'queued to the run inbox; the running supervisor adopts it on its next tick' });
+        const decisions = Object.values(validated).map((item) => item.decision);
+        const queuedState = decisions.length === 1
+          ? (decisions[0] === 'approve' ? 'APPROVAL_QUEUED' : 'DENIAL_QUEUED')
+          : 'DECISIONS_QUEUED';
+        return json(res, 200, {
+          ok: true,
+          state: queuedState,
+          queued: Object.keys(inbox.decisions).length,
+          queuedThisRequest: Object.keys(validated).length,
+          replaced,
+          note: 'queued to the run inbox; persisted review state changes only when the running supervisor applies it'
+        });
       });
       return;
     }
@@ -95,14 +215,27 @@ export function buildDashboardServer(theStore = store, thePort = port) {
       const run = u.searchParams.get('run');
       if (run) {
         if (!isSafeId(run) || !theStore.exists(run)) return send(res, 404, 'text/plain', 'unknown run');
-        const html = theStore.readRunFile(run, 'dashboard.html');
-        if (html) return send(res, 200, 'text/html; charset=utf-8', html);
-        return send(res, 404, 'text/plain', `no dashboard yet for ${run}`);
+        try {
+          const state = theStore.load(run);
+          const snapshot = buildServedSnapshot(theStore, run, state);
+          const rendered = renderDashboard(state, { snapshot, decisionToken });
+          return send(res, 200, 'text/html; charset=utf-8', rendered, {
+            'cache-control': 'no-store',
+            'x-dashboard-source': 'state'
+          });
+        } catch {
+          const html = theStore.readRunFile(run, 'dashboard.html');
+          if (html) return send(res, 200, 'text/html; charset=utf-8', html, { 'x-dashboard-source': 'persisted-fallback' });
+          return send(res, 500, 'text/plain', 'dashboard rendering failed');
+        }
       }
       const runs = theStore.listRuns();
-      const links = runs.map((r) => `<li><a href="/?run=${encodeURIComponent(r)}">${r}</a></li>`).join('');
-      return send(res, 200, 'text/html; charset=utf-8',
-        `<!doctype html><meta charset="utf-8"><title>super-loop runs</title><body style="font-family:system-ui;background:#0b0c0e;color:#ece9e2;padding:40px"><h1>super-loop · runs</h1><ul>${links || '<li>no runs yet</li>'}</ul>`);
+      const snapshots = runs.map((runId) => {
+        try { return buildServedSnapshot(theStore, runId); } catch { return null; }
+      }).filter(Boolean);
+      return send(res, 200, 'text/html; charset=utf-8', renderRunSelector(snapshots), {
+        'cache-control': 'no-store'
+      });
     }
     send(res, 404, 'text/plain', 'not found');
   });
@@ -112,6 +245,6 @@ export function buildDashboardServer(theStore = store, thePort = port) {
 if (process.argv[1] && process.argv[1].endsWith('dashboard-server.mjs')) {
   buildDashboardServer().listen(port, '127.0.0.1', () => {
     console.log(`super-loop dashboard → http://127.0.0.1:${port}  (home: ${home})`);
-    console.log('Open it, click Approve/Sludge — the running campaign adopts your choice on its next tick. No files, no commands.');
+    console.log('Open it, choose Approve or Deny, then queue the session-authorized decision. The running campaign revalidates it on its next tick.');
   });
 }

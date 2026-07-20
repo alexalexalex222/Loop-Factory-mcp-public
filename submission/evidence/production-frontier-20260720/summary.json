@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "loop-factory-build-week-production-frontier-20260720",
+  "runId": "production-frontier-20260720-r3",
+  "childRunId": "production-frontier-20260720-r3-t1",
+  "model": "gpt-5.6-sol",
+  "reasoning": "high",
+  "authentication": "chatgpt-oauth-subscription",
+  "perCallApiBillingAsserted": false,
+  "callCount": 12,
+  "callBreakdown": {
+    "mining": 1,
+    "baselineEvaluations": 3,
+    "proposals": 2,
+    "challengerEvaluations": 6
+  },
+  "retries": 0,
+  "attemptZeroCount": 12,
+  "exitZeroCount": 12,
+  "isolationPassCount": 12,
+  "uniqueThreadCount": 12,
+  "uniqueWorkspaceCount": 12,
+  "cliReportedTokens": 724453,
+  "wallClockMs": 401711,
+  "artifactCount": 34,
+  "artifactProblems": 0,
+  "baseline": {
+    "quality": 0.619,
+    "meanCliReceiptTokens": 61270.3333,
+    "stdevQuality": 0.0674,
+    "replicates": 3
+  },
+  "challengers": [
+    {
+      "id": "finding-001-h1",
+      "quality": 1,
+      "meanCliReceiptTokens": 60180,
+      "stdevQuality": 0,
+      "qualityDelta": 0.381,
+      "costDeltaPct": -0.0178,
+      "reverified": true,
+      "reviewId": "rev-001",
+      "reviewStatus": "PENDING"
+    },
+    {
+      "id": "finding-001-h2",
+      "quality": 1,
+      "meanCliReceiptTokens": 60193.3333,
+      "stdevQuality": 0,
+      "qualityDelta": 0.381,
+      "costDeltaPct": -0.0176,
+      "reverified": true,
+      "reviewId": "rev-002",
+      "reviewStatus": "PENDING"
+    }
+  ],
+  "recommendedReviewId": "rev-001",
+  "promotionCount": 0,
+  "publicationEligible": true,
+  "verifierStatus": "PASS",
+  "verifierEvidenceSha256": "07866647944a6b291eab0e2c8f8c677728039d94fbb86c6ab3e381bc22b9bd74",
+  "packageSha256": "56ddcdb946f31cb5000053768052b8cd2d8aaec7cf89a46dd847c38b7ec16517",
+  "configSha256": "e41fea87c3a2aa11677dba07b694a914a4e89b58807da05bd7c9cc45d222c67e",
+  "planSha256": "d29d3046f3af9a7ed0865c31520dd05e097248f991e0db82233b18f7433bc265",
+  "benchmarkSha256": "5e906bc07851966ff521b8cfcbba72dccd75e2697815655dddc49c3f4e22fe58",
+  "rawReceiptsPublic": false,
+  "rawReceiptExclusionReason": "Provider transcripts and machine-specific capsule paths are excluded from the public supplemental packet.",
+  "portableCausalVerifier": "npm run verify:submission"
+}

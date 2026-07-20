@@ -18,12 +18,22 @@ import {
 } from './skill-schema.mjs';
 import { rankSkills } from './skill-match.mjs';
 import { renderDashboard, renderReport } from './dashboard.mjs';
-import { deriveMeasurement, estimateTokens, scoreOracle, isDeterministicOracle, TOOL_AUTHORITY, CALLER_AUTHORITY } from './measure.mjs';
+import {
+  CASE_RESULTS_ORACLE_KIND_V2, deriveMeasurement, estimateTokens, scoreOracle,
+  isDeterministicOracle, isCaseResultsOracle,
+  evaluateCaseResultsGameability, parseCaseResults, TOOL_AUTHORITY, CALLER_AUTHORITY
+} from './measure.mjs';
 import { detectHostCapabilities, hostProfile, hostMatrix, detectHostRuntime } from './host.mjs';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, sep, isAbsolute } from 'node:path';
-import { isExecEnabled, runWorker, execBinaryForRoute, executorWorker } from './executor.mjs';
+import {
+  STRICT_CODEX_DISABLED_FEATURES, extractResult, inspectWorkerIsolation, isExecEnabled,
+  normalizeStructuredWorkerOutput, parseTokenUsage, runWorker, execBinaryForRoute, executorWorker
+} from './executor.mjs';
 import { runSupervisedCampaign } from './supervisor.mjs';
+import { checkBaselineIntegrity, checkHypothesisIntegrity } from './baseline-integrity.mjs';
+import { deriveExperimentValidity, verifyPersistedProposalRun } from './run-verifier.mjs';
+import { isReviewDecisionBinding, reviewDecisionBinding } from './review-decisions.mjs';
 import {
   SEALED, WORKER_MSG, LANE as INTEGRITY_LANE, ARTIFACT_CLASS, DEFAULT_PASS_MARK,
   oracleMarkers, answerKeyEchoGuard, paddedMarkerEchoGuard, negativeControlVerdict, standardNegativeControl,
@@ -35,38 +45,6 @@ import {
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const ok = (message, extra = {}) => ({ status: 'OK', message, ...extra });
 const blocked = (code, message, extra = {}) => ({ status: 'BLOCKED', code, message, ...extra });
-
-// Step 1 — baseline integrity floor. A baseline is the reference a challenger must
-// beat, so a worker cannot register a trivial/placeholder bar and then promote stubs
-// against it. Pure check over the recorded bytes; returns {ok:true} or a block spec.
-// This catches the obvious holes (literal placeholder markers, content too thin, no
-// real structure). It does NOT prove the bytes are a genuine loop — a sophisticated
-// stub that avoids the markers, clears the size floor, and fakes headers/code blocks
-// would pass. That residual is closed by author authority + dashboard promotion.
-const BASELINE_PLACEHOLDER_RE = /\b(PLACEHOLDER|TODO|scaffold to be|not yet authored)\b/i;
-function checkBaselineIntegrity(content) {
-  const text = String(content == null ? '' : content);
-  const marker = text.match(BASELINE_PLACEHOLDER_RE);
-  if (marker) {
-    return { ok: false, code: BLOCK.BASELINE_PLACEHOLDER,
-      reason: `Baseline content reads as a placeholder ("${marker[0]}"). The baseline is the reference a challenger must beat — record the real loop/artifact bytes, not a stub.`,
-      evidence: { marker: marker[0] } };
-  }
-  const tokenEstimate = estimateTokens(text);
-  if (tokenEstimate < 200) {
-    return { ok: false, code: BLOCK.BASELINE_TOO_SHALLOW,
-      reason: `Baseline is too thin to be a real bar (~${tokenEstimate} tokens; a real baseline carries real content).`,
-      evidence: { tokenEstimate, minTokens: 200 } };
-  }
-  const headers = (text.match(/^#{2,3}\s+\S/gm) || []).length;
-  const codeBlocks = (text.match(/```[\s\S]*?```/g) || []).filter((b) => b.replace(/`/g, '').trim().length > 0).length;
-  if (headers < 3 && codeBlocks < 3) {
-    return { ok: false, code: BLOCK.BASELINE_TOO_SHALLOW,
-      reason: `Baseline lacks the structure of a real reference (found ${headers} markdown header(s) and ${codeBlocks} non-empty code block(s); need at least 3 of either).`,
-      evidence: { headers, codeBlocks } };
-  }
-  return { ok: true };
-}
 
 function skillsUsedFor(state) {
   return Array.isArray(state.skillsUsed) ? state.skillsUsed : [];
@@ -105,7 +83,8 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         promotion: { ...DEFAULTS.promotion },
         comparisonRule: 'pareto',
         runMode: 'infinite', // 'bounded' only when the operator sets a limit (maxCycles)
-        maxCycles: null      // bounded limit = max full tests; null = infinite (never self-stops)
+        maxCycles: null,     // bounded limit = max full tests; null = infinite (never self-stops)
+        realTest: null
       },
       userMessages: [], questions: [], answers: [],
       loops: {}, activeLoop: null, customLoops: {},
@@ -124,6 +103,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       skillsUsed: [],
       dashboardPath: null, reportPath: null,
       dashboard: { alwaysOn: true, reviewAuthority: 'dashboard-only', modelCanResolveReview: false },
+      realTest: null,
       continuation: { required: false, id: null, since: null, source: null, reason: null, next: null, clearedAt: null, clearedBy: null, history: [] },
       log: []
     };
@@ -634,6 +614,9 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   }
 
   function writeDashboardForState(state) {
+    if (state.realTest && state.realTest.enabled === true) {
+      state.realTest.experimentValidity = deriveExperimentValidity(state, state.realTest, store);
+    }
     const html = renderDashboard(state);
     const path = store.writeRunFile(state.runId, 'dashboard.html', html);
     state.dashboardPath = path;
@@ -844,6 +827,9 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     const notes = [];
     let partial = null;
     let source = 'defaults';
+    const explicitModelPolicy = args && args.modelPolicy && typeof args.modelPolicy === 'object'
+      ? args.modelPolicy
+      : null;
 
     if (args && typeof args.modelPreset === 'string' && args.modelPreset.trim()) {
       const preset = modelPolicyPreset(args.modelPreset);
@@ -852,12 +838,6 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         source = preset.source;
         notes.push(`model preset "${args.modelPreset.trim()}" selected`);
       }
-    }
-
-    if (args && args.modelPolicy && typeof args.modelPolicy === 'object') {
-      partial = { ...(partial || {}), ...args.modelPolicy };
-      source = 'operator-init';
-      notes.push('modelPolicy supplied in initialize_loop_run args');
     }
 
     // Scan answers for a model-choice reply (keyword hit, or the dedicated question index).
@@ -882,6 +862,15 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       notes.push(...parsed.notes);
       if (parsed.source === 'defaults') notes.push('model answer resolved to defaults');
       else notes.push('model answer applied from operator reply');
+    }
+
+    // Structured init configuration is authoritative over free-form answer text.
+    // Answers may supply omitted policy fields, but cannot widen or replace fields
+    // the operator explicitly provided in modelPolicy.
+    if (explicitModelPolicy) {
+      partial = { ...(partial || {}), ...explicitModelPolicy };
+      source = 'operator-init';
+      notes.push('modelPolicy supplied in initialize_loop_run args');
     }
 
     if (args && typeof args.model === 'string' && args.model.trim()) {
@@ -1017,7 +1006,188 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       return { ok: false, model: c.model, code: BLOCK.MEASUREMENT_AUTHORITY,
         reason: `agent run on ${c.model}: tokenCost authority is "${m.authority.tokenCost}", not tool-computed. The MCP must derive cost from the recorded bytes — record the raw run via artifact_record without { callerReported:true } and pass that measurementRef. A number the model typed is not evidence.` };
     }
-    return { ok: true, model: c.model, metrics: m.metrics, authority: m.authority, measurementRef: m.measurementRef, reverifiable: true };
+    let execution = null;
+    let metrics = {
+      ...m.metrics,
+      artifactOutputTokenEstimate: m.metrics.tokenCost,
+      cliReceiptTokenCost: null
+    };
+    let authority = { ...m.authority };
+    const strictExecution = state.config.realTest && state.config.realTest.enabled === true;
+    const hasExecutionRefs = !!(run && (run.rawArtifactRef || run.resultArtifactRef));
+    if (strictExecution) {
+      const rawArtifactRef = run && run.rawArtifactRef;
+      const resultArtifactRef = run && run.resultArtifactRef;
+      const evaluationArtifactRef = run && (run.evaluationArtifactRef || run.measurementRef);
+      const raw = rawArtifactRef && isSafeId(rawArtifactRef) ? store.readArtifact(state.runId, rawArtifactRef) : null;
+      const result = resultArtifactRef && isSafeId(resultArtifactRef) ? store.readArtifact(state.runId, resultArtifactRef) : null;
+      const evaluation = evaluationArtifactRef && isSafeId(evaluationArtifactRef)
+        ? store.readArtifact(state.runId, evaluationArtifactRef)
+        : null;
+      const isolation = raw ? inspectWorkerIsolation(raw.content) : null;
+      const receiptTokens = raw ? parseTokenUsage(raw.content) : null;
+      const rawResult = raw ? extractResult('codex', raw.content) : null;
+      const normalizedResult = rawResult ? normalizeStructuredWorkerOutput({}, rawResult) : null;
+      const argv = Array.isArray(run.argv) ? run.argv.map(String) : [];
+      const disabledFeatures = new Set(
+        Array.isArray(run.disabledFeatures) ? run.disabledFeatures.map(String) : []
+      );
+      const cwdIndex = argv.indexOf('-C');
+      const schemaIndex = argv.indexOf('--output-schema');
+      const strictLaunch = run.strictIsolation === true
+        && run.binaryFamily === 'codex'
+        && argv.includes('--ignore-user-config')
+        && STRICT_CODEX_DISABLED_FEATURES.every((feature) => (
+          disabledFeatures.has(feature)
+          && argv.some((value, index) => value === feature && argv[index - 1] === '--disable')
+        ))
+        && cwdIndex >= 0
+        && argv[cwdIndex + 1] === run.workspaceRoot
+        && schemaIndex >= 0
+        && !!argv[schemaIndex + 1]
+        && /^[a-f0-9]{64}$/i.test(String(run.outputSchemaSha256 || ''))
+        && run.resultNormalization === 'json-schema-v1'
+        && sha256(String(rawResult || '')) === String(run.rawResultSha256 || '')
+        && normalizedResult === result?.content;
+      const hasProposalEvidence = !!(run.proposalRawArtifactRef
+        || run.proposalResultArtifactRef
+        || run.proposalStdoutSha256
+        || run.proposalResultSha256);
+      const proposalVerification = hasProposalEvidence
+        ? verifyPersistedProposalRun(store, state.runId, {
+            model: c.model,
+            rawArtifactRef: run.proposalRawArtifactRef,
+            resultArtifactRef: run.proposalResultArtifactRef,
+            stdoutSha256: run.proposalStdoutSha256,
+            resultSha256: run.proposalResultSha256,
+            requestedModel: run.proposalRequestedModel,
+            reportedModel: run.proposalReportedModel,
+            binaryFamily: run.proposalBinaryFamily,
+            argv: run.proposalArgv,
+            modelSelectionAuthority: run.proposalModelSelectionAuthority,
+            modelIdentityAuthority: run.proposalModelIdentityAuthority,
+            reportedModelMatchesRequest: run.proposalReportedModelMatchesRequest,
+            strictIsolation: run.proposalStrictIsolation,
+            disabledFeatures: run.proposalDisabledFeatures,
+            workspaceRoot: run.proposalWorkspaceRoot,
+            outputSchemaSha256: run.proposalOutputSchemaSha256,
+            rawResultSha256: run.proposalRawResultSha256,
+            resultNormalization: run.proposalResultNormalization,
+            cliReportedTotalTokens: run.proposalCliReportedTotalTokens,
+            cliReportedTokenUsage: run.proposalCliReportedTokenUsage,
+            durationMs: run.proposalDurationMs,
+            exitCode: run.proposalExitCode,
+            isolation: run.proposalIsolation,
+            procedureSha256: run.procedureSha256
+          })
+        : { ok: true };
+      if (!raw || !result || !evaluation || evaluationArtifactRef !== m.measurementRef
+        || raw.sha256 !== String(run.stdoutSha256 || '')
+        || result.sha256 !== String(run.resultSha256 || '')
+        || String(run.requestedModel || '') !== c.model
+        || String(run.modelSelectionAuthority || '') !== 'explicit-model-flag'
+        || Number(run.exitCode) !== 0
+        || (run.reportedModel && String(run.reportedModel).toLowerCase() !== c.model.toLowerCase())
+        || !isolation || isolation.status !== 'PASS'
+        || !strictLaunch
+        || !proposalVerification.ok
+        || !Number.isFinite(receiptTokens) || receiptTokens <= 0
+        || receiptTokens !== Number(run.cliReportedTotalTokens)) {
+        return {
+          ok: false,
+          model: c.model,
+          reason: `agent run on ${c.model}: strict executor evidence must directly link matching raw/final/evaluation artifacts, a clean no-tool transcript, exact model routing, exit 0, and re-derived CLI token usage`,
+          code: BLOCK.MODEL_REPORTED
+        };
+      }
+      metrics = { ...metrics, tokenCost: receiptTokens, cliReceiptTokenCost: receiptTokens };
+      authority = { ...authority, tokenCost: TOOL_AUTHORITY };
+      execution = {
+        rawArtifactRef,
+        resultArtifactRef,
+        evaluationArtifactRef,
+        requestedModel: String(run.requestedModel || ''),
+        reportedModel: run.reportedModel || null,
+        binaryFamily: run.binaryFamily || null,
+        argv,
+        modelSelectionAuthority: run.modelSelectionAuthority || null,
+        modelIdentityAuthority: run.modelIdentityAuthority || null,
+        reportedModelMatchesRequest: run.reportedModelMatchesRequest ?? null,
+        strictIsolation: run.strictIsolation === true,
+        disabledFeatures: [...disabledFeatures],
+        workspaceRoot: run.workspaceRoot || null,
+        outputSchemaSha256: run.outputSchemaSha256 || null,
+        rawResultSha256: run.rawResultSha256 || null,
+        resultNormalization: run.resultNormalization || null,
+        cliReportedTotalTokens: Number.isFinite(run.cliReportedTotalTokens) ? run.cliReportedTotalTokens : null,
+        cliReportedTokenUsage: run.cliReportedTokenUsage || null,
+        durationMs: Number.isFinite(run.durationMs) ? run.durationMs : null,
+        exitCode: Number.isFinite(run.exitCode) ? run.exitCode : null,
+        isolation,
+        stdoutSha256: raw.sha256,
+        resultSha256: result.sha256,
+        procedureSha256: run.procedureSha256 || null,
+        proposalRawArtifactRef: run.proposalRawArtifactRef || null,
+        proposalResultArtifactRef: run.proposalResultArtifactRef || null,
+        proposalStdoutSha256: run.proposalStdoutSha256 || null,
+        proposalResultSha256: run.proposalResultSha256 || null,
+        proposalRequestedModel: run.proposalRequestedModel || null,
+        proposalReportedModel: run.proposalReportedModel || null,
+        proposalBinaryFamily: run.proposalBinaryFamily || null,
+        proposalArgv: Array.isArray(run.proposalArgv) ? run.proposalArgv.map(String) : [],
+        proposalModelSelectionAuthority: run.proposalModelSelectionAuthority || null,
+        proposalModelIdentityAuthority: run.proposalModelIdentityAuthority || null,
+        proposalReportedModelMatchesRequest: run.proposalReportedModelMatchesRequest ?? null,
+        proposalStrictIsolation: run.proposalStrictIsolation === true,
+        proposalDisabledFeatures: Array.isArray(run.proposalDisabledFeatures)
+          ? run.proposalDisabledFeatures.map(String)
+          : [],
+        proposalWorkspaceRoot: run.proposalWorkspaceRoot || null,
+        proposalOutputSchemaSha256: run.proposalOutputSchemaSha256 || null,
+        proposalRawResultSha256: run.proposalRawResultSha256 || null,
+        proposalResultNormalization: run.proposalResultNormalization || null,
+        proposalCliReportedTotalTokens: Number.isFinite(run.proposalCliReportedTotalTokens)
+          ? run.proposalCliReportedTotalTokens
+          : null,
+        proposalCliReportedTokenUsage: run.proposalCliReportedTokenUsage || null,
+        proposalDurationMs: Number.isFinite(run.proposalDurationMs) ? run.proposalDurationMs : null,
+        proposalExitCode: Number.isFinite(run.proposalExitCode) ? run.proposalExitCode : null,
+        proposalIsolation: run.proposalIsolation || null
+      };
+    } else if (hasExecutionRefs) {
+      const rawArtifactRef = run && run.rawArtifactRef;
+      const resultArtifactRef = run && run.resultArtifactRef;
+      const raw = rawArtifactRef && isSafeId(rawArtifactRef) ? store.readArtifact(state.runId, rawArtifactRef) : null;
+      const result = resultArtifactRef && isSafeId(resultArtifactRef) ? store.readArtifact(state.runId, resultArtifactRef) : null;
+      if (!raw || !result || resultArtifactRef !== m.measurementRef) {
+        return {
+          ok: false,
+          model: c.model,
+          reason: `agent run on ${c.model}: executor evidence must directly link raw and measured result artifacts`,
+          code: BLOCK.MODEL_REPORTED
+        };
+      }
+      execution = {
+        rawArtifactRef,
+        resultArtifactRef,
+        requestedModel: String(run.requestedModel || ''),
+        reportedModel: run.reportedModel || null,
+        modelIdentityAuthority: run.modelIdentityAuthority || null,
+        cliReportedTotalTokens: Number.isFinite(run.cliReportedTotalTokens) ? run.cliReportedTotalTokens : null,
+        durationMs: Number.isFinite(run.durationMs) ? run.durationMs : null,
+        stdoutSha256: raw.sha256,
+        resultSha256: result.sha256
+      };
+    }
+    return {
+      ok: true,
+      model: c.model,
+      metrics,
+      authority,
+      measurementRef: m.measurementRef,
+      reverifiable: true,
+      execution
+    };
   }
   function summarizeBenchmark(def) {
     const ov = Array.isArray(def.integrityOverride) ? def.integrityOverride : (def.integrityOverride ? [def.integrityOverride] : []);
@@ -1081,6 +1251,16 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       );
     }
     const ts = clock();
+    const answerSource = ['operator', 'config', 'default'].includes(args.answerSource)
+      ? args.answerSource
+      : 'operator';
+    const answerRecord = (answer, index) => ({
+      index,
+      sha256: sha256(String(answer)),
+      text: String(answer),
+      source: answerSource,
+      ts
+    });
     const runId = args.runId || `run-${hash8(String(args.task || '') + ts)}`;
     if (!isSafeId(runId)) return invalidIdBlock('runId', runId);
     let state = store.exists(runId) ? store.load(runId) : freshRun(runId, ts);
@@ -1097,7 +1277,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     // Ask-once already satisfied → idempotent. NEVER ask again.
     if ([STATUS.INITIALIZED, STATUS.ACTIVE, STATUS.NEEDS_RESUME].includes(state.status)) {
       if (Array.isArray(args.answers)) {
-        state.answers = args.answers.map((a, i) => ({ index: i, sha256: sha256(String(a)), text: String(a), ts }));
+        state.answers = args.answers.map(answerRecord);
         state.task.path = computeCampaignPath(state) || state.task.path || null;
       }
       state.updatedAt = ts;
@@ -1136,7 +1316,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       if (answersProvided) {
         state.answers = [
           ...(state.answers || []),
-          ...args.answers.map((a, i) => ({ index: (state.answers || []).length + i, sha256: sha256(String(a)), text: String(a), ts }))
+          ...args.answers.map((a, i) => answerRecord(a, (state.answers || []).length + i))
         ];
       }
       const resolvedConf = resolveModelConfirmationAnswer(confText, state.pendingModelConfirmation, args);
@@ -1169,13 +1349,59 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       state.config.maxCycles = Math.round(args.config.maxCycles);
       state.config.runMode = 'bounded';
     }
+    if (args.config && args.config.realTest && args.config.realTest.enabled === true) {
+      const raw = args.config.realTest;
+      const cleanHash = (value) => /^[a-f0-9]{64}$/i.test(String(value || '')) ? String(value).toLowerCase() : null;
+      state.config.realTest = {
+        enabled: true,
+        maxFindings: Number.isInteger(raw.maxFindings) ? Math.max(1, raw.maxFindings) : 5,
+        maxImprovementAttempts: Number.isInteger(raw.maxImprovementAttempts) ? Math.max(1, raw.maxImprovementAttempts) : 10,
+        planSha256: cleanHash(raw.planSha256),
+        benchmarkSha256: cleanHash(raw.benchmarkSha256),
+        approvedPlanSha256: cleanHash(raw.approvedPlanSha256),
+        planApproved: raw.planApproved === true,
+        benchmarkAuthority: raw.benchmarkAuthority === 'maker' ? 'maker' : null,
+        baselineStrategy: raw.baselineStrategy === 'route-batch' ? 'route-batch' : null,
+        parentRunId: isSafeId(raw.parentRunId) ? raw.parentRunId : null,
+        findingId: isSafeId(raw.findingId) ? raw.findingId : null,
+        evidenceManifest: Array.isArray(raw.evidenceManifest)
+          ? raw.evidenceManifest
+              .filter((item) => item && typeof item === 'object')
+              .map((item) => ({
+                path: String(item.path || ''),
+                bytes: Number.isInteger(item.bytes) ? item.bytes : null,
+                sha256: /^[a-f0-9]{64}$/i.test(String(item.sha256 || '')) ? String(item.sha256).toLowerCase() : null
+              }))
+          : []
+      };
+      state.realTest = {
+        enabled: true,
+        status: 'PREPARING',
+        findingsAccepted: 0,
+        findingsRejected: 0,
+        findingsTested: 0,
+        findingsBlocked: 0,
+        attemptsPlanned: 0,
+        attemptsValid: 0,
+        attemptsInvalid: 0,
+        coverage: [],
+        improvementAttempts: 0,
+        invalidAttempts: 0,
+        latestSubRunId: null,
+        benchmarkLocked: false,
+        baselineSamples: 0,
+        updatedAt: ts,
+        experimentValidity: null
+      };
+      state.realTest.experimentValidity = deriveExperimentValidity(state, state.realTest, store);
+    }
     if (args.config && args.config.comparisonRule) state.config.comparisonRule = args.config.comparisonRule;
     if (args.config && args.config.promotion) state.config.promotion = { ...state.config.promotion, ...args.config.promotion };
     state.task.mode = (args.config && args.config.mode) || inferMode(state.task.text);
 
     const answersProvided = Array.isArray(args.answers) && args.answers.length > 0;
     if (answersProvided) {
-      state.answers = args.answers.map((a, i) => ({ index: i, sha256: sha256(String(a)), text: String(a), ts }));
+      state.answers = args.answers.map(answerRecord);
     }
 
     // A4: an explicit "set it up and just go" message starts the run with surfaced
@@ -1515,6 +1741,19 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   // promotion sealed NEGATIVE_CONTROL_PASSED on null).
   function applyNegativeControlPrecondition(state, def) {
     if (!isDeterministicOracle(def.oracle)) { state.benchmark.negativeControl = null; return null; }
+    if (state.config.realTest && state.config.realTest.enabled === true) {
+      if (def.oracle?.kind !== CASE_RESULTS_ORACLE_KIND_V2 || !isCaseResultsOracle(def.oracle)) {
+        return blocked(BLOCK.BENCHMARK_GAMEABLE,
+          'Strict real-test benchmarks must use the case-results-v2 decision oracle; legacy or answer-visible marker oracles are refused before worker execution.');
+      }
+      const gameability = evaluateCaseResultsGameability(def.oracle);
+      if (!gameability.ok) {
+        return blocked(BLOCK.BENCHMARK_GAMEABLE,
+          'Strict real-test benchmark failed the freeze-time gameability controls.',
+          { gameability });
+      }
+      state.benchmark.gameability = { ...gameability, checkedAt: clock() };
+    }
     const ncRaw = def.negativeControl;
     const ncContent = (ncRaw && typeof ncRaw === 'object') ? String(ncRaw.content == null ? '' : ncRaw.content) : (typeof ncRaw === 'string' ? ncRaw : standardNegativeControl());
     const passMark = Number.isFinite(ncRaw && ncRaw.passMark) ? Number(ncRaw.passMark)
@@ -1617,7 +1856,102 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     const g = requireInitialized(state); if (g) return g;
     if (!state.benchmark.frozen) return blocked(BLOCK.BENCHMARK_FIRST, 'Freeze a benchmark first (benchmark_select). The scorecard must be frozen before any measured run.');
     const arm = args.arm || 'baseline';
-    const m = resolveMeasurement(state, args.measurementRef);
+    const strictRealTest = state.config.realTest && state.config.realTest.enabled === true;
+    const baselineAgentRuns = arm === 'baseline' && Array.isArray(args.agentRuns) ? args.agentRuns : [];
+    const batchRefs = arm === 'baseline' && Array.isArray(args.measurementRefs)
+      ? args.measurementRefs.map(String).filter(Boolean)
+      : [];
+    let m = null;
+    if (baselineAgentRuns.length) {
+      if (!strictRealTest) {
+        return blocked(BLOCK.BAD_INPUT, 'baseline agentRuns are reserved for strict real-test executor receipts.');
+      }
+      if (baselineAgentRuns.length < DEFAULTS.fullTestAgentsMin || baselineAgentRuns.length > DEFAULTS.fullTestAgentsMax) {
+        return blocked(
+          BLOCK.FULLTEST_AGENTS,
+          `Strict real-test baseline must use ${DEFAULTS.fullTestAgentsMin}-${DEFAULTS.fullTestAgentsMax} captured worker runs; received ${baselineAgentRuns.length}.`
+        );
+      }
+      const validated = baselineAgentRuns.map((run) => validateAgentRun(state, run));
+      const failed = validated.filter((item) => !item.ok);
+      if (failed.length) {
+        return blocked(BLOCK.MODEL_REPORTED, `Baseline batch rejected: ${failed[0].reason}. Every baseline route must bind to re-readable executor receipts.`);
+      }
+      if (validated.some((item) => item.authority.quality !== TOOL_AUTHORITY)) {
+        return blocked(BLOCK.MEASUREMENT_AUTHORITY, 'Strict real-test baseline rejected: every route quality must be tool-computed by the frozen deterministic oracle.');
+      }
+      const qualities = validated.map((item) => item.metrics.quality);
+      const costs = validated.map((item) => item.metrics.tokenCost);
+      const outputEstimates = validated.map((item) => item.metrics.artifactOutputTokenEstimate);
+      m = {
+        ok: true,
+        metrics: {
+          tokenCost: round(mean(costs)),
+          artifactOutputTokenEstimate: round(mean(outputEstimates)),
+          cliReceiptTokenCost: round(mean(costs)),
+          quality: round(mean(qualities)),
+          n: validated.length,
+          stdevQuality: round(stdev(qualities)),
+          minQuality: round(Math.min(...qualities)),
+          maxQuality: round(Math.max(...qualities))
+        },
+        authority: { tokenCost: TOOL_AUTHORITY, quality: TOOL_AUTHORITY },
+        measurementRef: null,
+        measurementRefs: validated.map((item) => item.measurementRef),
+        agentRuns: validated.map((item) => ({
+          model: item.model,
+          tokenCost: item.metrics.tokenCost,
+          artifactOutputTokenEstimate: item.metrics.artifactOutputTokenEstimate,
+          cliReceiptTokenCost: item.metrics.cliReceiptTokenCost,
+          quality: item.metrics.quality,
+          measurementRef: item.measurementRef,
+          qualityAuthority: item.authority.quality,
+          ...(item.execution || {})
+        }))
+      };
+    } else if (batchRefs.length) {
+      if (strictRealTest && (batchRefs.length < DEFAULTS.fullTestAgentsMin || batchRefs.length > DEFAULTS.fullTestAgentsMax)) {
+        return blocked(
+          BLOCK.FULLTEST_AGENTS,
+          `Strict real-test baseline must use ${DEFAULTS.fullTestAgentsMin}-${DEFAULTS.fullTestAgentsMax} captured worker runs; received ${batchRefs.length}.`
+        );
+      }
+      if (new Set(batchRefs).size !== batchRefs.length) {
+        return blocked(BLOCK.BAD_INPUT, 'Baseline measurementRefs must be unique; duplicate evidence cannot simulate an independent route batch.');
+      }
+      const measured = batchRefs.map((measurementRef) => resolveMeasurement(state, measurementRef));
+      const failed = measured.filter((item) => !item.ok);
+      if (failed.length) {
+        return blocked(BLOCK.MODEL_REPORTED, `Baseline batch rejected: ${failed[0].reason}. Every baseline route must bind to a captured measurementRef.`);
+      }
+      if (measured.some((item) => item.authority.tokenCost !== TOOL_AUTHORITY)) {
+        return blocked(BLOCK.MEASUREMENT_AUTHORITY, 'Baseline batch rejected: every route cost must be tool-computed from captured bytes.');
+      }
+      if (strictRealTest && measured.some((item) => item.authority.quality !== TOOL_AUTHORITY)) {
+        return blocked(BLOCK.MEASUREMENT_AUTHORITY, 'Strict real-test baseline rejected: every route quality must be tool-computed by the frozen deterministic oracle.');
+      }
+      const qualities = measured.map((item) => item.metrics.quality);
+      const costs = measured.map((item) => item.metrics.tokenCost);
+      m = {
+        ok: true,
+        metrics: {
+          tokenCost: round(mean(costs)),
+          quality: round(mean(qualities)),
+          n: measured.length,
+          stdevQuality: round(stdev(qualities)),
+          minQuality: round(Math.min(...qualities)),
+          maxQuality: round(Math.max(...qualities))
+        },
+        authority: {
+          tokenCost: TOOL_AUTHORITY,
+          quality: measured.every((item) => item.authority.quality === TOOL_AUTHORITY) ? TOOL_AUTHORITY : CALLER_AUTHORITY
+        },
+        measurementRef: null,
+        measurementRefs: measured.map((item) => item.measurementRef)
+      };
+    } else {
+      m = resolveMeasurement(state, args.measurementRef);
+    }
     if (!m.ok) return blocked(BLOCK.MODEL_REPORTED, `Benchmark run rejected: ${m.reason}. The bar must be tool-measured with a raw artifact (measurementRef); model self-report never sets or moves the bar.`);
     if (m.authority.tokenCost !== TOOL_AUTHORITY) {
       return blocked(BLOCK.MEASUREMENT_AUTHORITY, `Benchmark run rejected: tokenCost authority is "${m.authority.tokenCost}", not tool-computed. The MCP must derive the bar's cost from recorded bytes; a caller-reported number cannot set the bar challengers are measured against.`, { authority: m.authority });
@@ -1634,12 +1968,36 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         return blocked(BLOCK.BASELINE_AUTHOR_FORBIDDEN, why,
           { baselineSource: state.baseline.baselineSource || null, selfBar: !!state.baseline.selfBar });
       }
-      state.benchmark.baselineScore = { tokenCost: m.metrics.tokenCost, quality: m.metrics.quality, source: 'tool', qualityAuthority: m.authority.quality, measurementRef: m.measurementRef, ts: clock() };
-      clearContinuation(state, 'benchmark_run', { arm: 'baseline', measurementRef: m.measurementRef });
-      logEvent(state, 'baseline_bar_set', { ...m.metrics });
+      state.benchmark.baselineScore = {
+        tokenCost: m.metrics.tokenCost,
+        artifactOutputTokenEstimate: m.metrics.artifactOutputTokenEstimate ?? m.metrics.tokenCost,
+        cliReceiptTokenCost: m.metrics.cliReceiptTokenCost ?? null,
+        quality: m.metrics.quality,
+        source: 'tool',
+        qualityAuthority: m.authority.quality,
+        measurementRef: m.measurementRef,
+        measurementRefs: m.measurementRefs || undefined,
+        agentRuns: m.agentRuns || undefined,
+        n: m.metrics.n || 1,
+        stdevQuality: m.metrics.stdevQuality ?? 0,
+        minQuality: m.metrics.minQuality ?? m.metrics.quality,
+        maxQuality: m.metrics.maxQuality ?? m.metrics.quality,
+        ts: clock()
+      };
+      clearContinuation(state, 'benchmark_run', {
+        arm: 'baseline',
+        measurementRef: m.measurementRef,
+        measurementRefs: m.measurementRefs || undefined
+      });
+      logEvent(state, 'baseline_bar_set', {
+        ...m.metrics,
+        artifactOutputTokenEstimate: m.metrics.artifactOutputTokenEstimate ?? m.metrics.tokenCost,
+        cliReceiptTokenCost: m.metrics.cliReceiptTokenCost ?? null,
+        strategy: m.measurementRefs ? 'route-batch' : 'single-run'
+      });
       state.updatedAt = clock();
       store.save(state);
-      return ok(`Baseline bar set: quality ${m.metrics.quality}, tokenCost ${m.metrics.tokenCost} (tool-measured).`, {
+      return ok(`Baseline bar set: quality ${m.metrics.quality}, tokenCost ${m.metrics.tokenCost} (${m.measurementRefs ? `${m.measurementRefs.length}-run route batch` : 'single run'}, tool-measured).`, {
         baselineScore: state.benchmark.baselineScore, continuation: continuationPayload(state), next: 'Register 3–5 frontier hypotheses (register_hypotheses).'
       });
     }
@@ -1661,8 +2019,19 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (!state.benchmark.frozen) return blocked(BLOCK.BENCHMARK_FIRST, 'Freeze the benchmark/scorecard before registering hypotheses (benchmark-first).');
     if (!state.benchmark.baselineScore) return blocked(BLOCK.BASELINE_BAR_FIRST, 'Run the baseline arm through the frozen benchmark (benchmark_run arm=baseline, tool-measured) to set the bar before challengers. The first benchmark is the whole point — it is not optional.');
     const hyps = Array.isArray(args.hypotheses) ? args.hypotheses : [];
-    if (hyps.length < DEFAULTS.hypothesisMin || hyps.length > DEFAULTS.hypothesisMax) {
-      return blocked(BLOCK.HYPOTHESIS_COUNT, `A full test needs ${DEFAULTS.hypothesisMin}–${DEFAULTS.hypothesisMax} parallel hypotheses tested with frontier models; you provided ${hyps.length}.`, { provided: hyps.length });
+    const strictRealTest = state.config.realTest && state.config.realTest.enabled === true;
+    const countOk = strictRealTest
+      ? hyps.length === 2
+      : hyps.length >= DEFAULTS.hypothesisMin && hyps.length <= DEFAULTS.hypothesisMax;
+    if (!countOk) {
+      const expected = strictRealTest ? 'exactly 2' : `${DEFAULTS.hypothesisMin}–${DEFAULTS.hypothesisMax}`;
+      return blocked(BLOCK.HYPOTHESIS_COUNT, `A ${strictRealTest ? 'strict finding' : 'full test'} needs ${expected} substantive hypotheses; you provided ${hyps.length}.`, { provided: hyps.length });
+    }
+    if (strictRealTest) {
+      for (const hypothesis of hyps) {
+        const integrity = checkHypothesisIntegrity(hypothesis, hyps);
+        if (!integrity.ok) return blocked(BLOCK.HYPOTHESIS_TOO_SHALLOW, integrity.reason, { evidence: integrity.evidence });
+      }
     }
     const pol = activePolicy(state);
     const routes = hyps.map((h) => (h.route && h.route.model) || h.model || '');
@@ -1694,18 +2063,33 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     }
     const created = [];
     hyps.forEach((h, i) => {
-      const hid = nextId(state, 'hypothesis', 'hyp');
+      const suppliedId = strictRealTest ? String(h.id || '') : '';
+      const expectedId = strictRealTest && state.config.realTest.findingId
+        ? `${state.config.realTest.findingId}-h${i + 1}`
+        : null;
+      const hid = suppliedId || nextId(state, 'hypothesis', 'hyp');
+      if (suppliedId) state.counters.hypothesis = (state.counters.hypothesis || 0) + 1;
       const builderRoute = (h.builderRoute && h.builderRoute.model) || h.builderRoute || null;
       const meta = routeMeta[i];
+      if (strictRealTest && (!isSafeId(hid) || (expectedId && hid !== expectedId)
+        || state.hypotheses.some((item) => item.id === hid))) {
+        created.push(null);
+        return;
+      }
       state.hypotheses.push({
         id: hid, title: h.title || hid, bottleneck: h.bottleneck || '', operation: h.operation || '',
         expectedMovement: h.expectedMovement || '', route: { model: (h.route && h.route.model) || h.model },
         builderRoute: builderRoute || null,
         executorBin: meta.bin, spawnable: !!meta.bin, manualRecord: meta.manual, provenance: meta.provenance, executorRan: false,
-        tradeoff: h.tradeoff || '', falsifier: h.falsifier || '', status: 'REGISTERED', ts: clock()
+        tradeoff: h.tradeoff || '', falsifier: h.falsifier || '',
+        findingId: strictRealTest ? state.config.realTest.findingId : null,
+        status: 'REGISTERED', ts: clock()
       });
       created.push(hid);
     });
+    if (created.some((id) => !id)) {
+      return blocked(BLOCK.HYPOTHESIS_TOO_SHALLOW, 'Strict hypothesis IDs must match the supervisor-assigned finding IDs and be unique.');
+    }
     logEvent(state, 'hypotheses_registered', { count: created.length });
     clearContinuation(state, 'register_hypotheses', { hypothesisIds: created });
     state.updatedAt = clock();
@@ -1746,21 +2130,45 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
 
     const quals = validated.map((v) => v.metrics.quality);
     const costs = validated.map((v) => v.metrics.tokenCost);
+    const outputEstimates = validated.map((v) => v.metrics.artifactOutputTokenEstimate);
+    const cliReceiptCosts = validated.map((v) => v.metrics.cliReceiptTokenCost);
     const qualityAuthority = validated.every((v) => v.authority.quality === TOOL_AUTHORITY) ? TOOL_AUTHORITY : CALLER_AUTHORITY;
-    const agg = { tokenCost: round(mean(costs)), quality: round(mean(quals)), n: validated.length, stdevQuality: round(stdev(quals)), minQuality: round(Math.min(...quals)), maxQuality: round(Math.max(...quals)) };
+    const agg = {
+      tokenCost: round(mean(costs)),
+      artifactOutputTokenEstimate: round(mean(outputEstimates)),
+      cliReceiptTokenCost: cliReceiptCosts.every(Number.isFinite) ? round(mean(cliReceiptCosts)) : null,
+      quality: round(mean(quals)),
+      n: validated.length,
+      stdevQuality: round(stdev(quals)),
+      minQuality: round(Math.min(...quals)),
+      maxQuality: round(Math.max(...quals))
+    };
     // Movement math uses the same thresholds as promotion, but this batch is NOT yet
     // reverified — store reverified:false and label the response so consumers cannot
     // misread a pre-reverify MOVED_FRONTIER as a shippable win. Promotion gating itself
     // still requires reverify_run (untouched).
     const mv = evaluatePromotion(state.benchmark.baselineScore, { tokenCost: agg.tokenCost, quality: agg.quality, source: 'tool', reverified: true }, state.config.promotion, state.config.comparisonRule);
-    const moved = mv.promote || mv.code === BLOCK.STAGED_TRADEOFF;
-    const verdict = moved ? VERDICT.MOVED_FRONTIER : VERDICT.NO_IMPROVEMENT;
+    const moved = mv.promote === true;
+    const verdict = moved
+      ? VERDICT.MOVED_FRONTIER
+      : (mv.code === BLOCK.STAGED_TRADEOFF ? BLOCK.STAGED_TRADEOFF : VERDICT.NO_IMPROVEMENT);
     const tid = nextId(state, 'test', 'test');
     state.tests.push({
       id: tid, hypothesisId: h.id, ts: clock(),
-      agentRuns: validated.map((v) => ({ model: v.model, tokenCost: v.metrics.tokenCost, quality: v.metrics.quality, measurementRef: v.measurementRef, qualityAuthority: v.authority.quality, reverifiable: v.reverifiable })),
+      agentRuns: validated.map((v) => ({
+        model: v.model,
+        tokenCost: v.metrics.tokenCost,
+        artifactOutputTokenEstimate: v.metrics.artifactOutputTokenEstimate,
+        cliReceiptTokenCost: v.metrics.cliReceiptTokenCost,
+        quality: v.metrics.quality,
+        measurementRef: v.measurementRef,
+        qualityAuthority: v.authority.quality,
+        reverifiable: v.reverifiable,
+        ...(v.execution || {})
+      })),
       agg, source: 'tool', qualityAuthority, reverified: false, verdict, movement: mv, verdictBasis: 'pre-reverify'
     });
+    if (validated.length > 0 && validated.every((v) => v.execution)) h.executorRan = true;
     if (moved && h.status !== 'PROMOTED_INTERNAL') h.status = VERDICT.MOVED_FRONTIER;
     else if (h.status === 'REGISTERED') h.status = 'TESTED';
 
@@ -1772,7 +2180,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     const lane = ensureActiveLane(state);
     let advisory = null;
     let retirement = null;
-    if (verdict === VERDICT.NO_IMPROVEMENT) {
+    if (!moved) {
       state.failures.consecutive++; state.failures.total++;
       lane.noImproveBatches = (lane.noImproveBatches || 0) + 1;
     } else {
@@ -1789,7 +2197,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       if (h.status !== 'PROMOTED_INTERNAL') h.status = 'RETIRED';
       const t = autoTransition(state, 'branch_retirement', { lane: lane.id, batches: lane.noImproveBatches, hypothesisId: h.id });
       retirement = { laneId: lane.id, batches: lane.noImproveBatches, pivotedToKind: t.plan.kind, pivotedToLoop: t.plan.loop, transitionId: t.transitionId };
-    } else if (verdict === VERDICT.NO_IMPROVEMENT) {
+    } else if (!moved) {
       requireContinuation(state, 'no_improvement', `Full test ${tid} did not move the frontier; continue into another hypothesis, operation, or lane.`);
     } else {
       clearContinuation(state, 'test_hypothesis', { testId: tid, verdict });
@@ -1818,7 +2226,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         ? `Branch retired and the supervisor auto-pivoted. ${retirement.pivotedToLoop ? `loop_start { loop:"${retirement.pivotedToLoop}" }` : 'open the next improvement branch (register_hypotheses for the next bottleneck)'}. The campaign keeps running.`
         : verdict === VERDICT.MOVED_FRONTIER
         ? `Deep-reverify the winning evidence (reverify_run { testId:"${tid}" }), then promotion_request. The verdict above is pre-reverify only.`
-        : 'No movement. This is not a final answer and not a stopping point; iterate another hypothesis, try another operation, or pivot lanes.'
+        : 'No promotable movement. This is not a final answer and not a stopping point; iterate another hypothesis, try another operation, or pivot lanes.'
     });
   }
 
@@ -1866,17 +2274,37 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         { failures: failed.map((f) => ({ model: f.model, reason: f.reason, message: f.message })), countedTowardRetirement: false });
     }
 
-    // Each captured stdout becomes a TOOL-EXECUTED artifact; the MCP derives the
-    // metric from the bytes IT captured (not a number or log the model handed in).
-    // Step 3 — these are Loop Factory-executed runs, so the hypothesis now has spawned-run
-    // evidence; a later manual artifact_record for it does not need provenance.
-    h.executorRan = true;
+    // Persist both the raw CLI envelope and the extracted comparable result. The
+    // direct links and invocation hashes travel with the agent run into test_hypothesis.
     const agentRuns = [];
     const workers = [];
     for (const l of launches) {
-      const art = artifact_record({ runId: state.runId, role: 'runlog', name: `exec-${l.model}`, content: l.stdout, measure: true });
-      agentRuns.push({ model: l.model, measurementRef: art.artifactId });
-      workers.push({ model: l.model, bin: l.bin, exitCode: l.exitCode, durationMs: l.durationMs, bytes: String(l.stdout).length, realTokenUsage: l.tokenUsage, measurementRef: art.artifactId });
+      const raw = artifact_record({ runId: state.runId, role: 'executor-raw', name: `exec-raw-${l.model}`, content: l.stdout });
+      const resultArt = artifact_record({ runId: state.runId, role: 'runlog', name: `exec-result-${l.model}`, content: l.resultText || l.stdout, measure: true });
+      agentRuns.push({
+        model: l.model,
+        measurementRef: resultArt.artifactId,
+        rawArtifactRef: raw.artifactId,
+        resultArtifactRef: resultArt.artifactId,
+        requestedModel: l.invocation.requestedModel,
+        reportedModel: l.invocation.reportedModel,
+        modelIdentityAuthority: l.invocation.modelSelectionAuthority,
+        cliReportedTotalTokens: l.tokenUsage,
+        durationMs: l.durationMs,
+        stdoutSha256: l.invocation.stdoutSha256,
+        resultSha256: l.invocation.resultSha256
+      });
+      workers.push({
+        model: l.model,
+        bin: l.bin,
+        exitCode: l.exitCode,
+        durationMs: l.durationMs,
+        bytes: String(l.stdout).length,
+        realTokenUsage: l.tokenUsage,
+        rawArtifactRef: raw.artifactId,
+        resultArtifactRef: resultArt.artifactId,
+        measurementRef: resultArt.artifactId
+      });
     }
     // Same gate/aggregate/verdict/retirement path as a recorded full test.
     const result = test_hypothesis({ runId: state.runId, hypothesisId: h.id, fullTest: { agentRuns, notes: 'tool-executed via execute_full_test' } });
@@ -1919,19 +2347,77 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       if (!art) { problems.push(`run ${run.model}: artifact ${run.measurementRef} missing`); continue; }
       const reHash = sha256(art.content);
       if (reHash !== art.sha256) { problems.push(`run ${run.model}: artifact bytes tampered (content hash ${reHash}!=${art.sha256})`); continue; }
-      const reCost = estimateTokens(art.content);
+      const reArtifactOutputTokenEstimate = estimateTokens(art.content);
+      let reCost = reArtifactOutputTokenEstimate;
+      if (run.rawArtifactRef || run.resultArtifactRef || run.evaluationArtifactRef) {
+        const raw = run.rawArtifactRef && store.readArtifact(state.runId, run.rawArtifactRef);
+        const result = run.resultArtifactRef && store.readArtifact(state.runId, run.resultArtifactRef);
+        const evaluation = run.evaluationArtifactRef && store.readArtifact(state.runId, run.evaluationArtifactRef);
+        if (!raw || !result || !evaluation
+          || evaluation.id !== run.measurementRef
+          || sha256(raw.content) !== raw.sha256
+          || sha256(result.content) !== result.sha256
+          || raw.sha256 !== run.stdoutSha256
+          || result.sha256 !== run.resultSha256) {
+          problems.push(`run ${run.model}: linked raw/final/evaluation artifacts do not reverify`);
+          continue;
+        }
+        const isolation = inspectWorkerIsolation(raw.content);
+        if (isolation.status !== 'PASS') {
+          problems.push(`run ${run.model}: isolation transcript contains tool activity`);
+          continue;
+        }
+        const receiptTokens = parseTokenUsage(raw.content);
+        if (!Number.isFinite(receiptTokens) || receiptTokens !== run.cliReportedTotalTokens) {
+          problems.push(`run ${run.model}: CLI token receipt does not rederive`);
+          continue;
+        }
+        if (run.requestedModel !== run.model || run.modelSelectionAuthority !== 'explicit-model-flag'
+          || run.exitCode !== 0
+          || (run.reportedModel && String(run.reportedModel).toLowerCase() !== String(run.model).toLowerCase())) {
+          problems.push(`run ${run.model}: model or exit receipt does not match the strict contract`);
+          continue;
+        }
+        if (run.proposalRawArtifactRef || run.proposalResultArtifactRef) {
+          const proposalRaw = run.proposalRawArtifactRef && store.readArtifact(state.runId, run.proposalRawArtifactRef);
+          const proposalResult = run.proposalResultArtifactRef && store.readArtifact(state.runId, run.proposalResultArtifactRef);
+          const proposalPayload = proposalResult ? parseCaseResults(proposalResult.content).payload : null;
+          if (!proposalRaw || !proposalResult || !proposalPayload
+            || proposalRaw.sha256 !== run.proposalStdoutSha256
+            || proposalResult.sha256 !== run.proposalResultSha256
+            || inspectWorkerIsolation(proposalRaw.content).status !== 'PASS'
+            || sha256(String(proposalPayload.revisedContent || '')) !== run.procedureSha256) {
+            problems.push(`run ${run.model}: proposal artifacts or procedure hash do not reverify`);
+            continue;
+          }
+        }
+        reCost = receiptTokens;
+      }
+      if (Number.isFinite(run.artifactOutputTokenEstimate)
+        && reArtifactOutputTokenEstimate !== run.artifactOutputTokenEstimate) {
+        problems.push(`run ${run.model}: re-derived artifactOutputTokenEstimate ${reArtifactOutputTokenEstimate} != recorded ${run.artifactOutputTokenEstimate} (bytes do not back the cost)`);
+        continue;
+      }
       const reQual = isDeterministicOracle(oracle)
         ? scoreOracle(art.content, oracle)
         : (art.measurement ? Number(art.measurement.quality) : NaN);
       if (reCost !== run.tokenCost) { problems.push(`run ${run.model}: re-derived tokenCost ${reCost} != recorded ${run.tokenCost} (bytes do not back the cost)`); continue; }
       if (!(Math.abs(reQual - run.quality) < 1e-9)) { problems.push(`run ${run.model}: re-derived quality ${reQual} != recorded ${run.quality} (bytes do not back the quality)`); continue; }
-      recomputed.push({ tokenCost: reCost, quality: reQual });
+      recomputed.push({
+        tokenCost: reCost,
+        artifactOutputTokenEstimate: reArtifactOutputTokenEstimate,
+        quality: reQual
+      });
     }
     let aggOk = false;
     if (recomputed.length === test.agentRuns.length && recomputed.length > 0) {
       const q = round(mean(recomputed.map((r) => r.quality)));
       const c = round(mean(recomputed.map((r) => r.tokenCost)));
-      aggOk = Math.abs(q - test.agg.quality) < 1e-9 && Math.abs(c - test.agg.tokenCost) < 1e-9;
+      const outputEstimate = round(mean(recomputed.map((r) => r.artifactOutputTokenEstimate)));
+      aggOk = Math.abs(q - test.agg.quality) < 1e-9
+        && Math.abs(c - test.agg.tokenCost) < 1e-9
+        && (!Number.isFinite(test.agg.artifactOutputTokenEstimate)
+          || Math.abs(outputEstimate - test.agg.artifactOutputTokenEstimate) < 1e-9);
       if (!aggOk) problems.push(`recomputed aggregate (q${q},c${c}) != stored (q${test.agg.quality},c${test.agg.tokenCost})`);
     }
     const reverified = problems.length === 0 && aggOk;
@@ -2224,6 +2710,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       maxCycles: state.config.maxCycles,
       cyclesDone: (state.counters && state.counters.test) || 0,
       boundedComplete: boundedComplete(state),
+      realTest: state.realTest ? clone(state.realTest) : null,
       stopCondition: STOP_CONDITION_WARNING,
       continuation: continuationPayload(state)
     });
@@ -2305,6 +2792,9 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (!state) return blocked(BLOCK.UNKNOWN_RUN, `No run "${args.runId}".`);
     const g = requireInitialized(state); if (g) return g;
     requireContinuation(state, 'report_export', 'Report was exported; a report is a checkpoint, not completion.');
+    if (state.realTest && state.realTest.enabled === true) {
+      state.realTest.experimentValidity = deriveExperimentValidity(state, state.realTest, store);
+    }
     const md = renderReport(state);
     const path = store.writeRunFile(state.runId, 'report.md', md);
     state.reportPath = path;
@@ -2747,7 +3237,26 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
           stdoutSha256: input.invocation.stdoutSha256 || null,
           resultSha256: input.invocation.resultSha256 || null,
           tokenUsage: Number.isFinite(input.invocation.tokenUsage) ? input.invocation.tokenUsage : null,
-          tokenUsageAuthority: input.invocation.tokenUsageAuthority || null
+          tokenUsageDetails: input.invocation.tokenUsageDetails && typeof input.invocation.tokenUsageDetails === 'object'
+            ? { ...input.invocation.tokenUsageDetails }
+            : null,
+          tokenUsageAuthority: input.invocation.tokenUsageAuthority || null,
+          strictIsolation: input.invocation.strictIsolation === true,
+          disabledFeatures: Array.isArray(input.invocation.disabledFeatures)
+            ? input.invocation.disabledFeatures.map(String)
+            : [],
+          workspaceRoot: input.invocation.workspaceRoot || null,
+          outputSchemaSha256: input.invocation.outputSchemaSha256 || null,
+          rawResultSha256: input.invocation.rawResultSha256 || null,
+          resultNormalization: input.invocation.resultNormalization || null,
+          isolation: input.invocation.isolation && typeof input.invocation.isolation === 'object'
+            ? {
+                status: input.invocation.isolation.status || null,
+                toolCalls: Array.isArray(input.invocation.isolation.toolCalls)
+                  ? input.invocation.isolation.toolCalls.map((item) => ({ ...item }))
+                  : []
+              }
+            : null
         }
       : null;
     const rec = {
@@ -2779,7 +3288,78 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     store.save(state);
     return { ok: true, event: rec };
   }
-  function applyDashboardDecisions({ runId, decisions } = {}) {
+  function recordCampaignProgress({ runId, progress } = {}) {
+    if (!isSafeId(runId)) return { ok: false, reason: `invalid runId "${runId}"` };
+    if (!store.exists(runId)) return { ok: false, reason: `no run "${runId}"` };
+    const state = store.load(runId);
+    const current = state.realTest && typeof state.realTest === 'object'
+      ? state.realTest
+      : { enabled: true };
+    const input = progress && typeof progress === 'object' ? progress : {};
+    const status = ['PREPARING', 'RUNNING', 'CAP_REACHED', 'QUEUE_DRAINED', 'OPERATOR_STOP', 'BLOCKED'].includes(input.status)
+      ? input.status
+      : current.status || 'RUNNING';
+    const safeCount = (value, fallback = 0) => Number.isInteger(value) && value >= 0 ? value : fallback;
+    const coverage = Array.isArray(input.coverage)
+      ? input.coverage
+          .filter((item) => item && typeof item === 'object' && isSafeId(item.findingId))
+          .map((item) => ({
+            findingId: item.findingId,
+            childRunId: isSafeId(item.childRunId) ? item.childRunId : null,
+            baselineSha256: /^[a-f0-9]{64}$/i.test(String(item.baselineSha256 || '')) ? String(item.baselineSha256).toLowerCase() : null,
+            miningRawArtifactId: isSafeId(item.miningRawArtifactId) ? item.miningRawArtifactId : null,
+            miningCaptureArtifactId: isSafeId(item.miningCaptureArtifactId) ? item.miningCaptureArtifactId : null,
+            evidenceRefs: Array.isArray(item.evidenceRefs)
+              ? item.evidenceRefs.map((ref) => ({
+                  path: String(ref && ref.path || ''),
+                  locator: String(ref && ref.locator || ''),
+                  sourceSha256: /^[a-f0-9]{64}$/i.test(String(ref && ref.sourceSha256 || ''))
+                    ? String(ref.sourceSha256).toLowerCase()
+                    : null,
+                  resolvedSha256: /^[a-f0-9]{64}$/i.test(String(ref && ref.resolvedSha256 || ''))
+                    ? String(ref.resolvedSha256).toLowerCase()
+                    : null
+                }))
+              : [],
+            hypothesisIds: Array.isArray(item.hypothesisIds) ? item.hypothesisIds.filter(isSafeId) : [],
+            planned: safeCount(item.planned, 0),
+            valid: safeCount(item.valid, 0),
+            invalid: safeCount(item.invalid, 0),
+            status: ['UNTESTED', 'RUNNING', 'PARTIAL', 'COVERED', 'BLOCKED'].includes(item.status) ? item.status : 'UNTESTED'
+          }))
+      : (Array.isArray(current.coverage) ? current.coverage : []);
+    state.realTest = {
+      enabled: true,
+      status,
+      findingsAccepted: safeCount(input.findingsAccepted, current.findingsAccepted),
+      findingsRejected: safeCount(input.findingsRejected, current.findingsRejected),
+      findingsTested: safeCount(input.findingsTested, current.findingsTested),
+      findingsBlocked: safeCount(input.findingsBlocked, current.findingsBlocked),
+      attemptsPlanned: safeCount(input.attemptsPlanned, current.attemptsPlanned),
+      attemptsValid: safeCount(input.attemptsValid, current.attemptsValid),
+      attemptsInvalid: safeCount(input.attemptsInvalid, current.attemptsInvalid),
+      coverage,
+      improvementAttempts: safeCount(input.improvementAttempts, current.improvementAttempts),
+      invalidAttempts: safeCount(input.invalidAttempts, current.invalidAttempts),
+      latestSubRunId: isSafeId(input.latestSubRunId) ? input.latestSubRunId : current.latestSubRunId || null,
+      benchmarkLocked: input.benchmarkLocked === true || current.benchmarkLocked === true,
+      baselineSamples: safeCount(input.baselineSamples, current.baselineSamples),
+      updatedAt: clock()
+    };
+    state.realTest.experimentValidity = deriveExperimentValidity(state, state.realTest, store);
+    logEvent(state, 'real_test_progress', {
+      status: state.realTest.status,
+      findingsAccepted: state.realTest.findingsAccepted,
+      improvementAttempts: state.realTest.improvementAttempts,
+      invalidAttempts: state.realTest.invalidAttempts,
+      latestSubRunId: state.realTest.latestSubRunId
+    });
+    state.updatedAt = clock();
+    const dash = writeDashboardForState(state);
+    store.save(state);
+    return { ok: true, progress: clone(state.realTest), dashboardPath: dash.path };
+  }
+  function applyDashboardDecisions({ runId, decisions, requireBinding = false } = {}) {
     if (!isSafeId(runId)) return { ok: false, reason: `invalid runId "${runId}"` };
     if (!store.exists(runId)) return { ok: false, reason: `no run "${runId}"` };
     const state = store.load(runId);
@@ -2791,6 +3371,33 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       const review = (state.humanReviews || []).find((r) => r.id === reviewId);
       if (!review) { applied.push({ reviewId, skipped: 'no such review' }); continue; }
       if (review.status !== 'PENDING') { applied.push({ reviewId, skipped: `already ${review.status}` }); continue; }
+      const currentReviewSha256 = reviewDecisionBinding(state, review);
+      if (requireBinding) {
+        const queuedReviewSha256 = String(d.reviewSha256 || '').toLowerCase();
+        const code = !isReviewDecisionBinding(queuedReviewSha256)
+          ? 'REVIEW_BINDING_REQUIRED'
+          : (queuedReviewSha256 !== currentReviewSha256 ? 'REVIEW_BINDING_CHANGED' : null);
+        if (code) {
+          review.lastDecisionError = {
+            code,
+            ts,
+            queuedReviewSha256: isReviewDecisionBinding(queuedReviewSha256) ? queuedReviewSha256 : null,
+            currentReviewSha256
+          };
+          logEvent(state, 'review_decision_rejected', { reviewId, code });
+          applied.push({
+            reviewId,
+            code,
+            skipped: code === 'REVIEW_BINDING_REQUIRED'
+              ? 'queued decision is not bound to the reviewed state'
+              : 'reviewed state changed after the decision was queued',
+            currentReviewSha256,
+            queuedReviewSha256: isReviewDecisionBinding(queuedReviewSha256) ? queuedReviewSha256 : null
+          });
+          continue;
+        }
+      }
+      delete review.lastDecisionError;
       if (d.decision === 'approve') {
         if (review.loopId && typeof review.loopContent === 'string' && review.loopContent.trim()) {
           const a = adoptLoop({ loopId: review.loopId, content: review.loopContent, from: { reviewId, runId } });
@@ -2801,28 +3408,38 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
           review.status = 'APPROVED'; review.resolvedAt = ts; review.notes = d.notes || review.notes;
           review.adoption = { loopId: a.loopId, version: a.version, sha256: a.sha256 };
           logEvent(state, 'loop_adopted', { reviewId, loopId: a.loopId, version: a.version });
-          applied.push({ reviewId, adopted: { loopId: a.loopId, version: a.version }, enforcedVia: `loop_start { loop:"${a.loopId}" }` });
+          applied.push({ reviewId, reviewSha256: currentReviewSha256, adopted: { loopId: a.loopId, version: a.version }, enforcedVia: `loop_start { loop:"${a.loopId}" }` });
         } else if (review.kind === 'promotion') {
           // Step 2 — operator-approves a champion. Flipping the review to APPROVED is the
           // gate; the next promotion_request for this hypothesis records the champion.
           review.status = 'APPROVED'; review.resolvedAt = ts; review.notes = d.notes || review.notes;
           logEvent(state, 'promotion_approved', { reviewId, hypothesisId: review.hypothesisId });
-          applied.push({ reviewId, approved: true, kind: 'promotion', hypothesisId: review.hypothesisId, enforcedVia: `promotion_request { hypothesisId:"${review.hypothesisId}" }` });
+          applied.push({ reviewId, reviewSha256: currentReviewSha256, approved: true, kind: 'promotion', hypothesisId: review.hypothesisId, enforcedVia: `promotion_request { hypothesisId:"${review.hypothesisId}" }` });
         } else {
           review.status = 'APPROVED'; review.resolvedAt = ts; review.notes = d.notes || review.notes;
-          applied.push({ reviewId, approved: true, note: 'informational review (no loop to adopt)' });
+          applied.push({ reviewId, reviewSha256: currentReviewSha256, approved: true, note: 'informational review (no loop to adopt)' });
         }
       } else if (d.decision === 'sludge') {
         review.status = 'SLUDGE'; review.resolvedAt = ts; review.notes = d.notes || review.notes;
-        applied.push({ reviewId, sludged: true });
+        applied.push({ reviewId, reviewSha256: currentReviewSha256, sludged: true });
       } else {
         applied.push({ reviewId, skipped: `unknown decision "${d.decision}"` });
       }
     }
+    const rejected = applied.filter((item) => item && (item.skipped || item.error));
     state.updatedAt = ts;
     const dash = writeDashboardForState(state);
     store.save(state);
-    return { ok: true, runId, applied, dashboardPath: dash.path, note: 'Operator dashboard decisions applied. The campaign was never paused for this — the operator (or full exhaustion) remains the only stop.' };
+    return {
+      ok: rejected.length === 0,
+      runId,
+      applied,
+      appliedCount: applied.length - rejected.length,
+      rejectedCount: rejected.length,
+      reason: rejected.length ? `${rejected.length} decision(s) were rejected or skipped` : null,
+      dashboardPath: dash.path,
+      note: 'Operator dashboard decisions applied. The campaign was never paused for this — the operator (or full exhaustion) remains the only stop.'
+    };
   }
   // Auto-apply: read the operator's exported decisions dropped into the run inbox
   // (runs/<runId>/inbox-decisions.json), apply them, and archive the file so it is not
@@ -2840,8 +3457,25 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       store.moveRunFile(runId, 'inbox-decisions.json', `inbox-decisions.invalid-${stamp}.json`);
       return { ok: false, inbox: true, applied: [], reason: `inbox decisions JSON invalid: ${e.message}` };
     }
-    const res = applyDashboardDecisions({ runId, decisions: (payload && payload.decisions) || payload || {} });
-    store.moveRunFile(runId, 'inbox-decisions.json', `inbox-decisions.applied-${stamp}.json`);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      store.moveRunFile(runId, 'inbox-decisions.json', `inbox-decisions.invalid-${stamp}.json`);
+      return { ok: false, inbox: true, applied: [], reason: 'inbox decisions payload must be an object' };
+    }
+    if (payload.runId != null && payload.runId !== runId) {
+      store.moveRunFile(runId, 'inbox-decisions.json', `inbox-decisions.rejected-${stamp}.json`);
+      return { ok: false, inbox: true, applied: [], reason: `inbox runId "${payload.runId}" does not match "${runId}"` };
+    }
+    const decisions = payload.decisions || payload;
+    if (!decisions || typeof decisions !== 'object' || Array.isArray(decisions) || Object.keys(decisions).length === 0) {
+      store.moveRunFile(runId, 'inbox-decisions.json', `inbox-decisions.rejected-${stamp}.json`);
+      return { ok: false, inbox: true, applied: [], reason: 'inbox decisions must contain at least one review' };
+    }
+    const res = applyDashboardDecisions({ runId, decisions, requireBinding: true });
+    store.moveRunFile(
+      runId,
+      'inbox-decisions.json',
+      `inbox-decisions.${res.ok ? 'applied' : 'rejected'}-${stamp}.json`
+    );
     return { ...res, inbox: true };
   }
 
@@ -2882,7 +3516,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   // Operator-only surface — consumed by the apply-decisions CLI and the autonomous
   // supervisor, NEVER by the model. It is an object (not a top-level function), so the
   // tools/call dispatch (`engine[name]`, function-typed only) cannot reach it.
-  api.operator = { adoptLoop, rollbackLoop, recordSupervisorEvent, applyDashboardDecisions, applyInboxDecisions };
+  api.operator = { adoptLoop, rollbackLoop, recordSupervisorEvent, recordCampaignProgress, applyDashboardDecisions, applyInboxDecisions };
   // The autonomous supervisor: one call drives the whole campaign (intake → mine →
   // improve targets → bank Stones → advance/retire → re-mine) with the executor as
   // the real worker, validating every worker output through the enforcement boundary.

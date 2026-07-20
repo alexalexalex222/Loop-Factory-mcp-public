@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { buildMeasuredContent, DEFAULT_QUALITY_ORACLE } from '../src/measure.mjs';
+import { createStore } from '../src/store.mjs';
+import { reviewDecisionBinding } from '../src/review-decisions.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEMO_HOME = join(ROOT, 'proof', '.super-loop-demo');
@@ -321,8 +323,18 @@ async function main() {
 
   log('\n=== 8b. Operator step: Approve the queued review out-of-band via apply-decisions.mjs ===');
   const decisionsPath = join(ROOT, 'proof', 'demo-decisions.json');
+  const demoStore = createStore(DEMO_HOME);
+  const demoState = demoStore.load(RUN);
+  const demoReview = demoState.humanReviews.find((review) => review.id === queued.queuedReviewId);
   writeFileSync(decisionsPath, JSON.stringify({
-    runId: RUN, decisions: { [queued.queuedReviewId]: { decision: 'approve', notes: 'demo operator approval' } }
+    runId: RUN,
+    decisions: {
+      [queued.queuedReviewId]: {
+        decision: 'approve',
+        notes: 'demo operator approval',
+        reviewSha256: reviewDecisionBinding(demoState, demoReview)
+      }
+    }
   }, null, 2));
   const applyOut = execFileSync('node', [
     join(ROOT, 'scripts', 'apply-decisions.mjs'), '--file', decisionsPath, '--run', RUN, '--home', DEMO_HOME

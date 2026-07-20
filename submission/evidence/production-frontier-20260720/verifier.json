@@ -1,0 +1,51 @@
+{
+  "runId": "production-frontier-20260720-r3",
+  "schemaVersion": 1,
+  "execution": {
+    "status": "PASS",
+    "reasons": [],
+    "checkedAgentRuns": 9,
+    "failedAgentRuns": [],
+    "miningRefs": [
+      {
+        "rawArtifactId": "art-001",
+        "resultArtifactId": "art-002"
+      }
+    ]
+  },
+  "targetGrounding": {
+    "status": "PASS",
+    "reasons": []
+  },
+  "benchmark": {
+    "status": "PASS",
+    "reasons": []
+  },
+  "isolation": {
+    "status": "PASS",
+    "reasons": [],
+    "failedAgentRuns": []
+  },
+  "comparability": {
+    "status": "PASS",
+    "reasons": [],
+    "failedAgentRuns": []
+  },
+  "coverage": {
+    "status": "PASS",
+    "reasons": []
+  },
+  "promotionSafety": {
+    "status": "N/A",
+    "reasons": [
+      "No promotion was recorded; this experiment cannot claim an improved champion."
+    ]
+  },
+  "stateConsistency": {
+    "status": "PASS",
+    "reasons": []
+  },
+  "status": "PASS",
+  "publicationEligible": true,
+  "evidenceSha256": "07866647944a6b291eab0e2c8f8c677728039d94fbb86c6ab3e381bc22b9bd74"
+}

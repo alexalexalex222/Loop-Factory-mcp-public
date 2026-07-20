@@ -70,11 +70,13 @@ test('Build Week docs expose the exact judge path, honest split, and unresolved 
   const video = read('../docs/BUILD_WEEK_VIDEO.md');
   assert.match(readme, /npm run judge:gpt56-sol/);
   assert.match(readme, /What changed on July 18, 2026/);
-  assert.match(readme, /controlled adversarial fixtures/i);
+  assert.match(readme, /controlled\s+adversarial\s+fixtures/i);
   assert.match(submission, /\[PUBLIC_YOUTUBE_URL\]/);
   assert.match(submission, /\[CODEX_FEEDBACK_SESSION_ID\]/);
-  assert.match(submission, /Tuesday, July 21, 2026 at 5:00 PM PT/);
-  assert.match(video, /Target length: 2 minutes 45 seconds/);
+  assert.match(submission, /Monday, July 20, 2026 at 11:30 PM PT/);
+  assert.match(submission, /production frontier packet/i);
+  assert.match(video, /Target length: 2 minutes 40 seconds/);
   assert.match(video, /spoken audio/i);
-  assert.match(video, /not claims of spontaneous model behavior/i);
+  assert.match(video, /original `0\.6190` and improved `1\.0000`/i);
+  assert.match(video, /do not claim a promotion/i);
 });

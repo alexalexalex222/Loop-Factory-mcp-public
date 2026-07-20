@@ -66,6 +66,7 @@ export const ARTIFACT_CLASS = {
 export const OUTPUT_CLASS = {
   DETERMINISTIC_COMMAND: 'deterministic_command',
   DETERMINISTIC_TOOL_OUTPUT: 'deterministic_tool_output',
+  STRUCTURED_CASE_RESULTS: 'structured_case_results',
   PROSE: 'prose',
   RECEIPT: 'receipt',
   SUMMARY: 'summary',
@@ -83,7 +84,11 @@ export const RECEIPT_PROSE_CLASSES = new Set([
   OUTPUT_CLASS.PROOF_MAINTENANCE
 ]);
 // Classes where byte-identical route output may be legitimate (explicit only).
-export const DETERMINISTIC_CLASSES = new Set([OUTPUT_CLASS.DETERMINISTIC_COMMAND, OUTPUT_CLASS.DETERMINISTIC_TOOL_OUTPUT]);
+export const DETERMINISTIC_CLASSES = new Set([
+  OUTPUT_CLASS.DETERMINISTIC_COMMAND,
+  OUTPUT_CLASS.DETERMINISTIC_TOOL_OUTPUT,
+  OUTPUT_CLASS.STRUCTURED_CASE_RESULTS
+]);
 
 // Back-compat alias: the v0 shipped a dash form ('deterministic-command'); honor it.
 export function normalizeOutputClass(outputClass) {

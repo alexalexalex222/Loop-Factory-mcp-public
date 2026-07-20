@@ -1,0 +1,15 @@
+{
+  "id": "eval-r4-p2-evaluation",
+  "name": "eval-r4-p2-evaluation",
+  "role": "runlog",
+  "content": "<CASE_RESULTS>[{\"caseId\":\"target-proposal-hook-context\",\"disposition\":\"ACCEPTED\",\"code\":\"ISOLATION_PASS\",\"evidence\":[{\"path\":\"proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json\",\"locator\":null}]},{\"caseId\":\"target-evaluation-hook-context\",\"disposition\":\"ACCEPTED\",\"code\":\"ISOLATION_PASS\",\"evidence\":[{\"path\":\"proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/eval-r1-p1-raw.json\",\"locator\":null}]},{\"caseId\":\"target-installed-skill-context\",\"disposition\":\"ACCEPTED\",\"code\":\"ISOLATION_PASS\",\"evidence\":[{\"path\":\"proof/real-test/causal-canary-finding-002-h2-20260719/state/runs/causal-canary-finding-002-h2-20260719/artifacts/proposal-raw.json\",\"locator\":null}]},{\"caseId\":\"control-clean-transcript\",\"disposition\":\"ACCEPTED\",\"code\":\"ISOLATION_PASS\",\"evidence\":[{\"path\":\".backup-case-results-v2-20260719-084950/test/executor.test.mjs\",\"locator\":null}]},{\"caseId\":\"control-tool-event\",\"disposition\":\"REJECTED\",\"code\":\"WORKER_TOOL_CALL\",\"evidence\":[{\"path\":\".backup-case-results-v2-20260719-084950/test/executor.test.mjs\",\"locator\":null}]},{\"caseId\":\"control-malformed-transcript\",\"disposition\":\"REJECTED\",\"code\":\"WORKER_TRANSCRIPT_UNPARSEABLE\",\"evidence\":[{\"path\":\".backup-case-results-v2-20260719-084950/test/executor.test.mjs\",\"locator\":null}]}]</CASE_RESULTS>",
+  "sha256": "0235ab242b5f6c0d37ce8f583967e291a01eb8f454a2c4b8110354c46b5045a7",
+  "measurement": {
+    "tokenCost": 27440,
+    "quality": 0.5,
+    "targetQuality": 0,
+    "controlQuality": 1,
+    "tokenCostAuthority": "tool-computed",
+    "qualityAuthority": "tool-computed"
+  }
+}

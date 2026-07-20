@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshEngine, initThroughBaselineBar, recordMeasurement, recordCallerReported, promoteWithApproval } from './helpers.mjs';
 import { sha256 } from '../src/util.mjs';
+import { buildScoreMatrix } from '../src/scorecard.mjs';
 
 const H = (model, title) => ({ title: title || 'h', bottleneck: 'precision', operation: 'restructure', expectedMovement: '+quality', route: { model } });
 
@@ -73,6 +74,26 @@ test('a below-threshold result (no frontier movement) is blocked', () => {
   const promo = engine.promotion_request({ runId: 'm5', hypothesisId: hyps[0] });
   assert.equal(promo.status, 'BLOCKED');
   assert.equal(promo.code, 'BELOW_THRESHOLD');
+});
+
+test('an expensive quality tradeoff is staged and never presented as promotable', () => {
+  const { engine, store, hyps } = setup('m-tradeoff');
+  const ft = fullTest(engine, 'm-tradeoff', hyps[0], [
+    ['claude-opus-4-8', 1500, 0.80],
+    ['gpt-5.5', 1500, 0.82],
+    ['glm-5.2', 1500, 0.81]
+  ]);
+  assert.equal(ft.status, 'OK');
+  assert.equal(ft.verdict, 'STAGED_TRADEOFF');
+  assert.equal(engine.reverify_run({ runId: 'm-tradeoff', testId: ft.testId }).status, 'OK');
+  const row = buildScoreMatrix(store.load('m-tradeoff')).find((item) => item.hypothesisId === hyps[0]);
+  assert.equal(row.verdict, 'STAGED_TRADEOFF');
+  assert.equal(row.promotable, false);
+  assert.equal(row.artifactOutputTokenEstimate, 1500);
+  assert.equal(row.cliReceiptTokenCost, null);
+  const promotion = engine.promotion_request({ runId: 'm-tradeoff', hypothesisId: hyps[0] });
+  assert.equal(promotion.status, 'BLOCKED');
+  assert.equal(promotion.code, 'STAGED_TRADEOFF');
 });
 
 test('reverify re-derives metrics from bytes, so a content tamper cannot survive', () => {
