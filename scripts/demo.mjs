@@ -20,7 +20,7 @@ mkdirSync(join(ROOT, 'proof'), { recursive: true });
 const transcript = [];
 function log(...a) { const line = a.join(' '); transcript.push(line); console.log(line); }
 
-const child = spawn('node', [join(ROOT, 'src', 'server.mjs')], {
+const child = spawn(process.execPath, [join(ROOT, 'src', 'server.mjs')], {
   cwd: ROOT, env: { ...process.env, SUPER_LOOP_HOME: DEMO_HOME }, stdio: ['pipe', 'pipe', 'pipe']
 });
 
@@ -336,7 +336,7 @@ async function main() {
       }
     }
   }, null, 2));
-  const applyOut = execFileSync('node', [
+  const applyOut = execFileSync(process.execPath, [
     join(ROOT, 'scripts', 'apply-decisions.mjs'), '--file', decisionsPath, '--run', RUN, '--home', DEMO_HOME
   ], { encoding: 'utf8' });
   log('apply-decisions:', applyOut.trim());

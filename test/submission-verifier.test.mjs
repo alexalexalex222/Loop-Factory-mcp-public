@@ -23,7 +23,7 @@ const PRODUCTION_BUNDLE = join(
 
 test('the public submission bundle rederives the sealed canary result', () => {
   const result = verifySubmission({ bundleRoot: BUNDLE });
-  assert.equal(result.status, 'PASS');
+  assert.equal(result.status, 'PASS', JSON.stringify(result, null, 2));
   assert.equal(result.metrics.calls.total, 16);
   assert.deepEqual(result.metrics.arms, { baseline: 5, challenger: 5, sham: 5 });
   assert.equal(result.metrics.outcome.pairedTargetWins, 5);

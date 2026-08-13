@@ -1,0 +1,93 @@
+name: Portability
+
+on:
+  push:
+    branches:
+      - "portability/**"
+  pull_request:
+    paths:
+      - ".github/workflows/portability.yml"
+      - ".gitattributes"
+      - "package.json"
+      - "README.md"
+      - "src/**"
+      - "scripts/**"
+      - "test/**"
+      - "loops/**"
+      - "hosts/**"
+      - "examples/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  os-matrix:
+    name: Core / ${{ matrix.os }} / Node 24
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Runtime versions
+        run: |
+          node --version
+          npm --version
+      - name: Verify bundled sources
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p portability-proof
+          npm run verify 2>&1 | tee portability-proof/verify.log
+      - name: Unit suite
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee portability-proof/test.log
+      - name: Demo
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run demo 2>&1 | tee portability-proof/demo.log
+      - name: Packed install smoke
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run package:smoke 2>&1 | tee portability-proof/package-smoke.log
+      - name: Save failure logs
+        if: failure()
+        shell: bash
+        run: |
+          printf 'os=%s\nnode=%s\nsha=%s\n' "${{ matrix.os }}" "$(node --version)" "${{ github.sha }}" > portability-proof/context.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: portability-failure-${{ matrix.os }}-node24
+          path: portability-proof/
+          if-no-files-found: ignore
+
+  runtime-matrix:
+    name: Runtime / Ubuntu / Node ${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22, 24]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: npm run verify
+      - run: npm test
+      - run: npm run package:smoke

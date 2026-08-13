@@ -10,7 +10,7 @@ import { buildServer } from '../src/server.mjs';
 import { runWorker, isExecEnabled } from '../src/executor.mjs';
 import { compilePhaseContract, parseWorkerPacket, validateWorkerPacket } from '../src/supervisor.mjs';
 import { modelPolicyPreset } from '../src/models.mjs';
-import { sha256 } from '../src/util.mjs';
+import { isMainModule, sha256 } from '../src/util.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -242,7 +242,7 @@ function main() {
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   try { main(); } catch (error) {
     process.stderr.write(`build-week GPT-5.6 Sol proof failed: ${error.message}\n`);
     process.exit(1);

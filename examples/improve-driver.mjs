@@ -13,6 +13,8 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../src/util.mjs';
+import { resolveStateHome } from '../src/state-home.mjs';
 import { dirname, join } from 'node:path';
 import { createStore } from '../src/store.mjs';
 import { createEngine } from '../src/engine.mjs';
@@ -129,7 +131,7 @@ export function driveImproveTargets(engine, parentRunId, targets) {
 function main() {
   const configPath = arg('--config', join(PKG, 'examples', 'improve-targets.sample.json'));
   const parentRunId = arg('--parent-run-id', `improve-${Date.now().toString(36)}`);
-  const home = arg('--home', process.env.SUPER_LOOP_HOME || join(PKG, '.super-loop'));
+  const home = resolveStateHome(PKG, { home: arg('--home') }).homeDir;
   const cfg = JSON.parse(readFileSync(configPath, 'utf8'));
   const targets = (cfg.targets || []).filter((t) => t.kind === 'improve');
   if (!targets.length) {
@@ -142,4 +144,4 @@ function main() {
   if (out.aborted) process.exit(1);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
+if (isMainModule(import.meta.url)) main();

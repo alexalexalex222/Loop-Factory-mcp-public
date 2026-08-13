@@ -6,10 +6,11 @@
 // traceable, never an invisible/unbacked claim.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { freshEngine, initThroughBaselineBar } from './helpers.mjs';
+import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 const H = (model, extra = {}) => ({ title: 'h', bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model }, ...extra });
 // claude/codex routes are spawnable regardless of PATH (their binary is resolved at launch),
@@ -19,9 +20,7 @@ const SPAWNABLE_PEERS = [H('claude-opus-4-8'), H('gpt-5.5')];
 // An injected env whose PATH contains a fake executable `opencode` (resolveOnPath finds it).
 function pathWithOpencode() {
   const dir = mkdtempSync(join(tmpdir(), 'sl-opencode-'));
-  const bin = join(dir, 'opencode');
-  writeFileSync(bin, '#!/bin/sh\necho hi\n');
-  chmodSync(bin, 0o755);
+  createFakeCli(dir, 'opencode', { stdout: 'hi\n' });
   return { PATH: dir };
 }
 // An injected env whose PATH has no opencode at all (deterministic regardless of the dev machine).

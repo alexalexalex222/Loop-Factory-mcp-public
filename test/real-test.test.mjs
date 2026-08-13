@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,7 @@ import {
 } from '../src/executor.mjs';
 import { sha256 } from '../src/util.mjs';
 import { BASELINE_BODY, freshEngine } from './helpers.mjs';
+import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 const ROUTES = ['gpt-5.6-sol', 'gpt-5.6-sol', 'gpt-5.6-sol'];
 const EVIDENCE_SOURCES = ['src/supervisor.mjs'];
@@ -1363,13 +1364,11 @@ test('a failed proposal launch remains blocked and persists hash-linked stdout a
   const { store } = freshEngine();
   const config = approvedCanaryConfig();
   const dir = mkdtempSync(join(tmpdir(), 'loop-factory-canary-failed-codex-'));
-  const bin = join(dir, 'codex');
-  writeFileSync(bin, `#!/bin/sh
-printf '%s\\n' '{"type":"thread.started","thread_id":"thread-proposal-failed-real-shape"}'
-printf '%s\\n' 'deterministic canary launch failure' >&2
-exit 23
-`);
-  chmodSync(bin, 0o755);
+  const bin = createFakeCli(dir, 'codex', {
+    stdout: '{"type":"thread.started","thread_id":"thread-proposal-failed-real-shape"}\n',
+    stderr: 'deterministic canary launch failure\n',
+    exitCode: 23
+  });
   try {
     const result = runRealTestCanary(store, config, {
       runId: 'canary-proposal-launch-fail',
@@ -1418,13 +1417,11 @@ test('a failed evaluation launch preserves its arm position and diagnostics afte
   const config = approvedCanaryConfig();
   const proposalWorker = canaryWorker(config);
   const dir = mkdtempSync(join(tmpdir(), 'loop-factory-canary-failed-evaluation-'));
-  const bin = join(dir, 'codex');
-  writeFileSync(bin, `#!/bin/sh
-printf '%s\\n' '{"type":"thread.started","thread_id":"thread-evaluation-failed-real-shape"}'
-printf '%s\\n' 'deterministic evaluation launch failure' >&2
-exit 29
-`);
-  chmodSync(bin, 0o755);
+  const bin = createFakeCli(dir, 'codex', {
+    stdout: '{"type":"thread.started","thread_id":"thread-evaluation-failed-real-shape"}\n',
+    stderr: 'deterministic evaluation launch failure\n',
+    exitCode: 29
+  });
   try {
     const result = runRealTestCanary(store, config, {
       runId: 'canary-evaluation-launch-fail',

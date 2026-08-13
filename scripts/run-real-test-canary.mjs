@@ -10,6 +10,7 @@ import {
   validateRealTestCanaryConfig
 } from '../src/real-test.mjs';
 import { createStore } from '../src/store.mjs';
+import { resolveStateHome } from '../src/state-home.mjs';
 
 function arg(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -55,7 +56,7 @@ if (!isExecEnabled()) {
   process.exit(3);
 }
 
-const home = arg('--home', process.env.SUPER_LOOP_HOME || join(packageRoot, '.super-loop'));
+const home = resolveStateHome(packageRoot, { home: arg('--home') }).homeDir;
 const result = runRealTestCanary(createStore(home), config, {
   runId,
   worker: executorWorker

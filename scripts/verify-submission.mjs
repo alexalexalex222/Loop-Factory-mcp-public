@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyCanaryRun } from '../src/canary-runner.mjs';
 import { parseTokenUsage } from '../src/executor.mjs';
@@ -10,7 +10,7 @@ import {
   validateRealTestCanaryConfig
 } from '../src/real-test.mjs';
 import { createStore } from '../src/store.mjs';
-import { sha256 } from '../src/util.mjs';
+import { isMainModule, sha256 } from '../src/util.mjs';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEFAULT_BUNDLE_ROOT = join(
@@ -96,7 +96,9 @@ function listFiles(root, current = root) {
   return readdirSync(current, { withFileTypes: true })
     .flatMap((entry) => {
       const full = join(current, entry.name);
-      return entry.isDirectory() ? listFiles(root, full) : [relative(root, full)];
+      return entry.isDirectory()
+        ? listFiles(root, full)
+        : [relative(root, full).split(sep).join('/')];
     })
     .sort();
 }
@@ -127,7 +129,7 @@ function schemaArgMatches(argv, schemaName) {
 }
 
 function artifactPath(runId, artifactId) {
-  return join('state', 'runs', runId, 'artifacts', `${artifactId}.json`);
+  return ['state', 'runs', runId, 'artifacts', `${artifactId}.json`].join('/');
 }
 
 function collectPrivacyFindings(bundleRoot, files) {
@@ -614,8 +616,7 @@ export function verifySubmission({
   }
 }
 
-const isMain = process.argv[1]
-  && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const result = verifySubmission({
     bundleRoot: arg('--bundle', DEFAULT_BUNDLE_ROOT),

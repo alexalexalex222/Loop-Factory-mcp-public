@@ -7,7 +7,8 @@ import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveWorkerBinary, runWorker } from '../src/executor.mjs';
-import { sha256 } from '../src/util.mjs';
+import { buildProcessLaunch } from '../src/process-launch.mjs';
+import { isMainModule, sha256 } from '../src/util.mjs';
 import { runProof } from './build-week-gpt56-proof.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,11 +80,14 @@ export function inspectCodexCandidate(path, env = process.env) {
     if (!existsSync(full) || !statSync(full).isFile()) {
       return { path: full, source: candidateSource(full, env), ok: false, reason: 'missing', version: null };
     }
-    const output = execFileSync(full, ['--version'], {
+    const launch = buildProcessLaunch({ binPath: full, args: ['--version'], env });
+    const output = execFileSync(launch.file, launch.args, {
       env,
       timeout: 5000,
       encoding: 'utf8',
-      windowsHide: true
+      windowsHide: true,
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
+      shell: false
     });
     const version = parseCodexVersion(output);
     return {
@@ -261,7 +265,7 @@ function main() {
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   try {
     main();
   } catch (error) {

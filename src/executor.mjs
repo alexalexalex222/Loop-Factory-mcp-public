@@ -9,8 +9,8 @@
 // anyone who does not turn it on keeps the no-execution posture unchanged.
 //
 // Safety properties (all enforced here):
-//   - execFileSync ONLY — never `exec`, never a shell string, so shell metacharacters
-//     can never be interpreted (no command injection).
+//   - native executables use direct execFileSync semantics. On Windows only, an
+//     already allowlisted .cmd/.bat shim uses the narrow adapter in process-launch.mjs.
 //   - arguments are fixed ARRAYS the MCP builds; the prompt is delivered on STDIN and
 //     never placed on argv, so untrusted text cannot become a flag or a command.
 //   - a fixed binary ALLOWLIST: a route maps to one of {claude, codex, glm}; a route
@@ -18,12 +18,12 @@
 //   - PATH resolution by filesystem stat (reused from host.mjs); a missing binary is
 //     refused, not guessed.
 //   - hard timeout + kill, bounded output buffer.
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { resolveOnPath } from './host.mjs';
+import { buildProcessLaunch, executeProcessSync } from './process-launch.mjs';
 import { sha256 } from './util.mjs';
 
 export const STRICT_CODEX_REASONING_EFFORT = 'high';
@@ -115,7 +115,10 @@ export function resolveWorkerBinary(model, env = process.env) {
   if (!bin) return { bin: null, binPath: null, reason: 'NOT_ALLOWLISTED' };
   if (bin === 'codex' && env.SUPER_LOOP_CODEX_BIN) {
     const candidate = String(env.SUPER_LOOP_CODEX_BIN).trim();
-    if (!isAbsolute(candidate) || basename(candidate) !== 'codex') {
+    const allowedBasenames = process.platform === 'win32'
+      ? new Set(['codex', 'codex.exe', 'codex.cmd', 'codex.bat'])
+      : new Set(['codex']);
+    if (!isAbsolute(candidate) || !allowedBasenames.has(basename(candidate).toLowerCase())) {
       return { bin, binPath: null, reason: 'BINARY_OVERRIDE_INVALID' };
     }
     const full = resolve(candidate);
@@ -677,7 +680,7 @@ export function runWorker({
         model,
         bin,
         reason: 'BINARY_OVERRIDE_INVALID',
-        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing file named "codex"'
+        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing allowlisted Codex executable or Windows shim'
       };
     }
     return { ok: false, model, bin, reason: 'BINARY_MISSING', message: `allowlisted binary "${bin}" not found on PATH (cannot execute route ${model})` };
@@ -692,6 +695,15 @@ export function runWorker({
     schemaPath,
     workspaceRoot
   });
+  let launch;
+  try {
+    launch = buildProcessLaunch({ binPath, args, env });
+  } catch (error) {
+    return {
+      ok: false, model, bin, binPath, reason: 'EXEC_ADAPTER_REFUSED',
+      message: `worker launch adapter refused the resolved binary: ${error.message}`
+    };
+  }
   // codex's wrapper alias unsets OPENAI_BASE_URL; replicate that for the child so a
   // stray base-url env can't redirect the worker to the wrong endpoint.
   const childEnv = { ...env };
@@ -709,22 +721,23 @@ export function runWorker({
     strictIsolation,
     disabledFeatures: strictIsolation ? [...STRICT_CODEX_DISABLED_FEATURES] : [],
     workspaceRoot,
-    outputSchemaSha256: schemaPath ? sha256(readFileSync(schemaPath)) : null
+    outputSchemaSha256: schemaPath ? sha256(readFileSync(schemaPath)) : null,
+    processAdapter: launch.adapter,
+    launchedFile: launch.file,
+    launchedArgv: [...launch.args],
+    timeoutCleanup: launch.requiresTreeTermination
+      ? 'windows-taskkill-process-tree-before-return'
+      : 'direct-child-signal'
   };
   const startNs = process.hrtime.bigint();
   try {
-    const stdout = execFileSync(binPath, args, {
+    const stdout = executeProcessSync(launch, {
       input: String(prompt == null ? '' : prompt), // prompt on STDIN, never argv → no injection
       cwd: workspaceRoot || undefined,
       env: childEnv,
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
+      timeoutMs,
       maxBuffer: 64 * 1024 * 1024,
-      encoding: 'utf8',
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe']
-      // No `shell` option → execFile semantics → args passed literally, never parsed
-      // by a shell. With the prompt on stdin, there is no untrusted text on argv at all.
+      encoding: 'utf8'
     });
     const durationMs = Number((process.hrtime.bigint() - startNs) / 1000000n);
     const stdoutText = String(stdout);
@@ -753,7 +766,10 @@ export function runWorker({
     };
   } catch (e) {
     const durationMs = Number((process.hrtime.bigint() - startNs) / 1000000n);
-    const timedOut = e && (e.code === 'ETIMEDOUT' || e.signal === 'SIGKILL' || e.killed === true);
+    const timedOut = e?.loopFactoryTimeout === true
+      || (!launch.requiresTreeTermination && e && (e.code === 'ETIMEDOUT' || e.signal === 'SIGKILL' || e.killed === true));
+    const cleanupFailed = e?.loopFactoryCleanupFailed === true;
+    const outputLimit = e?.loopFactoryOutputLimit === true;
     const stdoutText = e && e.stdout ? String(e.stdout) : '';
     const stderrText = e && e.stderr ? String(e.stderr) : '';
     const exitCode = e && typeof e.status === 'number' ? e.status : null;
@@ -762,12 +778,20 @@ export function runWorker({
     const tokenUsage = parseTokenUsage(stdoutText);
     const tokenUsageDetails = parseTokenUsageDetails(stdoutText);
     const isolation = inspectWorkerIsolation(stdoutText);
+    const reason = timedOut
+      ? 'TIMEOUT'
+      : (cleanupFailed ? 'TIMEOUT_CLEANUP_FAILED' : (outputLimit ? 'OUTPUT_LIMIT' : 'EXEC_FAILED'));
+    const message = timedOut
+      ? `worker ${bin} exceeded ${timeoutMs}ms and its process tree was killed`
+      : (cleanupFailed
+        ? `worker ${bin} exceeded its execution boundary but complete process-tree cleanup could not be confirmed`
+        : (outputLimit
+          ? `worker ${bin} exceeded the maximum captured output and its process tree was killed`
+          : `worker ${bin} failed${exitCode == null ? '' : ` with exit code ${exitCode}`}${processErrorCode ? ` (${processErrorCode})` : ''}`));
     return {
       ok: false, model, bin, binPath,
-      reason: timedOut ? 'TIMEOUT' : 'EXEC_FAILED',
-      message: timedOut
-        ? `worker ${bin} exceeded ${timeoutMs}ms and was killed`
-        : `worker ${bin} failed${exitCode == null ? '' : ` with exit code ${exitCode}`}${processErrorCode ? ` (${processErrorCode})` : ''}`,
+      reason,
+      message,
       stdout: stdoutText,
       stderr: stderrText,
       exitCode,
