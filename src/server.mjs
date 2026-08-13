@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 import { createStore } from './store.mjs';
 import { createEngine } from './engine.mjs';
 import { verifyAllLoops, loopSummary } from './loops.mjs';
+import { resolveStateHome } from './state-home.mjs';
+import { isMainModule } from './util.mjs';
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SERVER_INFO = { name: 'super-loop', version: '1.0.0' };
@@ -123,7 +125,7 @@ export const TOOL_SPECS = [
   },
   {
     name: 'execute_full_test',
-    description: 'SUPERVISOR-EXECUTED full test (off by default; opt in with env SUPER_LOOP_ALLOW_EXEC=1). Loop Factory itself LAUNCHES 3-5 allowlisted frontier workers (claude/codex/glm/gemini binaries on PATH) via execFile (never a shell), captures each output, and feeds the tool-captured bytes through the same gate as test_hypothesis — so there is no model-supplied run-log to fabricate. A failed/timed-out/non-allowlisted launch is an invalid batch and does not count toward retirement. Without the opt-in this returns BLOCKED (EXEC_DISABLED) and you record run-logs via artifact_record + test_hypothesis instead.',
+    description: 'SUPERVISOR-EXECUTED full test (off by default; opt in with env SUPER_LOOP_ALLOW_EXEC=1). Loop Factory itself LAUNCHES 3-5 allowlisted frontier workers (claude/codex/glm/gemini binaries on PATH). Native executables run directly without a shell; an allowlisted Windows .cmd/.bat shim alone uses the guarded cmd.exe adapter. Prompts remain on stdin. Captured output flows through the same gate as test_hypothesis, so there is no model-supplied run-log to fabricate. A failed/timed-out/non-allowlisted launch is an invalid batch and does not count toward retirement. Without the opt-in this returns BLOCKED (EXEC_DISABLED) and you record run-logs via artifact_record + test_hypothesis instead.',
     inputSchema: { type: 'object', required: ['runId', 'hypothesisId', 'routes', 'prompt'], properties: {
       runId: { type: 'string' }, hypothesisId: { type: 'string' },
       routes: { type: 'array', items: { type: 'string' }, description: '3-5 frontier worker routes to launch (each must map to an allowlisted binary)' },
@@ -263,11 +265,12 @@ export const TOOL_SPECS = [
 ];
 
 // ---- wiring --------------------------------------------------------------
-export function buildServer({ home } = {}) {
-  const homeDir = home || process.env.SUPER_LOOP_HOME || join(PKG_ROOT, '.super-loop');
+export function buildServer({ home, env = process.env, platform = process.platform } = {}) {
+  const selected = resolveStateHome(PKG_ROOT, { home, env, platform });
+  const homeDir = selected.homeDir;
   const store = createStore(homeDir);
   const engine = createEngine(store);
-  return { store, engine, homeDir };
+  return { store, engine, homeDir, stateHomeSource: selected.source };
 }
 
 function toolResult(obj) {
@@ -322,7 +325,7 @@ export function handleMessage(engine, msg) {
 
 // ---- stdio loop ----------------------------------------------------------
 export function startStdioServer() {
-  const { engine } = buildServer();
+  const { engine, homeDir, stateHomeSource } = buildServer();
   // Fail fast if the bundled loops were swapped/corrupted.
   try {
     verifyAllLoops();
@@ -330,7 +333,7 @@ export function startStdioServer() {
     process.stderr.write(`[super-loop-mcp] FATAL: ${e.message}\n`);
     process.exit(1);
   }
-  process.stderr.write(`[super-loop-mcp] ready · loops: ${verifyAllLoops().map((l) => `${l.id}(${l.sections}p)`).join(', ')}\n`);
+  process.stderr.write(`[super-loop-mcp] ready · loops: ${verifyAllLoops().map((l) => `${l.id}(${l.sections}p)`).join(', ')} · state: ${homeDir} (${stateHomeSource})\n`);
 
   let buffer = '';
   process.stdin.setEncoding('utf8');
@@ -356,7 +359,7 @@ export function startStdioServer() {
 }
 
 // Only run the stdio loop when executed directly (never on import / under tests).
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   startStdioServer();
 }
 

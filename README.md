@@ -117,18 +117,77 @@ Point an MCP host at `src/server.mjs`:
 }
 ```
 
-State defaults to `<package>/.super-loop`. The autonomous driver is opt-in via
-`SUPER_LOOP_ALLOW_EXEC=1`; without it, Loop Factory does not launch workers.
+`SUPER_LOOP_HOME` is always authoritative. Existing `<package>/.super-loop`
+state remains discoverable and is never moved automatically. A source checkout
+keeps that historical default; a fresh packed installation uses the writable
+per-user location listed below. The selected path and its source are printed at
+server startup.
 
-## Supported platforms
-
-| Surface | Support boundary |
+| Platform | Fresh installed state path |
 |---|---|
-| Public evidence verifier | Node.js 18+; no model or auth dependency |
-| MCP server and deterministic demo | Node.js 18+ with stdio-capable host |
-| Native goal hosts | Codex and Claude Code are tier-1 verified |
-| Other MCP hosts | Profiles are listed in [`hosts/registry.json`](hosts/registry.json); unverified entries are labeled |
-| Live GPT-5.6 Sol path | Captured on macOS with a compatible authenticated Codex CLI; other environments are not claimed as verified |
+| macOS | `~/Library/Application Support/Loop Factory` |
+| Linux | `$XDG_STATE_HOME/loop-factory`, or `~/.local/state/loop-factory` |
+| Windows | `%LOCALAPPDATA%\Loop Factory` |
+
+The autonomous driver is opt-in. Without the exact value
+`SUPER_LOOP_ALLOW_EXEC=1`, Loop Factory does not launch workers.
+
+POSIX shell:
+
+```bash
+SUPER_LOOP_ALLOW_EXEC=1 node scripts/run-campaign.mjs --config examples/campaign.json --stop-file ./STOP
+touch ./STOP
+```
+
+PowerShell:
+
+```powershell
+$env:SUPER_LOOP_ALLOW_EXEC = "1"
+node scripts/run-campaign.mjs --config examples/campaign.json --stop-file .\STOP
+New-Item -ItemType File .\STOP
+```
+
+Windows Command Prompt:
+
+```bat
+set "SUPER_LOOP_ALLOW_EXEC=1"
+node scripts\run-campaign.mjs --config examples\campaign.json --stop-file .\STOP
+type nul > .\STOP
+```
+
+Start the local dashboard with `node scripts/dashboard-server.mjs`; pass
+`--home "<path with spaces>"` when selecting state explicitly. Run
+`npm run package:smoke` to pack, install into a clean path containing spaces,
+handshake the installed MCP, verify all tools and loop hashes, and round-trip
+isolated state.
+
+On Windows, JSON configuration paths need escaped backslashes (or forward
+slashes), for example:
+
+```json
+{
+  "command": "node",
+  "args": ["C:\\Users\\Ace\\Loop Factory\\src\\server.mjs"],
+  "env": { "SUPER_LOOP_HOST": "codex" }
+}
+```
+
+## Core platform evidence
+
+`CI PASS` means the flow passes the public repository's
+[Portability workflow](https://github.com/alexalexalex222/Loop-Factory-mcp-public/actions/workflows/portability.yml)
+on GitHub-hosted runners. Provider authentication is a separate boundary.
+
+| OS | Core package/install | MCP stdio | Persistence | Dashboard | Autonomous supervisor | Fake executor | Authenticated Claude CLI | Authenticated Codex CLI | Authenticated OpenCode routes |
+|---|---|---|---|---|---|---|---|---|---|
+| macOS | CI PASS | CI PASS | CI PASS | CI PASS | CI PASS | CI PASS | not retested here | one live executor audit | not verified |
+| Ubuntu | CI PASS | CI PASS | CI PASS | CI PASS | CI PASS | CI PASS | not verified | not verified | not verified |
+| Windows | CI PASS | CI PASS | CI PASS | CI PASS | CI PASS | CI PASS | not verified | not verified | not verified |
+
+The workflow also checks Node 18, 22, and 24 on Ubuntu, matching the existing
+`node >=18` package declaration. Profiles in
+[`hosts/registry.json`](hosts/registry.json) remain labeled independently from
+core OS support.
 
 ## Optional live path
 
@@ -269,7 +328,7 @@ Custom loops are sha256 hash-locked (write-once per version; `overwrite:true` ma
 | `benchmark_run` | set the tool-**computed** baseline bar; a caller-reported measurement is rejected |
 | `register_hypotheses` | Standard mode: 3–5 hypotheses. Strict real-test mode: exactly two substantive, supervisor-ID-bound hypotheses for one finding. Benchmark-first; rejects banned routes and shape-only placeholders. |
 | `test_hypothesis` | one full test = 3–5 frontier agents, each tool-computed; aggregates vs the bar; reports quality authority |
-| `execute_full_test` | **opt-in (`SUPER_LOOP_ALLOW_EXEC=1`)** — the supervisor itself launches 3–5 allowlisted workers (`execFile`, no shell, prompt via stdin), captures output, parses real token usage, and gates on the tool-captured bytes; off by default → `EXEC_DISABLED` |
+| `execute_full_test` | **opt-in (`SUPER_LOOP_ALLOW_EXEC=1`)** — the supervisor itself launches 3–5 allowlisted workers (native executables use direct shell-free `execFile`; allowlisted Windows `.cmd`/`.bat` shims use a narrow `cmd.exe` adapter; prompt always travels via stdin), captures output, parses real token usage, and gates on the tool-captured bytes; off by default → `EXEC_DISABLED` |
 | `reverify_run` | **re-derive** metrics from the sealed raw bytes and confirm they reproduce (a tampered number cannot survive) |
 | `promotion_request` | promote only on measured + reverified frontier movement; a quality win the MCP can't tool-verify routes to the dashboard (`QUALITY_UNVERIFIED`) |
 | `cycle_decision_request` | **the supervisor hook** — a worker proposes a transition packet (promote/advance_phase/change_baseline/change_benchmark/saturate); only a supervisor-accepted transition is progress; completion/stop intents refused |
@@ -289,7 +348,7 @@ All 42 codes from `src/constants.mjs` `BLOCK` (runtime vocabulary):
 `NOT_INITIALIZED · UNKNOWN_RUN · NO_ACTIVE_LOOP · NOT_STARTED · PHASE_SKIP · UNKNOWN_LOOP · BASELINE_FIRST · BASELINE_LOCKED · BASELINE_BAR_FIRST · BASELINE_PLACEHOLDER · BASELINE_TOO_SHALLOW · BASELINE_AUTHOR_FORBIDDEN · BENCHMARK_FIRST · BENCHMARK_FROZEN · WEAK_BENCHMARK · HYPOTHESIS_COUNT · BANNED_ROUTE · UNKNOWN_HYPOTHESIS · FULLTEST_AGENTS · MODEL_REPORTED · NO_SCORE_MATRIX · NOT_REVERIFIED · BELOW_THRESHOLD · BELOW_FLOOR · STAGED_TRADEOFF · OPERATOR_IS_STOP · DASHBOARD_ONLY · MEASUREMENT_AUTHORITY · QUALITY_UNVERIFIED · PROMOTION_NEEDS_APPROVAL · PROMOTION_REJECTED · LOOP_EXISTS · LOOP_SOURCE · NO_ACTIVE_LANE (reserved — not currently emitted) · BUILDER_ROUTE · EXEC_DISABLED · EXEC_FAILED · ROUTE_UNSPAWNABLE · MANUAL_PROVENANCE_REQUIRED · INTEGRITY_GATE · TARGET_SATURATED_NEEDS_NEW_TARGET · BAD_INPUT`
 
 ### Live execution + autonomous harness (opt-in)
-By default the server **never executes commands** (audited posture). Set `SUPER_LOOP_ALLOW_EXEC=1` to let Loop Factory own benchmark execution end-to-end: `execute_full_test` launches the frontier workers itself (allowlisted `claude`/`codex`/`glm`/`gemini` only, via `execFile` with no shell, prompt passed on **stdin** so untrusted text never reaches argv), captures each output, parses real token usage when the CLI reports it, enforces a hard timeout, and feeds the **tool-captured** bytes through the same gate. This closes the last self-report hole — when the supervisor launches the worker, there is no model-supplied run-log to fabricate. A failed/timed-out/non-allowlisted launch is an invalid batch and does not count toward retirement.
+By default the server **never executes commands** (audited posture). Set `SUPER_LOOP_ALLOW_EXEC=1` to let Loop Factory own benchmark execution end-to-end. Native executables stay on direct, shell-free `execFile` semantics. An allowlisted Windows `.cmd` or `.bat` npm shim alone goes through the dedicated `cmd.exe` adapter; `%` expansion syntax is refused before launch. The prompt remains **stdin** data and never reaches argv or the command string. On a Windows shim timeout, Loop Factory kills the ordinary descendant process tree before returning `TIMEOUT`; unconfirmed cleanup fails closed. A failed/timed-out/non-allowlisted launch is an invalid batch and does not count toward retirement.
 
 The **autonomous driver** sits on top of that — the difference between "a supervisor you call" and "a harness that drives itself":
 

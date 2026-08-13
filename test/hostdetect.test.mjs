@@ -4,27 +4,28 @@
 // fixture paths + a fake fileExists — no real home directory is touched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { detectHostRuntime } from '../src/host.mjs';
 import { freshEngine, SPECIFIC_TASK } from './helpers.mjs';
 
-const HOME = '/fake/home';
+const HOME = join('fake', 'home');
 // fileExists factory over a fixed set of "present" absolute paths.
 const existsOf = (present) => (p) => present.includes(p);
 
 test('a single matching config yields a confident guess (no env override)', () => {
   const r = detectHostRuntime({
     env: {}, home: HOME,
-    fileExists: existsOf([`${HOME}/.claude.json`])
+    fileExists: existsOf([join(HOME, '.claude.json')])
   });
   assert.equal(r.guess, 'claude-code');
   assert.equal(r.explicitHost, null);
   assert.equal(r.candidates.length, 1);
-  assert.deepEqual(r.candidates[0].evidence, [`${HOME}/.claude.json`]);
+  assert.deepEqual(r.candidates[0].evidence, [join(HOME, '.claude.json')]);
   assert.match(r.method, /read-only|no mutation/i);
 });
 
 test('multiple matching configs are ambiguous (no guess) until SUPER_LOOP_HOST is set', () => {
-  const present = [`${HOME}/.claude.json`, `${HOME}/.codex/config.toml`];
+  const present = [join(HOME, '.claude.json'), join(HOME, '.codex', 'config.toml')];
   const ambiguous = detectHostRuntime({ env: {}, home: HOME, fileExists: existsOf(present) });
   assert.equal(ambiguous.guess, null, 'two candidates → no single guess');
   assert.equal(ambiguous.candidates.length, 2);

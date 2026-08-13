@@ -26,7 +26,8 @@
     "proof:gpt56": "node scripts/build-week-gpt56-proof.mjs",
     "test": "node --test",
     "demo": "node scripts/demo.mjs",
-    "verify": "node scripts/verify-sources.mjs"
+    "verify": "node scripts/verify-sources.mjs",
+    "package:smoke": "node scripts/package-smoke.mjs"
   },
   "files": [
     "src/",
