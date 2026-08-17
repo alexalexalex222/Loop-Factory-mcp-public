@@ -1,20 +1,19 @@
 {
   "schemaVersion": "loop-factory-vnext-context-boundary-tests-v1",
-  "generatedAt": "2026-08-17T12:04:05.000Z",
-  "sourceTreeSha256": "b7470bcdc2f6761b43f72446d46b09124ce326e500c35e9d7912684e946ea8e4",
+  "generatedAt": "2026-08-17T12:20:32.000Z",
+  "sourceTreeSha256": "e9ca483202ef53718293ecede30ef8642f6f0821f9fb3127e59cffb07809cbfa",
   "authority": {
     "kind": "local-test-replay",
     "testLog": {
-      "path": "proof/public-integration-verification-20260817/npm-test-node24-portability-r5.log",
-      "sha256": "5c6b3096efabe262c54f4ead8f893aeabb0c8f1e65c81db098c0f71690564a29",
+      "path": "proof/public-integration-verification-20260817/npm-test-node24-portability-r6.log",
+      "sha256": "7f3e39a60cd32e302fa2f4893ba9c2a4c372d9cfd51637366e4dbed4a5eb6bb9",
       "tests": 956,
-      "pass": 950,
+      "pass": 951,
       "fail": 0,
       "cancelled": 0,
-      "skipped": 6,
+      "skipped": 5,
       "platformExclusions": [
         "executable evaluator refuses unsupported hosts before sandbox access",
-        "portable task packs refuse baseline replay on unsupported evaluator hosts",
         "Windows command shims refuse percent expansion in model argv",
         "a timed-out Windows command shim kills its complete descendant process tree",
         "code candidate execution refuses unsupported platforms before filesystem access",
@@ -124,5 +123,5 @@
       "result": "PASS"
     }
   ],
-  "artifactSha256": "e69109092dcf7e2f20338528bbc77a59eb61c84feafe0fceaec3d00ffc645cae"
+  "artifactSha256": "23a2236029607121469d712f3f076de17dfd55a30edb31eaef249dfc12189762"
 }

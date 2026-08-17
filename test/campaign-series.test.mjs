@@ -285,9 +285,7 @@ function enqueue(data, state = data.state, waveId = 'wave-1') {
   });
 }
 
-test('portable task packs refuse baseline replay on unsupported evaluator hosts', {
-  skip: process.platform === 'darwin'
-}, () => {
+test('portable task packs require live evaluator authority for baseline replay', () => {
   const data = fixture();
   const replay = loadVNextTaskPackMaterials({
     artifactRoot: data.root,

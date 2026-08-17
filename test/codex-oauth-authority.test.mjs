@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import {
   captureCodexOAuthAuthority,
   createCodexOAuthAuthorityRecord,
@@ -73,6 +74,7 @@ test('OAuth authority accepts the allowlisted Windows Codex launch forms', () =>
 
 test('capture removes API credentials and invokes only read-only Codex metadata commands', () => {
   const calls = [];
+  const binaryPath = resolve('/opt/codex/codex.real');
   const runner = (binary, args, options) => {
     calls.push({ binary, args, env: options.env });
     if (args[0] === '--version') {
@@ -88,7 +90,7 @@ test('capture removes API credentials and invokes only read-only Codex metadata 
     };
   };
   const captured = captureCodexOAuthAuthority({
-    binaryPath: '/opt/codex/codex.real',
+    binaryPath,
     requestedModel: 'gpt-5.6-sol',
     reasoningEffort: 'high',
     platform: 'linux',
@@ -110,7 +112,7 @@ test('capture removes API credentials and invokes only read-only Codex metadata 
     ['debug', 'models']
   ]);
   assert.ok(calls.every((item) => (
-    item.binary === '/opt/codex/codex.real'
+    item.binary === binaryPath
     && item.env.OPENAI_API_KEY === undefined
     && item.env.OPENAI_BASE_URL === undefined
     && item.env.CODEX_ACCESS_TOKEN === undefined

@@ -460,9 +460,10 @@ export function loadVNextTaskPackMaterials({
       materials
     };
     const bundle = { ...core, bundleSha256: sha256(canonicalVNextJson(core)) };
-    return validateVNextTaskMaterialBundle({ bundle, pack }).status === 'OK'
+    const validated = validateVNextTaskMaterialBundle({ bundle, pack });
+    return validated.status === 'OK'
       ? { status: 'OK', bundle }
-      : { status: 'REFUSED', code: 'TASK_PACK_MATERIAL_BUNDLE_INVALID' };
+      : validated;
   } catch (error) {
     return { status: 'REFUSED', code: 'TASK_PACK_MATERIAL_LOAD_FAILED', message: error.message };
   }

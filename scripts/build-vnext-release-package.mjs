@@ -110,7 +110,6 @@ const EXPECTED_PLATFORM_EXCLUSIONS = Object.freeze([
   'SIGKILL residue is swept from the external auth root without entering proof state',
   'Windows command shims refuse percent expansion in model argv',
   'a timed-out Windows command shim kills its complete descendant process tree',
-  'portable task packs refuse baseline replay on unsupported evaluator hosts',
   'executable evaluator refuses unsupported hosts before sandbox access',
   'task-pack build reports an unsupported evaluator host directly',
   'recursive campaign executes one full causal generation and banks verifier-owned memory',
