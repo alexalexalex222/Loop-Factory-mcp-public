@@ -39,3 +39,12 @@ signal-only heartbeat shutdown, and test fixtures that tried to create macOS
 `sandbox-exec` evidence on other operating systems. The repair keeps sealed
 records portable, keeps live evaluator execution host-bound, and preserves the
 Windows refusal for power-loss-durable paid dispatch.
+
+## Repair Runs
+
+Run `32028065230` passed both macOS jobs and reduced the non-macOS failures to
+one generic task-material replay wrapper plus one Windows-native expected path.
+Those last assertions were corrected without widening either execution boundary.
+
+Run `32029397722` passed all five declared jobs on commit
+`0c9b7b3d69e99f1c2a87234a2626966939cb1572`.

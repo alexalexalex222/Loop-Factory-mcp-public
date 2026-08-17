@@ -1,7 +1,7 @@
 {
   "schemaVersion": "loop-factory-vnext-context-boundary-tests-v1",
-  "generatedAt": "2026-08-17T12:20:32.000Z",
-  "sourceTreeSha256": "e9ca483202ef53718293ecede30ef8642f6f0821f9fb3127e59cffb07809cbfa",
+  "generatedAt": "2026-08-17T12:39:53.000Z",
+  "sourceTreeSha256": "a912ff95d7f2958aa2a9013385fd37f9385a8550d0718eb37f0c0be9a06efb45",
   "authority": {
     "kind": "local-test-replay",
     "testLog": {
@@ -123,5 +123,5 @@
       "result": "PASS"
     }
   ],
-  "artifactSha256": "23a2236029607121469d712f3f076de17dfd55a30edb31eaef249dfc12189762"
+  "artifactSha256": "a202fb0df4f1c5daebe6321cbb840dfc228977922b766af99e3e70fe63b84aea"
 }
