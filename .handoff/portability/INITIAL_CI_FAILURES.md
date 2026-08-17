@@ -1,17 +1,27 @@
 # Initial Hosted CI Failures
 
-## Status
+## Run
 
-`NOT CAPTURED FOR THIS BRANCH`
+- Pull request: `#2`
+- Workflow run: `32019059970`
+- Event: `pull_request`
+- Result used here: Windows Node 24 failed before the unit suite
 
-The VNext integration branch has not been pushed, and no pull request or hosted
-workflow has been started. The work began from a public base commit that already
-contained the portability workflow and prior portability repairs, so there was
-no honest pre-repair VNext failure matrix to record locally.
+## Demonstrated Failure
 
-This file does not treat missing CI as success. The first hosted run for this
-branch must be considered the initial VNext operating-system matrix. Its Windows,
-Ubuntu, and macOS results belong in `FINAL_MATRIX.md` before any cross-platform
-claim or merge.
+Bundled-loop verification passed, then source-manifest replay refused:
 
-No GitHub Actions minutes were consumed by this integration session.
+```text
+SOURCE_ARTIFACT_MANIFEST_DRIFT
+mismatched: src/native/darwin-fullfsync.c
+```
+
+The tracked C source was the only public text extension not covered by the LF
+working-tree policy. Git therefore checked it out with CRLF on Windows while the
+manifest bound its LF bytes.
+
+## Correction
+
+Add `*.c text eol=lf` to `.gitattributes`, regenerate the public source and
+release manifests, and rerun the complete hosted matrix. No expected source hash
+was weakened or redefined to accept CRLF.

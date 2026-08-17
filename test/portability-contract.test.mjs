@@ -27,6 +27,17 @@ test('portability contract freezes bundled loop hashes and line counts', () => {
   assert.equal(loops['loop-de-loop'].lines, 75);
 });
 
+test('hash-bound public text keeps LF bytes on Windows checkouts', () => {
+  const attributes = readFileSync(join(ROOT, '.gitattributes'), 'utf8');
+  for (const rule of [
+    'loops/strip-miner.txt text eol=lf',
+    'loops/loop-de-loop.md text eol=lf',
+    '*.c text eol=lf'
+  ]) {
+    assert.equal(attributes.includes(rule), true, `.gitattributes includes ${rule}`);
+  }
+});
+
 test('portability contract freezes tool names and package binary names', () => {
   assert.deepEqual(TOOL_SPECS.map((tool) => tool.name), EXPECTED_TOOLS);
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));

@@ -5,6 +5,7 @@ loops/loop-de-loop.md text eol=lf
 # Cross-platform source and configuration files use deterministic LF bytes.
 *.mjs text eol=lf
 *.js text eol=lf
+*.c text eol=lf
 *.json text eol=lf
 *.jsonl text eol=lf
 *.txt text eol=lf
