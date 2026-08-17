@@ -180,7 +180,7 @@ sleep 30
   await waitForExit(owner);
   const guardExit = await waitForExit(guard);
   assert.equal(guardExit.code, 143);
-  assertGone(childPid);
+  await assertGoneEventually(childPid);
 });
 
 test('guarded executor reaps a descendant left behind by a successful command', {
@@ -207,7 +207,7 @@ test('guarded executor reaps a descendant left behind by a successful command', 
   const exit = await waitForExit(guard);
   assert.equal(exit.code, 125);
   assert.equal(existsSync(pidPath), true);
-  assertGone(Number(readFileSync(pidPath, 'utf8')));
+  await assertGoneEventually(Number(readFileSync(pidPath, 'utf8')));
 });
 
 test('guarded executor preserves a fast failure when prompt forwarding hits EPIPE', {

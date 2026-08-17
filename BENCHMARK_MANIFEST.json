@@ -1,13 +1,13 @@
 {
   "schemaVersion": "loop-factory-vnext-benchmark-manifest-v1",
-  "generatedAt": "2026-08-17T12:46:52.000Z",
+  "generatedAt": "2026-08-17T13:14:44.000Z",
   "status": "BLOCKED_PENDING_LIVE_ABLATIONS_AND_EXTERNAL_CUSTODIAN",
   "repository": {
-    "startingCommit": "33068fb2890b61338b4aa49705afc6064446f402",
+    "startingCommit": "1b9dbb6d0dab9797f4f5e70ebb26c05ca311b9fb",
     "branch": "vnext-public-integration-20260816",
     "dirty": true,
-    "gitStatusSha256": "a94e117a5f41a530187bdcd22af43679746696b3984da45a6cba91783b40acc1",
-    "sourceTreeSha256": "ddf2fd78b5d9251a854b486190600eba76a5396eda481f1025d939fdd9fefc99",
+    "gitStatusSha256": "056ba88eab388600926258719e04cef588b0aba79e7922a3375973169f7d5518",
+    "sourceTreeSha256": "2f2db58401d8b5f7e597417069025999c98e261fad838db50bb02061d64dd324",
     "implementationFileCount": 501
   },
   "evidence": {
@@ -28,7 +28,7 @@
       ],
       "todo": 0
     },
-    "contextBoundaryArtifactSha256": "ccd564625188f141cd43bd819eb8f07643896839cabf0213638a05b813ff204c",
+    "contextBoundaryArtifactSha256": "6f8c5e1d16cffecdc0cb98c5a53b6702073b08b74b14b51d204861cb88f0adf5",
     "ablationMatrixSha256": "371bc7d6ac489c54d8aaa20604e51e6dddf7fa76a6eb3b503a8ac1e31cd557af",
     "retrievalArtifactSha256": "b12ffe5444f5a630637978013fa4722ee28263d022eb5ff8077f6653f9696436",
     "retrievalAuthority": "fixture-only",
@@ -105,5 +105,5 @@
     "costGateRequired": true,
     "finalRuleMutableAfterObservation": false
   },
-  "manifestSha256": "73f0b0376077eaed3c5fc371444122a85e7a0a6e975ed19493ffc543adaec57c"
+  "manifestSha256": "1ca34514453cc9f58910b6f02e215cc6738f1a120cef026cf49bf08aef8efaca"
 }
