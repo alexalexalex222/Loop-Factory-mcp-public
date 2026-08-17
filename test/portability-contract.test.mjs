@@ -27,6 +27,17 @@ test('portability contract freezes bundled loop hashes and line counts', () => {
   assert.equal(loops['loop-de-loop'].lines, 75);
 });
 
+test('hash-bound public text keeps LF bytes on Windows checkouts', () => {
+  const attributes = readFileSync(join(ROOT, '.gitattributes'), 'utf8');
+  for (const rule of [
+    'loops/strip-miner.txt text eol=lf',
+    'loops/loop-de-loop.md text eol=lf',
+    '*.c text eol=lf'
+  ]) {
+    assert.equal(attributes.includes(rule), true, `.gitattributes includes ${rule}`);
+  }
+});
+
 test('portability contract freezes tool names and package binary names', () => {
   assert.deepEqual(TOOL_SPECS.map((tool) => tool.name), EXPECTED_TOOLS);
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -34,6 +45,22 @@ test('portability contract freezes tool names and package binary names', () => {
     'super-loop-mcp': 'src/server.mjs',
     'super-loop-run': 'scripts/run-campaign.mjs'
   });
+  assert.equal(pkg.engines.node, '>=22');
+  assert.equal(pkg.scripts['vnext:custodian:plan'],
+    'node scripts/plan-vnext-custodian-final.mjs');
+  assert.equal(pkg.scripts['verify:recursive-null'],
+    'node scripts/verify-adaptive-recursive-null.mjs');
+});
+
+test('combined portability workflow covers every supported OS and runtime floor', () => {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/portability.yml'), 'utf8');
+  for (const value of [
+    'ubuntu-latest', 'windows-latest', 'macos-latest',
+    'node: [22]', 'npm test', 'npm run package:smoke',
+    'npm run verify:recursive-null'
+  ]) {
+    assert.equal(workflow.includes(value), true, `workflow includes ${value}`);
+  }
 });
 
 test('worker execution remains opt-in and disabled by default', () => {

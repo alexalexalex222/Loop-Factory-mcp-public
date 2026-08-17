@@ -62,14 +62,31 @@ test('package exposes the one-command live judge path and deterministic fallback
   assert.equal(pkg.scripts.demo, 'node scripts/demo.mjs');
 });
 
+test('every local README link is included in the package boundary', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const localTargets = [...readme.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)]
+    .map((match) => match[1].split('#')[0])
+    .filter((target) => target && !/^(?:https?:|mailto:|#)/i.test(target));
+  const includesTarget = (target) => pkg.files.some((entry) => (
+    !entry.startsWith('!')
+    && (entry === target || (entry.endsWith('/') && target.startsWith(entry)))
+  ));
+  assert.deepEqual(localTargets.filter((target) => !includesTarget(target)), []);
+});
+
 test('Build Week docs expose the exact judge path, honest split, and unresolved external placeholders', () => {
   const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
   const readme = read('../README.md');
   const submission = read('../docs/BUILD_WEEK_SUBMISSION.md');
   const video = read('../docs/BUILD_WEEK_VIDEO.md');
+  assert.match(readme, /Make AI agents prove they got better/);
   assert.match(readme, /npm run judge:gpt56-sol/);
-  assert.match(readme, /What changed on July 18, 2026/);
-  assert.match(readme, /controlled\s+adversarial\s+fixtures/i);
+  assert.match(readme, /GPT-5\.6 Sol/);
+  assert.match(readme, /Fable 5/);
+  assert.match(readme, /0\.6190/);
+  assert.match(readme, /1\.0000/);
+  assert.doesNotMatch(readme, /claude-opus-4-8|gpt-5\.5|glm-5\.2/i);
   assert.match(submission, /\[PUBLIC_YOUTUBE_URL\]/);
   assert.match(submission, /\[CODEX_FEEDBACK_SESSION_ID\]/);
   assert.match(submission, /Monday, July 20, 2026 at 11:30 PM PT/);

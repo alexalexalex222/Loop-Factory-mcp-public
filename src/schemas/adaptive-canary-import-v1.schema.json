@@ -1,0 +1,240 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "adaptive-canary-import-v1",
+  "title": "Verifier-owned V4 executable canary evidence admitted for routing only",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "applicationId",
+    "applicationReceiptId",
+    "applicationSha256",
+    "familyId",
+    "partition",
+    "eligibleForRouting",
+    "source",
+    "context",
+    "routing",
+    "outcome",
+    "credit",
+    "authority",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "adaptive-canary-import-v1" },
+    "applicationId": { "type": "string", "pattern": "^application-[a-f0-9]{24}$" },
+    "applicationReceiptId": { "type": "string", "pattern": "^app-receipt-[a-f0-9]{24}$" },
+    "applicationSha256": { "$ref": "#/definitions/sha256" },
+    "familyId": { "type": "string", "pattern": "^family-[a-f0-9]{24}$" },
+    "partition": { "const": "harvest" },
+    "eligibleForRouting": { "const": true },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "runId"],
+      "properties": {
+        "kind": { "const": "adaptive-executable-canary-v4" },
+        "runId": { "$ref": "#/definitions/safeId" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetSha256",
+        "taskMode",
+        "loopRole",
+        "taskValueDimensions",
+        "resourceDimensions"
+      ],
+      "properties": {
+        "targetSha256": { "$ref": "#/definitions/sha256" },
+        "taskMode": { "$ref": "#/definitions/kind" },
+        "loopRole": { "$ref": "#/definitions/kind" },
+        "taskValueDimensions": { "$ref": "#/definitions/kinds" },
+        "resourceDimensions": { "$ref": "#/definitions/kinds" }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routingDecisionId",
+        "routingDecisionSha256",
+        "routingPacketSha256",
+        "policyEpochId",
+        "policyEpochSha256",
+        "allocation",
+        "schedulePosition"
+      ],
+      "properties": {
+        "routingDecisionId": { "type": "string", "pattern": "^route-[a-f0-9]{24}$" },
+        "routingDecisionSha256": { "$ref": "#/definitions/sha256" },
+        "routingPacketSha256": { "$ref": "#/definitions/sha256" },
+        "policyEpochId": { "type": "string", "pattern": "^epoch-[a-f0-9]{24}$" },
+        "policyEpochSha256": { "$ref": "#/definitions/sha256" },
+        "allocation": { "enum": ["related", "adjacent", "failure-derived", "wildcard"] },
+        "schedulePosition": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "valid",
+        "qualityDelta",
+        "tokenCostDeltaPct",
+        "shamMovement",
+        "controlRegressions",
+        "targetRegressions",
+        "shamWins",
+        "reverified",
+        "transferChecks",
+        "contradictionCodes"
+      ],
+      "properties": {
+        "verdict": { "const": "improvement" },
+        "valid": { "const": true },
+        "qualityDelta": { "type": "number", "exclusiveMinimum": 0 },
+        "tokenCostDeltaPct": { "type": "number" },
+        "shamMovement": { "const": 0 },
+        "controlRegressions": { "const": 0 },
+        "targetRegressions": { "const": 0 },
+        "shamWins": { "const": 0 },
+        "reverified": { "const": true },
+        "transferChecks": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "attempted", "passed", "evidenceSha256"],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "negativeControl",
+                  "heldOut",
+                  "metamorphic",
+                  "perturbation",
+                  "evidenceBinding",
+                  "freshReplay"
+                ]
+              },
+              "attempted": { "const": true },
+              "passed": { "const": true },
+              "evidenceSha256": { "$ref": "#/definitions/sha256" }
+            }
+          }
+        },
+        "contradictionCodes": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "credit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confidence", "authority", "positiveEvidence", "failureDerived"],
+      "properties": {
+        "confidence": { "const": 1 },
+        "authority": { "const": "tool-computed" },
+        "positiveEvidence": { "const": true },
+        "failureDerived": { "const": false }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "model",
+        "authMode",
+        "fixtureOnly",
+        "verificationStatus",
+        "experimentValid",
+        "causalPass",
+        "allVerifierGatesPassed",
+        "retries",
+        "promotionRecorded",
+        "activation"
+      ],
+      "properties": {
+        "profile": { "const": "adaptive-executable-canary-v4" },
+        "model": { "const": "gpt-5.6-sol" },
+        "authMode": { "const": "chatgpt-oauth" },
+        "fixtureOnly": { "const": false },
+        "verificationStatus": { "const": "PASS" },
+        "experimentValid": { "const": true },
+        "causalPass": { "const": true },
+        "allVerifierGatesPassed": { "const": true },
+        "retries": { "const": 0 },
+        "promotionRecorded": { "const": false },
+        "activation": { "const": "routing-only" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configSha256",
+        "planSha256",
+        "verifierEvidenceSha256",
+        "familySha256",
+        "programSha256",
+        "evaluatorAuthoritySha256",
+        "interfaceSetSha256",
+        "caseSetSha256",
+        "compilationSetSha256",
+        "evaluationArtifactSetSha256",
+        "tokenReceiptSetSha256",
+        "measurementSha256",
+        "mechanismCapsuleSha256",
+        "confirmationCaseCount",
+        "evaluationArtifactCount",
+        "evaluationArtifactSha256s",
+        "tokenReceiptArtifactCount",
+        "tokenReceiptArtifactSha256s"
+      ],
+      "properties": {
+        "configSha256": { "$ref": "#/definitions/sha256" },
+        "planSha256": { "$ref": "#/definitions/sha256" },
+        "verifierEvidenceSha256": { "$ref": "#/definitions/sha256" },
+        "familySha256": { "$ref": "#/definitions/sha256" },
+        "programSha256": { "$ref": "#/definitions/sha256" },
+        "evaluatorAuthoritySha256": { "$ref": "#/definitions/sha256" },
+        "interfaceSetSha256": { "$ref": "#/definitions/sha256" },
+        "caseSetSha256": { "$ref": "#/definitions/sha256" },
+        "compilationSetSha256": { "$ref": "#/definitions/sha256" },
+        "evaluationArtifactSetSha256": { "$ref": "#/definitions/sha256" },
+        "tokenReceiptSetSha256": { "$ref": "#/definitions/sha256" },
+        "measurementSha256": { "$ref": "#/definitions/sha256" },
+        "mechanismCapsuleSha256": { "$ref": "#/definitions/sha256" },
+        "confirmationCaseCount": { "type": "integer", "minimum": 1 },
+        "evaluationArtifactCount": { "type": "integer", "minimum": 1 },
+        "evaluationArtifactSha256s": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/sha256" }
+        },
+        "tokenReceiptArtifactCount": { "type": "integer", "minimum": 1 },
+        "tokenReceiptArtifactSha256s": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/sha256" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$" },
+    "kinds": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/kind" }
+    }
+  }
+}

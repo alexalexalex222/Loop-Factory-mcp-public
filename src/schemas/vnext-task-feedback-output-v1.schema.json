@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "helped", "obstructed", "timing", "missing", "irrelevant", "rediscovered", "uncertainty"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-task-feedback-output-v1" },
+    "helped": { "$ref": "#/$defs/textArray" },
+    "obstructed": { "$ref": "#/$defs/textArray" },
+    "timing": { "$ref": "#/$defs/textArray" },
+    "missing": { "$ref": "#/$defs/textArray" },
+    "irrelevant": { "$ref": "#/$defs/textArray" },
+    "rediscovered": { "$ref": "#/$defs/textArray" },
+    "uncertainty": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "$defs": {
+    "textArray": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policyId", "requestedModel", "reasoningEffort", "oauthAuthoritySha256", "executableSha256", "requireBackendReportedModel", "acceptedSelectionAuthority", "policySha256"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-model-identity-policy-v1" },
+    "policyId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "requestedModel": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "reasoningEffort": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "oauthAuthoritySha256": { "$ref": "#/$defs/sha" },
+    "executableSha256": { "$ref": "#/$defs/sha" },
+    "requireBackendReportedModel": { "type": "boolean" },
+    "acceptedSelectionAuthority": { "const": "explicit-model-flag" },
+    "policySha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": { "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

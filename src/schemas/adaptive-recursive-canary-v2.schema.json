@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "adaptive-recursive-canary-v2",
+  "title": "Replicated placebo-calibrated recursive mechanism canary configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "model",
+    "reasoningEffort",
+    "authMode",
+    "retries",
+    "promotionEnabled",
+    "historicalTokenEstimate",
+    "replicatesPerArm",
+    "calibrationRule",
+    "confirmationRule",
+    "parentFamily",
+    "candidateFamily",
+    "evolutionRecord",
+    "calibrationTasks",
+    "confirmationTasks"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "adaptive-recursive-canary-v2" },
+    "model": { "enum": ["gpt-5.6-luna", "gpt-5.6-sol"] },
+    "reasoningEffort": { "enum": ["high", "xhigh", "max"] },
+    "authMode": { "const": "chatgpt-oauth" },
+    "retries": { "const": 0 },
+    "promotionEnabled": { "const": false },
+    "historicalTokenEstimate": { "type": "integer", "minimum": 1 },
+    "replicatesPerArm": { "const": 3 },
+    "calibrationRule": { "const": "paired-placebo-upper-bound-v1" },
+    "confirmationRule": { "const": "five-task-adjusted-sign-test-v1" },
+    "parentFamily": { "$ref": "mechanism-family-v1.schema.json" },
+    "candidateFamily": { "$ref": "mechanism-family-v1.schema.json" },
+    "evolutionRecord": { "$ref": "mechanism-evolution-v1.schema.json" },
+    "vnextBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "adapterId",
+        "preparationRunId",
+        "taskPartition",
+        "taskPackSha256",
+        "preparationVerifierEvidenceSha256",
+        "pipelineReceiptSha256",
+        "candidateArtifactSha256",
+        "candidateVerificationSha256",
+        "candidateContractSha256",
+        "behaviorMapSha256",
+        "allowedTargetsSha256",
+        "parentFamilySha256",
+        "mutationPlanSha256",
+        "candidateFamilySha256",
+        "candidateProgramSha256",
+        "evolutionSha256",
+        "treatmentDeltaSha256",
+        "proposalRecordedAt",
+        "shadowRecordedAt",
+        "productionEvidence",
+        "executionAuthority",
+        "activationAuthority",
+        "bindingSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "vnext-mechanism-execution-binding-v1" },
+        "adapterId": { "const": "mechanism-program-v1" },
+        "preparationRunId": { "$ref": "#/definitions/safeId" },
+        "taskPartition": { "enum": ["development", "validation"] },
+        "taskPackSha256": { "$ref": "#/definitions/sha256" },
+        "preparationVerifierEvidenceSha256": { "$ref": "#/definitions/sha256" },
+        "pipelineReceiptSha256": { "$ref": "#/definitions/sha256" },
+        "candidateArtifactSha256": { "$ref": "#/definitions/sha256" },
+        "candidateVerificationSha256": { "$ref": "#/definitions/sha256" },
+        "candidateContractSha256": { "$ref": "#/definitions/sha256" },
+        "behaviorMapSha256": { "$ref": "#/definitions/sha256" },
+        "allowedTargetsSha256": { "$ref": "#/definitions/sha256" },
+        "parentFamilySha256": { "$ref": "#/definitions/sha256" },
+        "mutationPlanSha256": { "$ref": "#/definitions/sha256" },
+        "candidateFamilySha256": { "$ref": "#/definitions/sha256" },
+        "candidateProgramSha256": { "$ref": "#/definitions/sha256" },
+        "evolutionSha256": { "$ref": "#/definitions/sha256" },
+        "treatmentDeltaSha256": { "$ref": "#/definitions/sha256" },
+        "proposalRecordedAt": { "type": "string", "format": "date-time" },
+        "shadowRecordedAt": { "type": "string", "format": "date-time" },
+        "productionEvidence": { "const": true },
+        "executionAuthority": { "const": "bounded-experiment-only" },
+        "activationAuthority": { "const": false },
+        "bindingSha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "vnextBehaviorMap": {
+      "$ref": "vnext-wave-config-v1.schema.json#/$defs/behaviorMap"
+    },
+    "resourceBudgetPolicy": { "$ref": "vnext-resource-budget-v1.schema.json" },
+    "perCallBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxInputTokens", "maxOutputTokens"],
+      "properties": {
+        "maxInputTokens": { "type": "integer", "minimum": 1 },
+        "maxOutputTokens": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "pacePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "outerAlphaAllocation",
+        "lambdaPolicy",
+        "maximumShamMovement",
+        "maximumRelativeTokenIncrease",
+        "ordering",
+        "policySha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "vnext-pace-canary-policy-v1" },
+        "outerAlphaAllocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allocationId", "alpha", "familyAlpha", "policySha256"],
+          "properties": {
+            "allocationId": { "$ref": "#/definitions/safeId" },
+            "alpha": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "familyAlpha": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "policySha256": { "$ref": "#/definitions/sha256" }
+          }
+        },
+        "lambdaPolicy": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "value"],
+              "properties": {
+                "kind": { "const": "fixed" },
+                "value": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "maximum", "priorWins", "priorLosses"],
+              "properties": {
+                "kind": { "const": "predictable-empirical" },
+                "maximum": { "type": "number", "minimum": 0, "maximum": 1 },
+                "priorWins": { "type": "number", "exclusiveMinimum": 0 },
+                "priorLosses": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            }
+          ]
+        },
+        "maximumShamMovement": { "type": "number", "minimum": 0 },
+        "maximumRelativeTokenIncrease": { "type": "number", "minimum": 0 },
+        "ordering": { "const": "policy-hash-task-id-v1" },
+        "policySha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "calibrationTasks": { "$ref": "#/definitions/taskSet" },
+    "confirmationTasks": { "$ref": "#/definitions/taskSet" }
+  },
+  "definitions": {
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "sha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "incident", "interface", "oracle", "interfaceContract"],
+      "properties": {
+        "id": { "$ref": "#/definitions/safeId" },
+        "source": { "$ref": "#/definitions/artifact" },
+        "incident": { "$ref": "#/definitions/artifact" },
+        "interface": { "$ref": "#/definitions/artifact" },
+        "oracle": { "$ref": "#/definitions/artifact" },
+        "interfaceContract": { "$ref": "executable-interface-contract-v2.schema.json" }
+      }
+    },
+    "taskSet": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/definitions/task" }
+    }
+  }
+}

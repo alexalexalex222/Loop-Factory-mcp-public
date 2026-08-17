@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-campaign-series-checkpoint-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sequence", "runId", "planSha256", "previousCheckpointSha256", "recordedAt", "stateSha256", "state", "checkpointSha256"],
+  "properties": { "schemaVersion": { "const": "loop-factory-campaign-series-checkpoint-v1" }, "sequence": { "type": "integer", "minimum": 0 }, "runId": { "$ref": "#/$defs/id" }, "planSha256": { "$ref": "#/$defs/sha" }, "previousCheckpointSha256": { "$ref": "#/$defs/nullableSha" }, "recordedAt": { "type": "string", "format": "date-time" }, "stateSha256": { "$ref": "#/$defs/sha" }, "state": { "$ref": "vnext-campaign-series-state-v1.schema.json" }, "checkpointSha256": { "$ref": "#/$defs/sha" } },
+  "$defs": { "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "nullableSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] } }
+}

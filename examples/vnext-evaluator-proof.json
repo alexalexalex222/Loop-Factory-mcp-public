@@ -1,0 +1,80 @@
+{
+  "taskId": "incident-summary-fidelity",
+  "anonymousArmId": "anonymous-pair-1",
+  "prompt": "Measure every anonymous artifact against each public rubric dimension. Use only the supplied task-local evidence. Return strict JSON matching vnext-evaluator-output-v1, use the frozen rubricSha256 exactly, cite evidence IDs, and report any protocol violation. You have measurement authority only.",
+  "timeoutMs": 600000,
+  "requestInput": {
+    "taskSpecification": {
+      "instruction": "Score the factual fidelity, coverage, and clarity of each anonymous incident summary using only the supplied evidence.",
+      "outputConvention": "Report separate dimensions prefixed A or B for the two visible slots."
+    },
+    "publicRubric": {
+      "scale": {
+        "minimum": 0,
+        "maximum": 1
+      },
+      "dimensions": [
+        {
+          "id": "A-factual-fidelity",
+          "criterion": "Every factual statement in slot A is supported by task-local evidence."
+        },
+        {
+          "id": "A-coverage",
+          "criterion": "Slot A includes the time, impact, response, and recovery facts."
+        },
+        {
+          "id": "A-clarity",
+          "criterion": "Slot A is concise and internally coherent."
+        },
+        {
+          "id": "B-factual-fidelity",
+          "criterion": "Every factual statement in slot B is supported by task-local evidence."
+        },
+        {
+          "id": "B-coverage",
+          "criterion": "Slot B includes the time, impact, response, and recovery facts."
+        },
+        {
+          "id": "B-clarity",
+          "criterion": "Slot B is concise and internally coherent."
+        }
+      ]
+    },
+    "anonymousCandidateArtifact": {
+      "text": "At 14:05 UTC, elevated checkout errors affected about 18 percent of requests. The on-call engineer disabled the faulty cache rule at 14:12, and error rates returned to normal by 14:18. No stored payment data was lost."
+    },
+    "objectiveVerifierFacts": {
+      "formatValid": true,
+      "requiredEvidenceIds": [
+        "incident-window",
+        "incident-impact",
+        "incident-response",
+        "incident-data"
+      ]
+    },
+    "taskLocalEvidence": [
+      {
+        "id": "incident-window",
+        "content": "Elevated checkout errors began at 14:05 UTC and returned to normal by 14:18 UTC."
+      },
+      {
+        "id": "incident-impact",
+        "content": "Approximately 18 percent of checkout requests failed during the incident."
+      },
+      {
+        "id": "incident-response",
+        "content": "The on-call engineer disabled a faulty cache rule at 14:12 UTC."
+      },
+      {
+        "id": "incident-data",
+        "content": "No stored payment data was lost."
+      }
+    ],
+    "pairwise": {
+      "secondAnonymousArtifact": {
+        "text": "At 16:40 UTC, every checkout request failed after a database deletion. Service recovered after a payment rollback, and stored card records were permanently lost."
+      },
+      "seed": "evaluator-proof-fixed-order-20260805"
+    }
+  }
+}

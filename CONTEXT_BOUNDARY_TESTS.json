@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "loop-factory-vnext-context-boundary-tests-v1",
+  "generatedAt": "2026-08-17T13:14:44.000Z",
+  "sourceTreeSha256": "2f2db58401d8b5f7e597417069025999c98e261fad838db50bb02061d64dd324",
+  "authority": {
+    "kind": "local-test-replay",
+    "testLog": {
+      "path": "proof/public-integration-verification-20260817/npm-test-node24-portability-r6.log",
+      "sha256": "7f3e39a60cd32e302fa2f4893ba9c2a4c372d9cfd51637366e4dbed4a5eb6bb9",
+      "tests": 956,
+      "pass": 951,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 5,
+      "platformExclusions": [
+        "executable evaluator refuses unsupported hosts before sandbox access",
+        "Windows command shims refuse percent expansion in model argv",
+        "a timed-out Windows command shim kills its complete descendant process tree",
+        "code candidate execution refuses unsupported platforms before filesystem access",
+        "task-pack build reports an unsupported evaluator host directly"
+      ],
+      "todo": 0
+    }
+  },
+  "paidModelCalls": 0,
+  "finalSealedTaskExposure": false,
+  "result": "PASS",
+  "controls": [
+    {
+      "id": "evaluator-fresh-process",
+      "file": "test/isolated-evaluator.test.mjs",
+      "assertion": "fresh process, state, HOME, TMPDIR, and auth-only capsule",
+      "result": "PASS"
+    },
+    {
+      "id": "evaluator-no-arm-leakage",
+      "file": "test/isolated-evaluator.test.mjs",
+      "assertion": "raw arm identity and prior score are refused",
+      "result": "PASS"
+    },
+    {
+      "id": "evaluator-drift-invalidates",
+      "file": "test/isolated-evaluator.test.mjs",
+      "assertion": "prompt, rubric, tool, and worker drift invalidate evidence",
+      "result": "PASS"
+    },
+    {
+      "id": "research-chronology",
+      "file": "test/vnext-research.test.mjs",
+      "assertion": "future evidence and sealed external research are refused",
+      "result": "PASS"
+    },
+    {
+      "id": "research-discovery-policy",
+      "file": "test/vnext-external-research.test.mjs",
+      "assertion": "browser-only discovery cannot escape the frozen host and source bounds",
+      "result": "PASS"
+    },
+    {
+      "id": "research-byte-replay",
+      "file": "test/vnext-external-research-worker.test.mjs",
+      "assertion": "captured primary-source bytes, excerpts, TLS, and receipt hashes replay",
+      "result": "PASS"
+    },
+    {
+      "id": "hypothesis-chronology",
+      "file": "test/vnext-hypothesis.test.mjs",
+      "assertion": "future dossier and retrieval context are refused",
+      "result": "PASS"
+    },
+    {
+      "id": "falsifier-chronology",
+      "file": "test/hypothesis-falsifier.test.mjs",
+      "assertion": "future prior evidence and feedback are refused",
+      "result": "PASS"
+    },
+    {
+      "id": "evidence-authority",
+      "file": "test/vnext-evidence-bank.test.mjs",
+      "assertion": "fixture and unverified records cannot enter production routing",
+      "result": "PASS"
+    },
+    {
+      "id": "candidate-mutation-scope",
+      "file": "test/vnext-candidate-generators.test.mjs",
+      "assertion": "candidate edits are exact-locator and parent-hash bound",
+      "result": "PASS"
+    },
+    {
+      "id": "candidate-strategy-separation",
+      "file": "test/vnext-candidate-generators.test.mjs",
+      "assertion": "Pareto, bounded-skill, recombination, and code strategies enforce distinct semantics",
+      "result": "PASS"
+    },
+    {
+      "id": "code-worktree-isolation",
+      "file": "test/vnext-code-worktree.test.mjs",
+      "assertion": "detached worktree, exact argv, patch replay, required tests, and network denial are bound",
+      "result": "PASS"
+    },
+    {
+      "id": "task-pack-custody",
+      "file": "test/vnext-task-pack.test.mjs",
+      "assertion": "final packs reject non-custodian builders and require executable custodian proof",
+      "result": "PASS"
+    },
+    {
+      "id": "operator-no-promotion",
+      "file": "test/vnext-operator-actions.test.mjs",
+      "assertion": "operator actions can restrict but cannot approve or promote",
+      "result": "PASS"
+    },
+    {
+      "id": "lease-cas",
+      "file": "test/run-lease.test.mjs",
+      "assertion": "stale mutex owners cannot remove a successor lock",
+      "result": "PASS"
+    },
+    {
+      "id": "task-cluster-inference",
+      "file": "test/adaptive-recursive-statistics.test.mjs",
+      "assertion": "replicates do not inflate the statistical sample",
+      "result": "PASS"
+    }
+  ],
+  "artifactSha256": "6f8c5e1d16cffecdc0cb98c5a53b6702073b08b74b14b51d204861cb88f0adf5"
+}

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-operator-action-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "actionId",
+    "runId",
+    "kind",
+    "target",
+    "expectedRevisionSha256",
+    "rollbackTarget",
+    "reasonCode",
+    "evidenceSha256",
+    "verifierEvidenceSha256",
+    "authority",
+    "createdAt",
+    "actionSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-operator-action-v1" },
+    "actionId": { "$ref": "#/$defs/id" },
+    "runId": { "$ref": "#/$defs/id" },
+    "kind": {
+      "enum": [
+        "deny-review",
+        "quarantine-family",
+        "rollback-policy",
+        "release-quarantine"
+      ]
+    },
+    "target": { "$ref": "#/$defs/target" },
+    "expectedRevisionSha256": { "$ref": "#/$defs/sha" },
+    "rollbackTarget": {
+      "anyOf": [{ "$ref": "#/$defs/rollbackTarget" }, { "type": "null" }]
+    },
+    "reasonCode": { "$ref": "#/$defs/id" },
+    "evidenceSha256": { "$ref": "#/$defs/sha" },
+    "verifierEvidenceSha256": { "$ref": "#/$defs/nullableSha" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "actionSha256": { "$ref": "#/$defs/sha" }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "const": "deny-review" },
+            "target": { "properties": { "type": { "const": "review" } } },
+            "rollbackTarget": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "quarantine-family" },
+            "target": { "properties": { "type": { "const": "family" } } },
+            "rollbackTarget": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "rollback-policy" },
+            "target": { "properties": { "type": { "const": "policy" } } },
+            "rollbackTarget": { "$ref": "#/$defs/rollbackTarget" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "release-quarantine" },
+            "target": { "properties": { "type": { "const": "family" } } },
+            "rollbackTarget": { "type": "null" },
+            "verifierEvidenceSha256": { "$ref": "#/$defs/sha" }
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
+    },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableSha": {
+      "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "sha256"],
+      "properties": {
+        "type": { "enum": ["review", "family", "policy"] },
+        "id": { "$ref": "#/$defs/id" },
+        "sha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "rollbackTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "sha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operatorId", "sessionId"],
+      "properties": {
+        "operatorId": { "$ref": "#/$defs/id" },
+        "sessionId": { "$ref": "#/$defs/id" }
+      }
+    }
+  }
+}

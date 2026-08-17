@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "protocol", "protocolSha256", "phaseId", "phaseMode",
+    "memoryPolicy", "proofHome", "common", "children", "exposure",
+    "implementationManifest", "implementationSha256", "authority", "planSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-matched-phase-plan-v1" },
+    "protocol": { "$ref": "#/$defs/openObject" },
+    "protocolSha256": { "$ref": "#/$defs/sha" },
+    "phaseId": { "$ref": "#/$defs/id" },
+    "phaseMode": { "type": "string", "minLength": 1 },
+    "memoryPolicy": { "type": "string", "minLength": 1 },
+    "proofHome": { "type": "string", "minLength": 1 },
+    "common": { "$ref": "#/$defs/openObject" },
+    "children": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/openObject" }
+    },
+    "exposure": { "$ref": "#/$defs/openObject" },
+    "implementationManifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/openObject" }
+    },
+    "implementationSha256": { "$ref": "#/$defs/sha" },
+    "authority": { "$ref": "#/$defs/openObject" },
+    "planSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "openObject": { "type": "object", "additionalProperties": true }
+  }
+}

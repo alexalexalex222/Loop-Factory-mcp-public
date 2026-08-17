@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-campaign-verifier-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "seriesRunId", "planSha256", "stateSha256", "checkpointSha256", "rootBudgetLedgerSha256", "leaseHistorySha256", "waves", "status", "operatorStop", "seriesValid", "promotionAuthorized"],
+  "properties": { "schemaVersion": { "const": "loop-factory-vnext-campaign-verifier-v1" }, "seriesRunId": { "$ref": "#/$defs/id" }, "planSha256": { "$ref": "#/$defs/sha" }, "stateSha256": { "$ref": "#/$defs/sha" }, "checkpointSha256": { "$ref": "#/$defs/sha" }, "rootBudgetLedgerSha256": { "$ref": "#/$defs/sha" }, "leaseHistorySha256": { "$ref": "#/$defs/nullableSha" }, "waves": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["waveId", "disposition", "valid", "evidenceSha256"], "properties": { "waveId": { "$ref": "#/$defs/id" }, "disposition": { "enum": ["VERIFIED", "INVALID", "AMBIGUOUS_DISPATCH", "QUEUED"] }, "valid": { "type": "boolean" }, "evidenceSha256": { "$ref": "#/$defs/nullableSha" } } } }, "status": { "type": "string", "minLength": 1, "maxLength": 80 }, "operatorStop": { "type": "boolean" }, "seriesValid": { "type": "boolean" }, "promotionAuthorized": { "const": false } },
+  "$defs": { "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "nullableSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] } }
+}

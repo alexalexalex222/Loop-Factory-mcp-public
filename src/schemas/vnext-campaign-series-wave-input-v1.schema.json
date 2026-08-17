@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-campaign-series-wave-input-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "waveId", "taskPackId", "taskPackSha256", "taskMaterialBundleSha256", "configId", "configSha256", "budgetPolicySetSha256", "artifacts", "manifestSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-campaign-series-wave-input-v1" }, "runId": { "$ref": "#/$defs/id" }, "waveId": { "$ref": "#/$defs/id" }, "taskPackId": { "$ref": "#/$defs/id" }, "taskPackSha256": { "$ref": "#/$defs/sha" }, "taskMaterialBundleSha256": { "$ref": "#/$defs/sha" }, "configId": { "$ref": "#/$defs/id" }, "configSha256": { "$ref": "#/$defs/sha" }, "budgetPolicySetSha256": { "$ref": "#/$defs/sha" },
+    "artifacts": { "type": "object", "additionalProperties": false, "required": ["taskPackSha256", "configSha256", "budgetPoliciesSha256", "taskMaterialsSha256"], "properties": { "taskPackSha256": { "$ref": "#/$defs/sha" }, "configSha256": { "$ref": "#/$defs/sha" }, "budgetPoliciesSha256": { "$ref": "#/$defs/sha" }, "taskMaterialsSha256": { "$ref": "#/$defs/sha" } } },
+    "manifestSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": { "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

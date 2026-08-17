@@ -8,28 +8,28 @@ import { freshEngine, initThroughBaselineBar, recordMeasurement, BASELINE_BODY, 
 
 const H = (model, title, extra = {}) => ({ title, bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model }, ...extra });
 
-test('builds / in-loop gating route to Opus 4.8 or GLM 5.2 — Codex/GPT builder is refused', () => {
+test('builds / in-loop gating route to Fable 5 or GPT-5.6 Sol; evaluator-only and host routes are refused', () => {
   const { engine } = freshEngine();
   initThroughBaselineBar(engine, 'b1');
-  // gpt-5.5 is a fine frontier TEST worker, but naming it as the BUILDER is refused
+  // Terra is a frontier test worker, but it is not a default builder.
   const bad = engine.register_hypotheses({ runId: 'b1', hypotheses: [
-    H('claude-opus-4-8', 'a', { builderRoute: 'gpt-5.5' }),
-    H('gpt-5.5', 'b'),
-    H('glm-5.2', 'c')
+    H('gpt-5.6-sol', 'a', { builderRoute: 'gpt-5.6-terra' }),
+    H('claude-fable-5', 'b'),
+    H('gpt-5.6-terra', 'c')
   ] });
   assert.equal(bad.status, 'BLOCKED');
   assert.equal(bad.code, 'BUILDER_ROUTE');
 
   const codex = engine.register_hypotheses({ runId: 'b1', hypotheses: [
-    H('claude-opus-4-8', 'a', { builderRoute: 'codex' }), H('gpt-5.5', 'b'), H('glm-5.2', 'c')
+    H('gpt-5.6-sol', 'a', { builderRoute: 'codex' }), H('claude-fable-5', 'b'), H('gpt-5.6-terra', 'c')
   ] });
-  assert.equal(codex.code, 'BUILDER_ROUTE', 'codex is a host surface, not an in-loop builder');
+  assert.equal(codex.code, 'BUILDER_ROUTE', 'codex is a host alias, not a model route');
 
   // trusted builder routes pass
   const good = engine.register_hypotheses({ runId: 'b1', hypotheses: [
-    H('claude-opus-4-8', 'a', { builderRoute: 'claude-opus-4-8' }),
-    H('gpt-5.5', 'b', { builderRoute: 'glm-5.2' }),
-    H('glm-5.2', 'c')
+    H('gpt-5.6-sol', 'a', { builderRoute: 'claude-fable-5' }),
+    H('claude-fable-5', 'b', { builderRoute: 'gpt-5.6-sol' }),
+    H('gpt-5.6-terra', 'c')
   ] });
   assert.equal(good.status, 'OK');
 });
@@ -82,7 +82,7 @@ test('campaign_status exposes the lane queue, retirement threshold, advisory ban
   assert.ok(s.modelPolicy, 'campaign_status exposes the ACTIVE modelPolicy');
   assert.equal(s.modelPolicy.banlist.mode, 'default');
   assert.deepEqual(s.builderGatingRoutes, s.modelPolicy.builderRoutes);
-  assert.deepEqual(s.modelPolicy.builderRoutes, ['claude-opus-4-8', 'glm-5.2']);
+  assert.deepEqual(s.modelPolicy.builderRoutes, ['claude-fable-5', 'gpt-5.6-sol']);
   assert.match(s.stopCondition, /you are the stop condition/i);
 });
 

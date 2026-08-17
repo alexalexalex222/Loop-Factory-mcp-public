@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "seriesRunId", "waveId", "armId", "createdAt",
+    "studyBinding", "proofHome", "taskPack", "parentMechanism", "model",
+    "evaluatorAuthoritySha256", "ablationProfileSha256",
+    "implementationSha256", "configSha256", "campaignPlanSha256",
+    "wavePlanSha256", "budgetPolicySha256s", "exposure", "execution",
+    "controls", "approval", "disclosureSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-study-disclosure-v1" },
+    "seriesRunId": { "$ref": "#/$defs/id" },
+    "waveId": { "$ref": "#/$defs/id" },
+    "armId": { "enum": ["B0", "B1", "B2", "B3", "B4", "B5a", "B5b", "B5c", "B6", "B7"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "studyBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolSha256", "phaseId", "memoryLedgerSha256"],
+      "properties": {
+        "protocolSha256": { "$ref": "#/$defs/sha" },
+        "phaseId": { "$ref": "#/$defs/id" },
+        "memoryLedgerSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "proofHome": { "type": "string", "minLength": 1 },
+    "taskPack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packId", "partition", "packSha256", "taskIdentitySetSha256", "taskClusters"],
+      "properties": {
+        "packId": { "$ref": "#/$defs/id" },
+        "partition": { "enum": ["development", "validation"] },
+        "packSha256": { "$ref": "#/$defs/sha" },
+        "taskIdentitySetSha256": { "$ref": "#/$defs/sha" },
+        "taskClusters": { "type": "integer", "minimum": 10 }
+      }
+    },
+    "parentMechanism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["familyId", "familySha256", "mutationObjectiveSha256"],
+      "properties": {
+        "familyId": { "$ref": "#/$defs/id" },
+        "familySha256": { "$ref": "#/$defs/sha" },
+        "mutationObjectiveSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestedModel", "reasoningEffort", "authMode", "oauthAuthoritySha256", "executableSha256", "fallbackModels"],
+      "properties": {
+        "requestedModel": { "type": "string", "minLength": 1 },
+        "reasoningEffort": { "type": "string", "minLength": 1 },
+        "authMode": { "const": "chatgpt-oauth" },
+        "oauthAuthoritySha256": { "$ref": "#/$defs/sha" },
+        "executableSha256": { "$ref": "#/$defs/sha" },
+        "fallbackModels": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "evaluatorAuthoritySha256": { "$ref": "#/$defs/sha" },
+    "ablationProfileSha256": { "$ref": "#/$defs/sha" },
+    "implementationSha256": { "$ref": "#/$defs/sha" },
+    "configSha256": { "$ref": "#/$defs/sha" },
+    "campaignPlanSha256": { "$ref": "#/$defs/sha" },
+    "wavePlanSha256": { "$ref": "#/$defs/sha" },
+    "budgetPolicySha256s": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": { "$ref": "#/$defs/sha" }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparationCalls", "calibrationCalls", "conditionalConfirmationCalls", "maximumCalls", "maximumInputTokens", "maximumOutputTokens", "maximumTotalTokens", "maximumUsdMicros", "billingMode", "tokenCeilingEnforcement", "historicalTokenEstimate", "sequentialTimeoutCeilingMinutes"],
+      "properties": {
+        "preparationCalls": { "type": "integer", "minimum": 2 },
+        "calibrationCalls": { "const": 60 },
+        "conditionalConfirmationCalls": { "const": 60 },
+        "maximumCalls": { "type": "integer", "minimum": 122 },
+        "maximumInputTokens": { "type": "integer", "minimum": 1 },
+        "maximumOutputTokens": { "type": "integer", "minimum": 1 },
+        "maximumTotalTokens": { "type": "integer", "minimum": 1 },
+        "maximumUsdMicros": { "const": 0 },
+        "billingMode": { "const": "subscription-no-metered-usd" },
+        "tokenCeilingEnforcement": { "type": "string", "minLength": 1 },
+        "historicalTokenEstimate": { "type": "integer", "minimum": 1 },
+        "sequentialTimeoutCeilingMinutes": { "const": 1200 }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparation", "experiment"],
+      "properties": {
+        "preparation": {
+          "type": "array", "minItems": 2, "maxItems": 6,
+          "items": { "$ref": "#/$defs/invocation" }
+        },
+        "experiment": { "$ref": "#/$defs/invocationWithoutRole" }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retries", "promotionEnabled", "confirmationConditional", "shamArm", "parentArm", "coldArm", "candidateArm", "evaluatorIsolationRequired"],
+      "properties": {
+        "retries": { "const": 0 },
+        "promotionEnabled": { "const": false },
+        "confirmationConditional": { "const": true },
+        "shamArm": { "const": true },
+        "parentArm": { "const": true },
+        "coldArm": { "const": true },
+        "candidateArm": { "const": true },
+        "evaluatorIsolationRequired": { "const": true }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredBeforeLaunch", "authority", "workerLaunchedAtPlanning", "paidModelCallsAtPlanning"],
+      "properties": {
+        "requiredBeforeLaunch": { "const": true },
+        "authority": { "const": "operator-exact-study-disclosure-sha256" },
+        "workerLaunchedAtPlanning": { "const": false },
+        "paidModelCallsAtPlanning": { "const": 0 }
+      }
+    },
+    "disclosureSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "maximumCalls", "kind", "toolPolicy", "argv", "outputSchemaPath", "outputSchemaSha256", "disabledFeatures", "enabledFeatures", "promptTransport", "filesystem", "conversation"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1 },
+        "maximumCalls": { "type": "integer", "minimum": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "toolPolicy": { "enum": ["none", "research-web-read-only"] },
+        "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "outputSchemaPath": { "type": "string", "minLength": 1 },
+        "outputSchemaSha256": { "$ref": "#/$defs/sha" },
+        "disabledFeatures": { "type": "array", "items": { "type": "string" } },
+        "enabledFeatures": { "type": "array", "items": { "type": "string" } },
+        "promptTransport": { "const": "stdin" },
+        "filesystem": { "const": "fresh-read-only-capsule" },
+        "conversation": { "const": "fresh-ephemeral-process" }
+      }
+    },
+    "invocationWithoutRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "toolPolicy", "argv", "outputSchemaPath", "outputSchemaSha256", "disabledFeatures", "enabledFeatures", "promptTransport", "filesystem", "conversation"],
+      "properties": {
+        "kind": { "const": "proposal" },
+        "toolPolicy": { "const": "none" },
+        "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "outputSchemaPath": { "type": "string", "minLength": 1 },
+        "outputSchemaSha256": { "$ref": "#/$defs/sha" },
+        "disabledFeatures": { "type": "array", "items": { "type": "string" } },
+        "enabledFeatures": { "type": "array", "items": { "type": "string" } },
+        "promptTransport": { "const": "stdin" },
+        "filesystem": { "const": "fresh-read-only-capsule" },
+        "conversation": { "const": "fresh-ephemeral-process" }
+      }
+    }
+  }
+}

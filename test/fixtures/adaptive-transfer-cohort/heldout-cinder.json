@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "id": "cinder-hidden-target", "cinderBaselineMarker": "MISSED" },
+    { "id": "cinder-hidden-clean", "cinderControlMarker": "ACCEPT" },
+    { "id": "cinder-hidden-guard", "cinderGuardMarker": "REJECT" }
+  ]
+}

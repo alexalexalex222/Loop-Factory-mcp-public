@@ -12,6 +12,15 @@ import { createEngine } from '../src/engine.mjs';
 import { buildDashboardServer } from '../scripts/dashboard-server.mjs';
 import { canaryState } from './fixtures/canary-state.mjs';
 import { reviewDecisionBinding } from '../src/review-decisions.mjs';
+import { createInitialAdaptiveContextPolicy } from '../src/adaptive-context-policy.mjs';
+import {
+  createCampaignSeriesPlan,
+  createCampaignSeriesState
+} from '../src/campaign-series.mjs';
+import { createResourceBudgetPolicy } from '../src/resource-budget.mjs';
+import { createMechanismFamilyRecord } from '../src/adaptive-records.mjs';
+import { persistAdaptiveRecord } from '../src/mechanism-catalog.mjs';
+import { sha256 } from '../src/util.mjs';
 
 const TASK = 'Improve the strip-miner loop to raise candidate precision by at least 10% while keeping token cost under the current benchmark.';
 const IMPROVED = 'PHASE ONE INTAKE\nImproved served candidate DELTA with recorded evidence.\n\nPHASE TWO MEASURE\nMeasure it on the frozen benchmark.\n\nPHASE THREE VERIFY\nReverify; the operator is the only stop.';
@@ -353,5 +362,318 @@ test('served dashboard: run selection is a polished, filterable operational inde
     assert.match(page.text, /Decision required/i);
     assert.match(page.text, /1 pending/i);
     assert.doesNotMatch(page.text, /<body style=/);
+  } finally { server.close(); }
+});
+
+test('served dashboard: recursive app API exposes cursored evidence and token-bound operator stop', async () => {
+  const store = createStore(mkdtempSync(join(tmpdir(), 'sl-dash-recursive-')));
+  const policy = createInitialAdaptiveContextPolicy({
+    scopeId: 'recursive-ui-context',
+    minInputTokens: 1000,
+    initialInputTokens: 10000,
+    maxInputTokens: 20000,
+    permanentControlFraction: 0.2,
+    recordedAt: '2026-08-05T05:00:00.000Z'
+  });
+  assert.equal(policy.status, 'OK');
+  store.save({
+    schemaVersion: 1,
+    kind: 'adaptive-recursive-campaign',
+    runId: 'recursive-ui-live',
+    status: 'RUNNING',
+    createdAt: '2026-08-05T05:00:00.000Z',
+    updatedAt: '2026-08-05T05:01:00.000Z',
+    completedAt: null,
+    plan: {
+      sha256: 'a'.repeat(64),
+      configSha256: 'b'.repeat(64),
+      modelPolicy: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+      bounds: { maximumGenerations: 5, maximumCalls: 605 }
+    },
+    events: [{
+      schemaVersion: 'adaptive-recursive-campaign-event-v1',
+      runId: 'recursive-ui-live',
+      sequence: 0,
+      previousEventSha256: null,
+      type: 'CAMPAIGN_INITIALIZED',
+      createdAt: '2026-08-05T05:00:00.000Z',
+      detail: {
+        planSha256: 'a'.repeat(64),
+        promptContent: 'EVENT_PROMPT_SECRET'
+      },
+      eventSha256: 'c'.repeat(64)
+    }],
+    generations: [{
+      generation: 0,
+      status: 'VERIFIED_IMPROVEMENT',
+      causalPass: true,
+      calibrationQualified: true,
+      childRunId: null,
+      childEvidenceSha256: 'd'.repeat(64),
+      mutationPlan: { mutationPlanId: 'mutation-aaaaaaaaaaaaaaaaaaaaaaaa' }
+    }],
+    currentGeneration: null,
+    nextGeneration: 1,
+    evidenceArtifacts: {},
+    memoryRecords: [{
+      recordId: 'memory-generation-0',
+      lifecycle: 'active',
+      priority: 2,
+      artifactSha256: 'e'.repeat(64),
+      semanticSha256: 'f'.repeat(64)
+    }],
+    contextPolicy: policy.record,
+    contextObservations: [],
+    promotion: { enabled: false, recorded: false },
+    verification: {
+      experimentValid: false,
+      modelCalls: 121,
+      gates: { eventChain: true, promotionDisabled: true }
+    }
+  });
+  const server = dashboardServer(store);
+  const port = await listen(server);
+  try {
+    const list = await req(port, 'GET', '/api/v1/runs');
+    assert.equal(list.status, 200);
+    assert.equal(list.json.schemaVersion, 'loop-factory-app-api-v1');
+    assert.ok(list.json.runs.some((run) => run.runId === 'recursive-ui-live'));
+
+    const envelope = await req(port, 'GET', '/api/v1/runs/recursive-ui-live');
+    assert.equal(envelope.status, 200);
+    assert.equal(envelope.json.snapshot.recursive.enabled, true);
+    assert.equal(envelope.json.snapshot.recursive.mode, 'campaign');
+    assert.equal(envelope.json.capabilities.operatorStop, true);
+    assert.match(envelope.json.envelopeSha256, /^[a-f0-9]{64}$/);
+
+    const events = await req(port, 'GET', '/api/v1/runs/recursive-ui-live/events');
+    assert.equal(events.status, 200);
+    assert.equal(events.json.events.length, 1);
+    assert.match(events.json.events[0].cursor, /^evt-[a-f0-9]{32}$/);
+    assert.ok(!events.text.includes('EVENT_PROMPT_SECRET'));
+    const after = await req(
+      port,
+      'GET',
+      `/api/v1/runs/recursive-ui-live/events?after=${events.json.events[0].cursor}`
+    );
+    assert.equal(after.status, 200);
+    assert.equal(after.json.events.length, 0);
+
+    const page = await req(port, 'GET', '/?run=recursive-ui-live');
+    assert.equal(page.status, 200);
+    assert.match(page.text, /Recursive control plane/);
+    assert.match(page.text, /Approval and denial/);
+    assert.match(page.text, /Stop run/);
+
+    const refused = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      null,
+      { origin: `http://127.0.0.1:${port}` }
+    );
+    assert.equal(refused.status, 403);
+    const revisionRequired = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      null,
+      decisionHeaders(port)
+    );
+    assert.equal(revisionRequired.status, 409);
+    assert.equal(revisionRequired.json.code, 'RUN_REVISION_REQUIRED');
+    const stopped = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      { expectedRevisionSha256: envelope.json.stateRevisionSha256 },
+      decisionHeaders(port)
+    );
+    assert.equal(stopped.status, 200);
+    assert.equal(stopped.json.state, 'STOP_REQUESTED');
+    assert.ok(store.readRunFile('recursive-ui-live', 'OPERATOR_STOP'));
+    const stoppedEnvelope = await req(
+      port,
+      'GET',
+      '/api/v1/runs/recursive-ui-live'
+    );
+    const idempotent = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      { expectedRevisionSha256: stoppedEnvelope.json.stateRevisionSha256 },
+      decisionHeaders(port)
+    );
+    assert.equal(idempotent.status, 200);
+    assert.equal(idempotent.json.idempotent, true);
+  } finally { server.close(); }
+});
+
+test('served dashboard: an idle VNext campaign remains stoppable without granting activation authority', async () => {
+  const store = createStore(mkdtempSync(join(tmpdir(), 'sl-dash-vnext-')));
+  const budget = createResourceBudgetPolicy({
+    policyId: 'vnext-dashboard-budget',
+    maxCalls: 200,
+    maxInputTokens: 100000,
+    maxOutputTokens: 50000,
+    maxTotalTokens: 150000,
+    maxUsdMicros: 0,
+    inputUsdMicrosPerMillionTokens: 0,
+    outputUsdMicrosPerMillionTokens: 0,
+    billingMode: 'subscription-no-metered-usd',
+    currency: 'USD'
+  });
+  assert.equal(budget.status, 'OK');
+  const plan = createCampaignSeriesPlan({
+    seriesId: 'vnext-dashboard-series',
+    createdAt: '2026-08-05T06:00:00.000Z',
+    maximumWaves: 2,
+    familywiseAlpha: 0.05,
+    maximumCalls: 200,
+    modelPolicySha256: '1'.repeat(64),
+    evaluatorPolicySha256: '2'.repeat(64),
+    implementationSha256: '3'.repeat(64),
+    budgetPolicy: budget.policy
+  });
+  assert.equal(plan.status, 'OK');
+  const created = createCampaignSeriesState({
+    plan: plan.plan,
+    runId: 'vnext-dashboard-run'
+  });
+  assert.equal(created.status, 'OK');
+  store.save(created.state);
+  const family = createMechanismFamilyRecord({
+    causalFingerprint: {
+      bottleneckKind: 'dashboard-control-bottleneck',
+      interventionKind: 'dashboard-control-intervention',
+      operationKind: 'dashboard-control-operation',
+      expectedEffectKind: 'dashboard-control-effect',
+      preconditions: ['verified-evidence'],
+      applicability: {
+        taskModes: ['improve'],
+        loopRoles: ['supervisor'],
+        taskValueDimensions: ['quality'],
+        resourceDimensions: ['token-cost']
+      }
+    }
+  });
+  assert.equal(family.status, 'OK');
+  assert.equal(persistAdaptiveRecord({
+    homeDir: store.homeDir,
+    record: family.record
+  }).status, 'OK');
+
+  const server = dashboardServer(store);
+  const port = await listen(server);
+  try {
+    const envelope = await req(port, 'GET', '/api/v1/runs/vnext-dashboard-run');
+    assert.equal(envelope.status, 200);
+    assert.equal(envelope.json.snapshot.kind, 'vnext-campaign-series');
+    assert.equal(envelope.json.snapshot.recursive.mode, 'vnext-campaign');
+    assert.equal(envelope.json.snapshot.recursive.operator.canStop, true);
+    assert.equal(envelope.json.capabilities.operatorStop, true);
+    assert.equal(envelope.json.capabilities.promotion, false);
+    assert.equal(envelope.json.capabilities.operatorControl, true);
+    assert.equal(envelope.json.capabilities.evidenceIndex, true);
+    assert.equal(envelope.json.capabilities.evidenceBodies, false);
+    assert.match(envelope.json.stateRevisionSha256, /^[a-f0-9]{64}$/);
+
+    const evidence = await req(
+      port,
+      'GET',
+      '/api/v1/runs/vnext-dashboard-run/evidence'
+    );
+    assert.equal(evidence.status, 200);
+    assert.equal(evidence.json.artifactBodiesExposed, false);
+    assert.doesNotMatch(evidence.text, /\/Users\/|PROMPT_SECRET|PROCEDURE_SECRET/);
+
+    const control = await req(
+      port,
+      'GET',
+      '/api/v1/runs/vnext-dashboard-run/operator-control'
+    );
+    assert.equal(control.status, 200);
+    assert.equal(control.json.activationAuthorized, false);
+    assert.equal(control.json.promotionAuthorized, false);
+    assert.equal(control.json.families[0].id, family.record.familyId);
+    const quarantined = await req(
+      port,
+      'POST',
+      '/api/v1/runs/vnext-dashboard-run/operator-control',
+      {
+        kind: 'quarantine-family',
+        target: {
+          type: 'family',
+          id: family.record.familyId,
+          sha256: family.record.familySha256
+        },
+        expectedRunRevisionSha256: envelope.json.stateRevisionSha256,
+        expectedRevisionSha256: control.json.revisionSha256,
+        rollbackTarget: null,
+        reasonCode: 'CONTROL_REGRESSION',
+        evidenceSha256: sha256('dashboard-quarantine-evidence')
+      },
+      decisionHeaders(port)
+    );
+    assert.equal(quarantined.status, 200);
+    assert.equal(quarantined.json.disposition, 'QUARANTINED');
+    assert.equal(quarantined.json.activationAuthorized, false);
+    const controlAfter = await req(
+      port,
+      'GET',
+      '/api/v1/runs/vnext-dashboard-run/operator-control'
+    );
+    assert.equal(controlAfter.json.families[0].status, 'QUARANTINED');
+    assert.equal(controlAfter.json.families[0].routingEligible, false);
+
+    const events = await req(port, 'GET', '/api/v1/runs/vnext-dashboard-run/events');
+    assert.equal(events.status, 200);
+    assert.equal(events.json.events[0].type, 'SERIES_INITIALIZED');
+    assert.match(events.json.events[0].detail.detailSha256, /^[a-f0-9]{64}$/);
+
+    const page = await req(port, 'GET', '/?run=vnext-dashboard-run');
+    assert.equal(page.status, 200);
+    assert.match(page.text, /vnext-campaign/i);
+    assert.match(page.text, /Stop run/);
+    assert.match(page.text, /data-tab="control"/);
+    assert.match(page.text, /Routing quarantine/);
+    assert.match(page.text, /Release returns to shadow only/);
+    assert.match(page.text, /cannot activate or promote a mechanism/);
+
+    const staleStop = await req(
+      port,
+      'POST',
+      '/api/v1/runs/vnext-dashboard-run/stop',
+      { expectedRevisionSha256: '0'.repeat(64) },
+      decisionHeaders(port)
+    );
+    assert.equal(staleStop.status, 409);
+    assert.equal(staleStop.json.code, 'RUN_REVISION_CHANGED');
+
+    const currentEnvelope = await req(
+      port,
+      'GET',
+      '/api/v1/runs/vnext-dashboard-run'
+    );
+
+    const stopped = await req(
+      port,
+      'POST',
+      '/api/v1/runs/vnext-dashboard-run/stop',
+      { expectedRevisionSha256: currentEnvelope.json.stateRevisionSha256 },
+      decisionHeaders(port)
+    );
+    assert.equal(stopped.status, 200);
+    assert.equal(stopped.json.state, 'STOP_REQUESTED');
+    assert.match(stopped.json.operationId, /^stop-[a-f0-9]{24}$/);
+    assert.match(stopped.json.stopRecordSha256, /^[a-f0-9]{64}$/);
+    assert.match(stopped.json.receiptSha256, /^[a-f0-9]{64}$/);
+    assert.equal(stopped.json.activationAuthorized, false);
+    assert.equal(stopped.json.promotionAuthorized, false);
+    assert.ok(store.readRunFile('vnext-dashboard-run', 'campaign-series/STOP'));
+
+    const after = await req(port, 'GET', '/api/v1/runs/vnext-dashboard-run');
+    assert.equal(after.json.snapshot.recursive.operator.stopRequested, true);
+    assert.equal(after.json.capabilities.promotion, false);
   } finally { server.close(); }
 });

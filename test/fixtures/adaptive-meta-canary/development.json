@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "adaptive-meta-canary-development-v1",
+  "finding": "Receipt validity and measurement are not one atomic supervisor decision.",
+  "cases": [
+    {
+      "id": "development-missing-final-hash",
+      "observation": "A result can reach measurement before its final artifact hash is bound."
+    },
+    {
+      "id": "development-clean-receipt",
+      "observation": "A complete route, stdout, result, and artifact receipt remains measurable."
+    },
+    {
+      "id": "development-route-mismatch",
+      "observation": "A mismatched requested route must remain rejected by the existing guard."
+    }
+  ]
+}

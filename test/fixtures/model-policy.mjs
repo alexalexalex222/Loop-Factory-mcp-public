@@ -6,18 +6,18 @@ import {
 } from '../../src/models.mjs';
 import { DEFAULT_PRIMARY_MODEL, BUILDER_GATING_ROUTES } from '../../src/constants.mjs';
 
-/** Historical default policy (enter / "defaults" / just-go). */
+/** Current default policy (enter / "defaults" / just-go). */
 export const DEFAULT_POLICY = defaultModelPolicy('defaults');
 
 /** Convenience route names under the default policy. */
 export const ROUTES = {
   primary: DEFAULT_PRIMARY_MODEL,
-  frontier: [DEFAULT_PRIMARY_MODEL, 'gpt-5.5', 'glm-5.2'],
+  frontier: [DEFAULT_PRIMARY_MODEL, 'claude-fable-5', 'gpt-5.6-terra'],
   builders: [...BUILDER_GATING_ROUTES],
-  judge: DEFAULT_PRIMARY_MODEL,
+  judge: BUILDER_GATING_ROUTES[0],
   banned: 'claude-haiku-4-5',
-  bannedMini: 'gpt-5.5-mini',
-  nonBuilder: 'gpt-5.5'
+  bannedMini: 'gpt-5.6-mini',
+  nonBuilder: 'gpt-5.6-terra'
 };
 
 /** Banlist off — previously-banned routes clear classifyRoute. */
@@ -35,7 +35,7 @@ export const POLICY_STRICT = normalizeModelPolicy({
   allowUnknownFrontier: false
 });
 
-/** Build Week preset: GPT-5.6 Sol primary/test worker; trusted builders/judge preserved. */
+/** GPT-5.6 Sol primary/test work with Fable 5 as independent builder/judge. */
 export const GPT56_POLICY = modelPolicyPreset('gpt-5.6-sol');
 
 /**

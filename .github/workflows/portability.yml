@@ -16,6 +16,14 @@ on:
       - "loops/**"
       - "hosts/**"
       - "examples/**"
+      - "docs/**"
+      - "submission/**"
+      - "*.csv"
+      - "*.json"
+      - "*.md"
+      - "*.sha256"
+      - "LICENSE"
+      - "server.mjs"
 
 permissions:
   contents: read
@@ -26,7 +34,8 @@ concurrency:
 
 jobs:
   os-matrix:
-    name: Core / ${{ matrix.os }} / Node 24
+    name: Combined / ${{ matrix.os }} / Node 24
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -48,11 +57,18 @@ jobs:
           set -o pipefail
           mkdir -p portability-proof
           npm run verify 2>&1 | tee portability-proof/verify.log
+          npm run verify:hashes 2>&1 | tee portability-proof/source-hashes.log
       - name: Unit suite
         shell: bash
         run: |
           set -o pipefail
           npm test 2>&1 | tee portability-proof/test.log
+      - name: Repeated-selection null simulation
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify:recursive-null 2>&1 | tee portability-proof/recursive-null.log
       - name: Demo
         shell: bash
         run: |
@@ -77,10 +93,11 @@ jobs:
 
   runtime-matrix:
     name: Runtime / Ubuntu / Node ${{ matrix.node }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 22, 24]
+        node: [22]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -91,3 +108,19 @@ jobs:
       - run: npm run verify
       - run: npm test
       - run: npm run package:smoke
+
+  node22-macos-sandbox:
+    name: Runtime / macOS / Node 22 sandbox replay
+    timeout-minutes: 15
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Executable sandbox replay
+        run: >-
+          node --test
+          --test-name-pattern="executable evaluator runs|V2 seals actionable procedures"
+          test/adaptive-executable-canary.test.mjs

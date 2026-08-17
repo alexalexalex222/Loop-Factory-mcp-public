@@ -5,6 +5,7 @@ loops/loop-de-loop.md text eol=lf
 # Cross-platform source and configuration files use deterministic LF bytes.
 *.mjs text eol=lf
 *.js text eol=lf
+*.c text eol=lf
 *.json text eol=lf
 *.jsonl text eol=lf
 *.txt text eol=lf
@@ -12,6 +13,12 @@ loops/loop-de-loop.md text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 *.sh text eol=lf
+*.csv text eol=lf
+*.sha256 text eol=lf
+*.html text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+LICENSE text eol=lf
 
 # Binary assets must never be line-ending normalized.
 *.png binary
@@ -20,3 +27,7 @@ loops/loop-de-loop.md text eol=lf
 *.gif binary
 *.zip binary
 *.tgz binary
+
+# The VNext proof fixture and Darwin durability helper are byte-bound artifacts.
+proof/vnext-prior-art-capture-v3/**/raw/*.bin binary
+src/native/darwin-fullfsync binary

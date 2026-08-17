@@ -31,9 +31,63 @@ import {
   normalizeStructuredWorkerOutput, parseTokenUsage, runWorker, execBinaryForRoute, executorWorker
 } from './executor.mjs';
 import { runSupervisedCampaign } from './supervisor.mjs';
+import { createStore } from './store.mjs';
+import {
+  appendCampaignSchedulerCheckpoint,
+  loadCampaignSchedulerCheckpoint as loadPersistedCampaignSchedulerCheckpoint
+} from './campaign-scheduler-state.mjs';
 import { checkBaselineIntegrity, checkHypothesisIntegrity } from './baseline-integrity.mjs';
 import { deriveExperimentValidity, verifyPersistedProposalRun } from './run-verifier.mjs';
 import { isReviewDecisionBinding, reviewDecisionBinding } from './review-decisions.mjs';
+import {
+  buildImprovementMechanismReceipt,
+  listImprovementMechanismReceipts,
+  persistImprovementMechanismReceipt,
+  summarizeImprovementMechanisms
+} from './improvement-memory.mjs';
+import {
+  buildMechanismRoutingDecision,
+  buildShadowMechanismPacket
+} from './mechanism-router.mjs';
+import { canonicalJson as canonicalMetaJson, META_POLICY_V1 } from './meta-policy.mjs';
+import {
+  ADAPTIVE_POLICY_FIELDS,
+  ADAPTIVE_SCHEMA,
+  canonicalAdaptiveJson,
+  createAutomaticPromotionDecisionRecord,
+  createMechanismApplicationRecord,
+  createMechanismFamilyRecord,
+  isCausallyAdmittedApplication,
+  normalizeCausalFingerprint,
+  selectLatestApplicationRevisions
+} from './adaptive-records.mjs';
+import {
+  listAdaptiveRecords,
+  loadMechanismCatalog,
+  persistAdaptiveCanaryImport,
+  persistAdaptiveRecord
+} from './mechanism-catalog.mjs';
+import {
+  createBaselinePolicyEpoch,
+  proposePolicyEpoch
+} from './adaptive-policy.mjs';
+import { operatorControlForRouting } from './vnext-operator-control.mjs';
+import { prepareActiveMechanismTreatment } from './active-mechanism-treatment.mjs';
+import {
+  MECHANISM_EVOLUTION_ADMISSION_V2
+} from './mechanism-evolution-admission-v2.mjs';
+import {
+  RECURSIVE_REPLICATED_ANALYSIS_SCHEMA
+} from './adaptive-recursive-statistics.mjs';
+import {
+  ADAPTIVE_CONTROL_ARM_SCHEMA,
+  ADAPTIVE_CONTROL_ARTIFACT_SOURCE_SCHEMA,
+  ADAPTIVE_CONTROL_MEASUREMENT_SCHEMA,
+  ADAPTIVE_CONTROL_SOURCE_SCHEMA,
+  adaptiveControlBenchmarkBindings,
+  deriveAdaptiveControlEvidence,
+  sealAdaptiveControlArmEvidence
+} from './adaptive-control-evidence.mjs';
 import {
   SEALED, WORKER_MSG, LANE as INTEGRITY_LANE, ARTIFACT_CLASS, DEFAULT_PASS_MARK,
   oracleMarkers, answerKeyEchoGuard, paddedMarkerEchoGuard, negativeControlVerdict, standardNegativeControl,
@@ -114,6 +168,1709 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   }
   function logEvent(state, event, detail) {
     state.log.push({ ts: clock(), event, detail: detail || null });
+  }
+  function metaLearningEnabled(state) {
+    return state?.config?.metaLearning?.enabled === true
+      && ['shadow', 'active-canary'].includes(state.config.metaLearning.mode);
+  }
+  function shadowMetaLearning(state) {
+    return metaLearningEnabled(state) && state.config.metaLearning.mode === 'shadow';
+  }
+  function activeMetaLearning(state) {
+    return metaLearningEnabled(state) && state.config.metaLearning.mode === 'active-canary';
+  }
+  function emptyMechanismSummary() {
+    return {
+      total: 0,
+      uniqueMechanisms: 0,
+      eligibleForRouting: 0,
+      ineligibleForRouting: 0,
+      byVerdict: {
+        improvement: 0,
+        no_improvement: 0,
+        tradeoff: 0,
+        invalid: 0,
+        regression: 0
+      },
+      byLifecycle: { observed: 0, replicated: 0, contradicted: 0 },
+      byPartition: { harvest: 0, reference: 0, gate: 0 },
+      invalidEntries: 0
+    };
+  }
+  function initialMetaLearningState(config) {
+    return {
+      enabled: true,
+      mode: config.mode,
+      affectedExecution: false,
+      policyId: config.policyId,
+      policySha256: config.policySha256,
+      ledger: emptyMechanismSummary(),
+      rejectedReceiptFiles: 0,
+      lastReceipt: null,
+      shadow: {
+        status: 'ABSTAINED',
+        packetSha256: null,
+        targetSha256: null,
+        eligibleCount: 0,
+        selected: [],
+        abstentionCode: 'NO_SHADOW_PACKET',
+        fallbackCode: null,
+        affectedExecution: false,
+        updatedAt: null
+      },
+      fallbacks: []
+    };
+  }
+  function normalizeEvidenceRefs(values) {
+    return (Array.isArray(values) ? values : [])
+      .slice(0, 50)
+      .map((value) => {
+        if (!value || typeof value !== 'object') return null;
+        const path = String(value.path || '').trim().slice(0, 1000);
+        const locator = String(value.locator || '').trim().slice(0, 1000);
+        if (!path || !locator || path.includes('\0') || locator.includes('\0')) return null;
+        const digest = /^[a-f0-9]{64}$/i.test(String(value.sha256 || ''))
+          ? String(value.sha256).toLowerCase()
+          : null;
+        return { path, locator, sha256: digest };
+      })
+      .filter(Boolean);
+  }
+  function recordMetaFallback(state, stage, reasonCode) {
+    if (!metaLearningEnabled(state)) return { status: 'DISABLED' };
+    const ts = clock();
+    const reason = String(reasonCode || 'UNKNOWN').slice(0, 120);
+    state.metaLearning = state.metaLearning || initialMetaLearningState(state.config.metaLearning);
+    state.metaLearning.shadow = {
+      ...(state.metaLearning.shadow || {}),
+      status: 'FALLBACK',
+      fallbackCode: 'META_POLICY_FALLBACK',
+      affectedExecution: false,
+      updatedAt: ts
+    };
+    state.metaLearning.fallbacks = Array.isArray(state.metaLearning.fallbacks)
+      ? state.metaLearning.fallbacks
+      : [];
+    state.metaLearning.fallbacks.push({
+      ts,
+      stage: String(stage || 'unknown').slice(0, 80),
+      code: reason
+    });
+    state.metaLearning.fallbacks = state.metaLearning.fallbacks.slice(-100);
+    logEvent(state, 'meta_policy_fallback', {
+      stage: String(stage || 'unknown').slice(0, 80),
+      code: reason
+    });
+    return { status: 'FALLBACK', code: 'META_POLICY_FALLBACK', reasonCode: reason };
+  }
+  function refreshMetaLedger(state) {
+    const listed = listImprovementMechanismReceipts({
+      homeDir: resolve(store.homeDir),
+      partitions: ['harvest', 'reference', 'gate'],
+      includeIneligible: true
+    });
+    if (listed.status !== 'OK') {
+      return recordMetaFallback(state, 'ledger_list', listed.code);
+    }
+    const summarized = summarizeImprovementMechanisms(listed.receipts);
+    if (summarized.status !== 'OK') {
+      return recordMetaFallback(state, 'ledger_summary', summarized.code);
+    }
+    state.metaLearning.ledger = summarized.summary;
+    state.metaLearning.rejectedReceiptFiles = listed.rejected.length;
+    return { status: 'OK', receipts: listed.receipts, rejected: listed.rejected };
+  }
+  function recordImprovementReceipt(state, {
+    hypothesisId,
+    testId = null,
+    outcomeOverlay = {}
+  } = {}) {
+    if (!metaLearningEnabled(state)) return { status: 'DISABLED' };
+    try {
+      const hypothesis = (state.hypotheses || []).find((item) => item.id === hypothesisId);
+      const built = buildImprovementMechanismReceipt({
+        state,
+        hypothesisId,
+        testId,
+        clock,
+        readArtifact: (runId, artifactId) => store.readArtifact(runId, artifactId),
+        evidenceRefs: hypothesis?.evidenceRefs || [],
+        outcomeOverlay
+      });
+      if (built.status !== 'OK') {
+        return recordMetaFallback(state, 'receipt_build', built.code);
+      }
+      const persisted = persistImprovementMechanismReceipt({
+        homeDir: resolve(store.homeDir),
+        receipt: built.receipt
+      });
+      if (persisted.status !== 'OK') {
+        return recordMetaFallback(state, 'receipt_persist', persisted.code);
+      }
+      const refreshed = refreshMetaLedger(state);
+      if (refreshed.status !== 'OK') return refreshed;
+      state.metaLearning.lastReceipt = {
+        receiptId: built.receipt.receiptId,
+        receiptSha256: built.receipt.receiptSha256,
+        mechanismId: built.receipt.mechanismId,
+        partition: built.receipt.partition,
+        eligibleForRouting: built.receipt.eligibleForRouting,
+        verdict: built.receipt.outcome.verdict,
+        lifecycle: built.receipt.lifecycle.state
+      };
+      logEvent(state, 'improvement_mechanism_receipt', {
+        receiptId: built.receipt.receiptId,
+        mechanismId: built.receipt.mechanismId,
+        partition: built.receipt.partition,
+        verdict: built.receipt.outcome.verdict,
+        lifecycle: built.receipt.lifecycle.state,
+        eligibleForRouting: built.receipt.eligibleForRouting
+      });
+      return {
+        status: 'OK',
+        receipt: built.receipt,
+        receiptId: built.receipt.receiptId,
+        receiptSha256: built.receipt.receiptSha256,
+        mechanismId: built.receipt.mechanismId,
+        partition: built.receipt.partition,
+        eligibleForRouting: built.receipt.eligibleForRouting,
+        verdict: built.receipt.outcome.verdict,
+        lifecycle: built.receipt.lifecycle.state
+      };
+    } catch (error) {
+      return recordMetaFallback(state, 'receipt_exception', error && error.code ? error.code : 'EXCEPTION');
+    }
+  }
+  function buildShadowPacket(state, hypotheses) {
+    if (!shadowMetaLearning(state)) return { status: 'DISABLED' };
+    try {
+      const refreshed = refreshMetaLedger(state);
+      if (refreshed.status !== 'OK') return refreshed;
+      const listed = listImprovementMechanismReceipts({ homeDir: resolve(store.homeDir) });
+      if (listed.status !== 'OK') {
+        return recordMetaFallback(state, 'router_list', listed.code);
+      }
+      const benchmark = state.benchmark?.def || {};
+      const query = [
+        state.task?.text,
+        ...(Array.isArray(hypotheses) ? hypotheses : []).flatMap((hypothesis) => [
+          hypothesis?.title,
+          hypothesis?.bottleneck,
+          hypothesis?.operation,
+          hypothesis?.expectedMovement,
+          hypothesis?.falsifier
+        ])
+      ].filter(Boolean).join('\n');
+      const packet = buildShadowMechanismPacket({
+        receipts: listed.receipts,
+        target: {
+          query,
+          taskMode: state.task?.mode || null,
+          loopId: state.activeLoop || null,
+          taskValueDimensions: benchmark.taskValueDimensions || [],
+          resourceDimensions: benchmark.resourceDimensions || []
+        },
+        seed: state.config.metaLearning.seed,
+        policy: META_POLICY_V1
+      });
+      store.writeRunFile(
+        state.runId,
+        'meta-shadow-packet.json',
+        `${canonicalMetaJson(packet)}\n`
+      );
+      state.metaLearning.shadow = {
+        status: packet.status,
+        packetSha256: packet.packetSha256,
+        targetSha256: packet.targetSha256,
+        eligibleCount: packet.eligiblePool?.count || 0,
+        selected: (packet.selected || []).slice(0, 5).map((item) => ({
+          slot: item.slot,
+          mechanismId: item.mechanismId,
+          receiptId: item.receiptId,
+          receiptSha256: item.receiptSha256,
+          source: {
+            runId: item.source?.runId || null,
+            hypothesisId: item.source?.hypothesisId || null,
+            testId: item.source?.testId || null
+          },
+          score: item.score,
+          selectionProbability: item.selectionProbability
+        })),
+        abstentionCode: packet.abstentionReason || null,
+        fallbackCode: null,
+        affectedExecution: false,
+        updatedAt: clock()
+      };
+      logEvent(state, 'meta_shadow_packet', {
+        status: packet.status,
+        packetSha256: packet.packetSha256,
+        targetSha256: packet.targetSha256,
+        eligibleCount: packet.eligiblePool?.count || 0,
+        selectedCount: packet.selected?.length || 0,
+        affectedExecution: false
+      });
+      return {
+        status: 'OK',
+        packetSha256: packet.packetSha256,
+        targetSha256: packet.targetSha256,
+        routingStatus: packet.status,
+        selectedCount: packet.selected?.length || 0,
+        affectedExecution: false
+      };
+    } catch (error) {
+      return recordMetaFallback(state, 'router_exception', error && error.code ? error.code : 'EXCEPTION');
+    }
+  }
+  function adaptiveHome() {
+    return resolve(store.homeDir);
+  }
+  function loadCampaignSchedulerCheckpoint(args = {}) {
+    if (!isSafeId(args.runId) || !store.exists(args.runId)) {
+      return blocked(BLOCK.BAD_INPUT, 'A persisted parent run is required to load scheduler state.');
+    }
+    const loaded = loadPersistedCampaignSchedulerCheckpoint({
+      store,
+      runId: args.runId,
+      config: args.config
+    });
+    if (loaded.status !== 'OK') {
+      return blocked(
+        'CAMPAIGN_SCHEDULER_CHECKPOINT_INVALID',
+        loaded.message || 'Campaign scheduler checkpoint failed verification.',
+        { reasonCode: loaded.code || null }
+      );
+    }
+    return {
+      status: 'OK',
+      configSha256: loaded.configSha256,
+      checkpointCount: loaded.checkpoints.length,
+      checkpoint: loaded.checkpoint ? clone(loaded.checkpoint) : null
+    };
+  }
+  function recordCampaignSchedulerCheckpoint(args = {}) {
+    if (!isSafeId(args.runId) || !store.exists(args.runId)) {
+      return blocked(BLOCK.BAD_INPUT, 'A persisted parent run is required to checkpoint scheduler state.');
+    }
+    const persisted = appendCampaignSchedulerCheckpoint({
+      store,
+      runId: args.runId,
+      config: args.config,
+      status: args.status,
+      snapshot: args.snapshot,
+      createdAt: clock()
+    });
+    if (persisted.status !== 'OK') {
+      return blocked(
+        'CAMPAIGN_SCHEDULER_CHECKPOINT_FAILED',
+        persisted.message || 'Campaign scheduler checkpoint could not be persisted.',
+        { reasonCode: persisted.code || null }
+      );
+    }
+    const state = store.load(args.runId);
+    state.scheduler = {
+      schemaVersion: persisted.checkpoint.schemaVersion,
+      status: persisted.checkpoint.status,
+      sequence: persisted.checkpoint.sequence,
+      configSha256: persisted.configSha256,
+      checkpointSha256: persisted.checkpoint.checkpointSha256,
+      snapshotSha256: persisted.checkpoint.snapshotSha256,
+      checkpointCount: persisted.checkpointCount,
+      idempotent: persisted.idempotent,
+      updatedAt: persisted.checkpoint.createdAt
+    };
+    logEvent(state, 'campaign_scheduler_checkpoint', {
+      status: state.scheduler.status,
+      sequence: state.scheduler.sequence,
+      checkpointSha256: state.scheduler.checkpointSha256,
+      idempotent: state.scheduler.idempotent
+    });
+    state.updatedAt = clock();
+    store.save(state);
+    return {
+      status: 'OK',
+      scheduler: clone(state.scheduler),
+      checkpoint: clone(persisted.checkpoint)
+    };
+  }
+  function importAdaptiveExecutableCanary(args = {}) {
+    const canaryHome = typeof args.canaryHome === 'string' ? args.canaryHome : '';
+    if (!isAbsolute(canaryHome) || canaryHome.includes('\0')
+        || resolve(canaryHome) !== canaryHome) {
+      return blocked(
+        BLOCK.BAD_INPUT,
+        'canaryHome must be a normalized absolute path to a persisted executable canary store.'
+      );
+    }
+    try {
+      const persisted = persistAdaptiveCanaryImport({
+        homeDir: adaptiveHome(),
+        sourceStore: createStore(canaryHome),
+        runId: args.canaryRunId,
+        automatic: args.automatic === true
+      });
+      if (persisted.status !== 'OK') {
+        return blocked(
+          'ADAPTIVE_CANARY_IMPORT_REFUSED',
+          persisted.message || 'Executable canary import was refused.',
+          { reasonCode: persisted.code || null }
+        );
+      }
+      const loaded = loadMechanismCatalog({ homeDir: adaptiveHome() });
+      if (loaded.status !== 'OK') {
+        return blocked(
+          'ADAPTIVE_CATALOG_FAILED',
+          loaded.message || 'The adaptive catalog could not be reopened after import.',
+          { reasonCode: loaded.code || null }
+        );
+      }
+      return ok('Imported independently verified V4 canary evidence for later adaptive routing.', {
+        import: {
+          schemaVersion: persisted.record.schemaVersion,
+          familyId: persisted.family.familyId,
+          familySha256: persisted.family.familySha256,
+          applicationReceiptId: persisted.record.applicationReceiptId,
+          applicationSha256: persisted.record.applicationSha256,
+          verifierEvidenceSha256: persisted.verification.evidenceSha256,
+          measurementId: persisted.measurementV2.measurementId,
+          measurementSha256: persisted.measurementV2.measurementSha256,
+          exactCaseDelta: persisted.measurementV2
+            .contrasts.treatmentVsBaseline.metrics.exact.delta,
+          decisionDelta: persisted.measurementV2
+            .contrasts.treatmentVsBaseline.metrics.decision.delta,
+          qualityDelta: persisted.record.outcome.qualityDelta,
+          tokenCostDeltaPct: persisted.measurement.tokens.routedDeltaPct,
+          activation: persisted.record.authority.activation,
+          familyIdempotent: persisted.familyPersisted.idempotent,
+          measurementIdempotent: persisted.measurementPersisted.idempotent,
+          importIdempotent: persisted.importPersisted.idempotent
+        },
+        catalog: adaptiveCatalogSummary(loaded.catalog)
+      });
+    } catch (error) {
+      return blocked(
+        'ADAPTIVE_CANARY_IMPORT_FAILED',
+        'Executable canary import failed closed.',
+        { reasonCode: error?.code || 'EXCEPTION' }
+      );
+    }
+  }
+  function adaptiveCatalogSummary(catalog = {}) {
+    const families = Array.isArray(catalog.families) ? catalog.families : [];
+    return {
+      catalogSha256: /^[a-f0-9]{64}$/.test(String(catalog.catalogSha256 || ''))
+        ? catalog.catalogSha256
+        : null,
+      recordCount: Number.isInteger(catalog.recordCount) ? catalog.recordCount : 0,
+      familyCount: families.length,
+      routingEligibleFamilyCount: families.filter((family) => family.routingEligible === true).length,
+      quarantinedFamilyCount: families.filter((family) => family.quarantined === true).length,
+      rejectedRecordCount: Number.isInteger(catalog.rejectedRecordCount)
+        ? catalog.rejectedRecordCount
+        : 0,
+      rejectedLedgerEntryCount: Number.isInteger(catalog.rejectedLedgerEntryCount)
+        ? catalog.rejectedLedgerEntryCount
+        : 0
+    };
+  }
+  function policyEpochSummary(epoch) {
+    return {
+      policyScopeId: epoch.policyScopeId,
+      policyEpochId: epoch.policyEpochId,
+      policyEpochSha256: epoch.policyEpochSha256,
+      epochNumber: epoch.epochNumber,
+      trigger: epoch.trigger,
+      drift: epoch.drift,
+      driftTier: epoch.driftTier,
+      allocations: clone(epoch.policy.allocations),
+      quarantinedFamilyIds: [...epoch.quarantinedFamilyIds],
+      rollbackTargetEpochId: epoch.rollbackTargetEpochId,
+      metaCanaryReceiptSha256: epoch.metaCanaryReceiptSha256
+    };
+  }
+  function operatorControlSummary(control) {
+    const projection = control?.projection || null;
+    return {
+      active: projection != null,
+      revision: projection?.revision ?? 0,
+      projectionSha256: projection?.projectionSha256 || null,
+      disposition: projection?.disposition || 'NOT_INITIALIZED',
+      quarantinedFamilyIds: [...(control?.quarantinedFamilyIds || [])],
+      shadowOnlyFamilyIds: [...(control?.shadowOnlyFamilyIds || [])],
+      policyOverride: control?.policyOverride ? {
+        policyEpochId: control.policyOverride.policyEpochId,
+        policyEpochSha256: control.policyOverride.policyEpochSha256,
+        policyScopeId: control.policyOverride.policyScopeId
+      } : null,
+      activationAuthorized: false,
+      promotionAuthorized: false
+    };
+  }
+  function loadAdaptivePolicyChain(policyScopeId) {
+    const listed = listAdaptiveRecords({
+      homeDir: adaptiveHome(),
+      schemaVersion: ADAPTIVE_SCHEMA.POLICY_EPOCH
+    });
+    if (listed.status !== 'OK') return listed;
+    const epochs = listed.records
+      .filter((record) => record.policyScopeId === policyScopeId)
+      .sort((left, right) => (
+        left.epochNumber - right.epochNumber
+        || left.policyEpochId.localeCompare(right.policyEpochId)
+      ));
+    if (!epochs.length) return { status: 'OK', epochs: [] };
+    const policyValue = (policy, field) => (
+      field.split('.').reduce((value, part) => value?.[part], policy)
+    );
+    for (let index = 0; index < epochs.length; index++) {
+      const epoch = epochs[index];
+      const previous = epochs[index - 1] || null;
+      const expectedChanges = previous
+        ? ADAPTIVE_POLICY_FIELDS.map((field) => ({
+            field,
+            before: round(policyValue(previous.policy, field)),
+            after: round(policyValue(epoch.policy, field)),
+            delta: round(policyValue(epoch.policy, field) - policyValue(previous.policy, field))
+          })).filter((change) => Math.abs(change.delta) > 1e-12)
+        : [];
+      const rollbackTarget = epoch.rollbackTargetEpochId == null
+        ? null
+        : epochs.slice(0, index).find((candidate) => (
+            candidate.policyEpochId === epoch.rollbackTargetEpochId
+          ));
+      if (epoch.epochNumber !== index
+          || epoch.baselinePolicySha256 !== epochs[0].baselinePolicySha256
+          || canonicalAdaptiveJson(epoch.baselinePolicy)
+            !== canonicalAdaptiveJson(epochs[0].baselinePolicy)
+          || canonicalAdaptiveJson(epoch.changes) !== canonicalAdaptiveJson(expectedChanges)
+          || (index === 0
+            && canonicalAdaptiveJson(epoch.policy) !== canonicalAdaptiveJson(epoch.baselinePolicy))
+          || (previous && previous.quarantinedFamilyIds.some(
+            (familyId) => !epoch.quarantinedFamilyIds.includes(familyId)
+          ))
+          || (epoch.trigger === 'rollback' && !rollbackTarget)
+          || (index === 0 && (
+            epoch.previousEpochId !== null
+            || epoch.previousEpochSha256 !== null
+            || epoch.trigger !== 'initial'
+          ))
+          || (index > 0 && (
+            epoch.previousEpochId !== previous.policyEpochId
+            || epoch.previousEpochSha256 !== previous.policyEpochSha256
+          ))) {
+        return {
+          status: 'REFUSED',
+          code: 'ADAPTIVE_POLICY_CHAIN_INVALID',
+          message: `Policy scope "${policyScopeId}" contains a gap, fork, or broken hash link.`
+        };
+      }
+    }
+    return { status: 'OK', epochs };
+  }
+  function refreshAdaptiveCatalogState(state) {
+    const loaded = loadMechanismCatalog({ homeDir: adaptiveHome() });
+    if (loaded.status !== 'OK') return loaded;
+    state.adaptiveIntelligence.catalog = adaptiveCatalogSummary(loaded.catalog);
+    return { status: 'OK', catalog: loaded.catalog };
+  }
+  function initializeAdaptiveIntelligence(state) {
+    if (!activeMetaLearning(state)) return { status: 'DISABLED' };
+    const policyScopeId = state.config.metaLearning.policyScopeId || state.runId;
+    let chain = loadAdaptivePolicyChain(policyScopeId);
+    if (chain.status !== 'OK') return chain;
+    if (!chain.epochs.length) {
+      const baseline = createBaselinePolicyEpoch({
+        policyScopeId,
+        evidenceWindowSha256: sha256(canonicalAdaptiveJson({
+          schemaVersion: 'adaptive-policy-baseline-window-v1',
+          policyScopeId
+        }))
+      });
+      if (baseline.status !== 'OK') return baseline;
+      const persisted = persistAdaptiveRecord({
+        homeDir: adaptiveHome(),
+        record: baseline.record
+      });
+      if (persisted.status !== 'OK') return persisted;
+      chain = { status: 'OK', epochs: [baseline.record] };
+    }
+    const baselineEpoch = chain.epochs[0];
+    const chainHead = chain.epochs.at(-1);
+    const operatorControl = operatorControlForRouting({ homeDir: adaptiveHome() });
+    if (operatorControl.status !== 'OK') return operatorControl;
+    const currentEpoch = operatorControl.policyOverride?.policyScopeId === policyScopeId
+      ? operatorControl.policyOverride
+      : chainHead;
+    const existing = state.adaptiveIntelligence || {};
+    state.adaptiveIntelligence = {
+      schemaVersion: 'adaptive-intelligence-state-v1',
+      mode: 'active-canary',
+      status: existing.status === 'BLOCKED' ? 'BLOCKED' : 'READY',
+      affectedExecution: existing.affectedExecution === true,
+      policyScopeId,
+      policy: {
+        baseline: policyEpochSummary(baselineEpoch),
+        current: policyEpochSummary(currentEpoch),
+        lastAction: existing.policy?.lastAction || 'INITIALIZED',
+        lastUpdatedAt: existing.policy?.lastUpdatedAt || clock()
+      },
+      routing: existing.routing || {
+        sequence: 0,
+        status: 'NOT_PREPARED',
+        current: null,
+        history: []
+      },
+      catalog: existing.catalog || adaptiveCatalogSummary(),
+      automaticDecisions: existing.automaticDecisions || {
+        latest: null,
+        autoBanked: 0,
+        queuedHuman: 0
+      },
+      rollback: existing.rollback || {
+        status: 'NONE',
+        targetEpochId: null,
+        activatedAt: null
+      },
+      operatorControl: operatorControlSummary(operatorControl),
+      lastApplication: existing.lastApplication || null,
+      lastError: existing.lastError || null
+    };
+    state.metaLearning = state.metaLearning || initialMetaLearningState(state.config.metaLearning);
+    state.metaLearning.affectedExecution = state.adaptiveIntelligence.affectedExecution;
+    const catalog = refreshAdaptiveCatalogState(state);
+    if (catalog.status !== 'OK') return catalog;
+    return { status: 'OK', baselineEpoch, currentEpoch, operatorControl };
+  }
+  function adaptiveRoutingView(decision, capsule) {
+    const capsuleByPosition = new Map((capsule.items || []).map((item) => [item.position, item]));
+    return {
+      routingDecisionId: decision.routingDecisionId,
+      routingDecisionSha256: decision.routingDecisionSha256,
+      routingPacketSha256: decision.routingPacketSha256,
+      mechanismCapsuleSha256: decision.mechanismCapsuleSha256,
+      targetSha256: decision.targetSha256,
+      candidatePoolSha256: decision.candidatePoolSha256,
+      candidatePoolCount: decision.candidatePoolCount,
+      policyEpochId: decision.policyEpochId,
+      policyEpochSha256: decision.policyEpochSha256,
+      operatorControlSha256: capsule.operatorControlSha256 || null,
+      status: decision.status,
+      affectedExecution: decision.affectedExecution,
+      allocationSchedule: decision.allocationSchedule.map((item) => ({
+        position: item.position,
+        allocation: item.allocation,
+        familyId: item.familyId,
+        probability: item.probability,
+        evidenceStrength: item.evidenceStrength,
+        reasonCodes: [...item.reasonCodes],
+        semantics: capsuleByPosition.get(item.position)?.semantics || null
+      }))
+    };
+  }
+  function adaptiveRoutingProgress(state, current) {
+    if (!current?.decision) {
+      return {
+        hypotheses: [],
+        pendingHypotheses: [],
+        testedHypothesisIds: [],
+        completedTests: []
+      };
+    }
+    const routingDecisionId = current.decision.routingDecisionId;
+    const hypotheses = (state.hypotheses || []).filter((hypothesis) => (
+      hypothesis?.routingBinding?.routingDecisionId === routingDecisionId
+    ));
+    const testsByHypothesis = new Map();
+    for (const test of state.tests || []) {
+      if (test?.hypothesisId) testsByHypothesis.set(test.hypothesisId, test);
+    }
+    const tested = new Set(testsByHypothesis.keys());
+    return {
+      hypotheses,
+      pendingHypotheses: hypotheses.filter((hypothesis) => !tested.has(hypothesis.id)),
+      testedHypothesisIds: hypotheses
+        .filter((hypothesis) => tested.has(hypothesis.id))
+        .map((hypothesis) => hypothesis.id),
+      completedTests: hypotheses
+        .filter((hypothesis) => tested.has(hypothesis.id))
+        .map((hypothesis) => ({
+          hypothesisId: hypothesis.id,
+          testId: testsByHypothesis.get(hypothesis.id).id
+        }))
+    };
+  }
+  function setAdaptiveRoutingRuntimeStatus(state, current, status, affectedExecution) {
+    current.view = {
+      ...(current.view || adaptiveRoutingView(current.decision, current.capsule)),
+      status,
+      affectedExecution: affectedExecution === true
+    };
+    const history = Array.isArray(state.adaptiveIntelligence.routing.history)
+      ? state.adaptiveIntelligence.routing.history
+      : [];
+    const index = history.findIndex((entry) => (
+      entry.routingDecisionId === current.decision.routingDecisionId
+    ));
+    if (index >= 0) history[index] = clone(current.view);
+    else history.push(clone(current.view));
+    state.adaptiveIntelligence.routing.history = history.slice(-50);
+    state.adaptiveIntelligence.routing.status = status;
+  }
+  function resumeMechanismRouting(args = {}) {
+    const state = loadRun(args);
+    if (!state) return blocked(BLOCK.UNKNOWN_RUN, `No run "${args.runId}".`);
+    const initialized = requireInitialized(state);
+    if (initialized) return initialized;
+    if (!activeMetaLearning(state)) {
+      return blocked('ADAPTIVE_MODE_REQUIRED', 'Routing recovery requires metaLearning mode "active-canary".');
+    }
+    const adaptive = initializeAdaptiveIntelligence(state);
+    if (adaptive.status !== 'OK') {
+      return blocked('ADAPTIVE_INITIALIZATION_FAILED', adaptive.message, {
+        reasonCode: adaptive.code || null
+      });
+    }
+    const current = state.adaptiveIntelligence.routing.current;
+    const benchmarkReady = !!(
+      state.baseline.recorded
+      && state.benchmark.frozen
+      && state.benchmark.baselineScore
+    );
+    if (!current) {
+      return ok('No persisted adaptive routing schedule exists for this run.', {
+        resume: {
+          status: 'NO_ROUTE',
+          benchmarkReady,
+          baseline: clone(state.baseline),
+          pendingHypotheses: [],
+          testedHypothesisIds: [],
+          completedTests: []
+        }
+      });
+    }
+    const progress = adaptiveRoutingProgress(state, current);
+    const runtimeStatus = current.retired === true
+      ? 'RETIRED'
+      : (!current.consumed
+          ? 'PREPARED'
+          : (progress.pendingHypotheses.length ? 'PENDING_TESTS' : 'ROUTE_COMPLETE'));
+    return ok('Loaded the persisted adaptive routing checkpoint.', {
+      resume: {
+        status: runtimeStatus,
+        benchmarkReady,
+        baseline: clone(state.baseline),
+        decision: clone(current.decision),
+        capsule: clone(current.capsule),
+        treatment: clone(current.treatment),
+        hypothesisCount: current.hypothesisCount,
+        pendingHypotheses: clone(progress.pendingHypotheses),
+        testedHypothesisIds: [...progress.testedHypothesisIds],
+        completedTests: clone(progress.completedTests),
+        retired: current.retired === true,
+        retirement: current.retirement ? clone(current.retirement) : null
+      }
+    });
+  }
+  function retireMechanismRouting(args = {}) {
+    const state = loadRun(args);
+    if (!state) return blocked(BLOCK.UNKNOWN_RUN, `No run "${args.runId}".`);
+    const initialized = requireInitialized(state);
+    if (initialized) return initialized;
+    if (!activeMetaLearning(state)) {
+      return blocked('ADAPTIVE_MODE_REQUIRED', 'Routing retirement requires active-canary mode.');
+    }
+    const current = state.adaptiveIntelligence?.routing?.current;
+    if (!current) {
+      return blocked('ADAPTIVE_ROUTING_NOT_PREPARED', 'There is no routing schedule to retire.');
+    }
+    if (args.routingDecisionId !== current.decision.routingDecisionId) {
+      return blocked('ADAPTIVE_ROUTING_ID_MISMATCH', 'Retirement must bind the current routing decision.');
+    }
+    const reasonCode = String(args.reasonCode || '');
+    const allowedReasons = new Set([
+      'OPERATOR_RETIRED',
+      'SUPERVISOR_RESTART',
+      'TARGET_CHANGED',
+      'TREATMENT_INVALIDATED'
+    ]);
+    if (!allowedReasons.has(reasonCode)) {
+      return blocked(BLOCK.BAD_INPUT, 'reasonCode is not an allowed adaptive routing retirement reason.');
+    }
+    if (current.retired === true) {
+      if (current.retirement?.reasonCode !== reasonCode) {
+        return blocked(
+          'ADAPTIVE_ROUTING_RETIREMENT_LOCKED',
+          'The immutable routing retirement receipt already records a different reason.'
+        );
+      }
+      return ok('Routing schedule was already retired idempotently.', {
+        retirement: clone(current.retirement),
+        idempotent: true
+      });
+    }
+    if (current.consumed === true) {
+      const progress = adaptiveRoutingProgress(state, current);
+      if (progress.pendingHypotheses.length) {
+        return blocked(
+          'ADAPTIVE_ROUTING_PENDING_TESTS',
+          'A consumed schedule with pending hypotheses cannot be retired without abandoning registered work.',
+          { pendingHypothesisIds: progress.pendingHypotheses.map((item) => item.id) }
+        );
+      }
+    }
+    const payload = {
+      schemaVersion: 'adaptive-routing-retirement-v1',
+      runId: state.runId,
+      routingDecisionId: current.decision.routingDecisionId,
+      routingDecisionSha256: current.decision.routingDecisionSha256,
+      mechanismCapsuleSha256: current.decision.mechanismCapsuleSha256,
+      treatmentSha256: sha256(canonicalAdaptiveJson(current.treatment)),
+      reasonCode,
+      retiredAt: clock()
+    };
+    const retirement = {
+      ...payload,
+      retirementSha256: sha256(canonicalAdaptiveJson(payload))
+    };
+    store.writeRunFile(
+      state.runId,
+      `adaptive-routing/${current.decision.routingDecisionId}.retirement.json`,
+      `${canonicalAdaptiveJson(retirement)}\n`
+    );
+    current.retired = true;
+    current.retirement = retirement;
+    setAdaptiveRoutingRuntimeStatus(state, current, 'RETIRED', false);
+    state.adaptiveIntelligence.affectedExecution = false;
+    state.metaLearning.affectedExecution = false;
+    logEvent(state, 'adaptive_routing_retired', {
+      routingDecisionId: current.decision.routingDecisionId,
+      retirementSha256: retirement.retirementSha256,
+      reasonCode
+    });
+    state.updatedAt = clock();
+    writeDashboardForState(state);
+    store.save(state);
+    return ok('Retired the unneeded routing schedule with an immutable receipt.', {
+      retirement: clone(retirement),
+      idempotent: false
+    });
+  }
+  function prepareMechanismRouting(args = {}) {
+    const state = loadRun(args);
+    if (!state) return blocked(BLOCK.UNKNOWN_RUN, `No run "${args.runId}".`);
+    const initialized = requireInitialized(state);
+    if (initialized) return initialized;
+    if (!activeMetaLearning(state)) {
+      return blocked('ADAPTIVE_MODE_REQUIRED', 'Pre-generation mechanism routing requires metaLearning mode "active-canary".');
+    }
+    if (!state.baseline.recorded || !state.benchmark.frozen || !state.benchmark.baselineScore) {
+      return blocked(
+        'ADAPTIVE_BENCHMARK_REQUIRED',
+        'Active routing begins only after the baseline, benchmark, and measured baseline bar are frozen.'
+      );
+    }
+    const adaptive = initializeAdaptiveIntelligence(state);
+    if (adaptive.status !== 'OK') {
+      return blocked(
+        'ADAPTIVE_INITIALIZATION_FAILED',
+        adaptive.message || 'Adaptive policy initialization failed.',
+        { reasonCode: adaptive.code || null }
+      );
+    }
+    const hypothesisCount = Number(args.hypothesisCount);
+    if (!Number.isInteger(hypothesisCount) || hypothesisCount < 1 || hypothesisCount > 20) {
+      return blocked(BLOCK.BAD_INPUT, 'hypothesisCount must be an integer from 1 through 20.');
+    }
+    const target = {
+      taskMode: args.target?.taskMode || state.task.mode,
+      loopRole: args.target?.loopRole || state.activeLoop || 'supervisor',
+      taskValueDimensions: Array.isArray(args.target?.taskValueDimensions)
+        ? args.target.taskValueDimensions
+        : (state.benchmark.def?.taskValueDimensions || []),
+      resourceDimensions: Array.isArray(args.target?.resourceDimensions)
+        ? args.target.resourceDimensions
+        : (state.benchmark.def?.resourceDimensions || [])
+    };
+    const interfaceContract = args.interfaceContract ?? null;
+    const interfaceContractSha256 = interfaceContract == null
+      ? null
+      : sha256(canonicalAdaptiveJson(interfaceContract));
+    const outstanding = state.adaptiveIntelligence.routing.current;
+    if (outstanding && outstanding.consumed === true && outstanding.retired !== true) {
+      const progress = adaptiveRoutingProgress(state, outstanding);
+      if (progress.pendingHypotheses.length) {
+        return blocked(
+          'ADAPTIVE_ROUTING_RESUME_REQUIRED',
+          'The current routing schedule still has registered hypotheses that must be tested before a replacement is prepared.',
+          { pendingHypothesisIds: progress.pendingHypotheses.map((item) => item.id) }
+        );
+      }
+    }
+    if (outstanding && outstanding.consumed !== true && outstanding.retired !== true) {
+      const sameRequest = outstanding.hypothesisCount === hypothesisCount
+        && canonicalAdaptiveJson(outstanding.target) === canonicalAdaptiveJson(target)
+        && outstanding.interfaceContractSha256 === interfaceContractSha256;
+      if (!sameRequest) {
+        return blocked(
+          'ADAPTIVE_ROUTING_OUTSTANDING',
+          'The current routing schedule must be consumed or explicitly retired before another schedule is prepared.'
+        );
+      }
+      return ok('Existing pre-generation routing schedule returned idempotently.', {
+        decision: clone(outstanding.decision),
+        capsule: clone(outstanding.capsule),
+        treatment: clone(outstanding.treatment),
+        routing: adaptiveRoutingView(outstanding.decision, outstanding.capsule),
+        idempotent: true
+      });
+    }
+    const records = listAdaptiveRecords({ homeDir: adaptiveHome() });
+    if (records.status !== 'OK') {
+      return blocked('ADAPTIVE_CATALOG_FAILED', records.message, { reasonCode: records.code });
+    }
+    const families = records.records.filter((record) => record.schemaVersion === ADAPTIVE_SCHEMA.FAMILY);
+    const applications = records.records.filter((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.APPLICATION
+      || record.schemaVersion === ADAPTIVE_SCHEMA.CANARY_IMPORT
+    ));
+    const evolutions = records.records.filter((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.EVOLUTION
+    ));
+    const measurements = records.records.filter((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.MEASUREMENT
+    ));
+    const admissions = records.records.filter((record) => (
+      record.schemaVersion === MECHANISM_EVOLUTION_ADMISSION_V2
+    ));
+    const analyses = records.records.filter((record) => (
+      record.schemaVersion === RECURSIVE_REPLICATED_ANALYSIS_SCHEMA
+    ));
+    const sequence = (state.adaptiveIntelligence.routing.sequence || 0) + 1;
+    const routed = buildMechanismRoutingDecision({
+      families,
+      applications,
+      evolutions,
+      measurements,
+      admissions,
+      analyses,
+      target,
+      policyEpoch: adaptive.currentEpoch,
+      operatorControl: adaptive.operatorControl.projection,
+      seed: `${state.config.metaLearning.seed}:${state.adaptiveIntelligence.policyScopeId}:${state.runId}:${sequence}`,
+      hypothesisCount,
+      mode: 'active-canary'
+    });
+    if (routed.status !== 'OK') {
+      return blocked('ADAPTIVE_ROUTING_FAILED', routed.message, { reasonCode: routed.code });
+    }
+    const treatment = prepareActiveMechanismTreatment({
+      routingDecision: routed.decision,
+      mechanismCapsule: routed.capsule,
+      interfaceContract
+    });
+    if (treatment.status !== 'OK') {
+      return blocked(
+        'ADAPTIVE_TREATMENT_REFUSED',
+        treatment.message || 'Executable mechanism treatment compilation was refused.',
+        {
+          reasonCode: treatment.code || null,
+          compilerReasonCode: treatment.compilerReasonCode || null
+        }
+      );
+    }
+    const persisted = persistAdaptiveRecord({
+      homeDir: adaptiveHome(),
+      record: routed.decision
+    });
+    if (persisted.status !== 'OK') {
+      return blocked('ADAPTIVE_ROUTING_PERSIST_FAILED', persisted.message, {
+        reasonCode: persisted.code
+      });
+    }
+    store.writeRunFile(
+      state.runId,
+      `adaptive-routing/${routed.decision.routingDecisionId}.json`,
+      `${canonicalAdaptiveJson(routed.decision)}\n`
+    );
+    store.writeRunFile(
+      state.runId,
+      `adaptive-routing/${routed.decision.routingDecisionId}.capsule.json`,
+      `${canonicalAdaptiveJson(routed.capsule)}\n`
+    );
+    store.writeRunFile(
+      state.runId,
+      `adaptive-routing/${routed.decision.routingDecisionId}.treatment.json`,
+      `${canonicalAdaptiveJson(treatment)}\n`
+    );
+    const history = Array.isArray(state.adaptiveIntelligence.routing.history)
+      ? state.adaptiveIntelligence.routing.history
+      : [];
+    const current = {
+      sequence,
+      hypothesisCount,
+      target,
+      interfaceContractSha256,
+      preparedAt: clock(),
+      consumed: false,
+      consumedAt: null,
+      retired: false,
+      retirement: null,
+      decision: routed.decision,
+      capsule: routed.capsule,
+      treatment,
+      view: adaptiveRoutingView(routed.decision, routed.capsule)
+    };
+    history.push(current.view);
+    state.adaptiveIntelligence.routing = {
+      sequence,
+      status: routed.decision.status,
+      current,
+      history: history.slice(-50)
+    };
+    state.adaptiveIntelligence.affectedExecution = false;
+    state.metaLearning.affectedExecution = false;
+    state.adaptiveIntelligence.lastError = null;
+    refreshAdaptiveCatalogState(state);
+    logEvent(state, 'adaptive_routing_prepared', {
+      routingDecisionId: routed.decision.routingDecisionId,
+      policyEpochId: routed.decision.policyEpochId,
+      status: routed.decision.status,
+      affectedExecution: false,
+      treatmentMode: treatment.treatmentMode,
+      interfaceContractSha256,
+      hypothesisCount
+    });
+    state.updatedAt = clock();
+    writeDashboardForState(state);
+    store.save(state);
+    return ok('Prepared and persisted the mechanism routing schedule before hypothesis generation.', {
+      decision: clone(routed.decision),
+      capsule: clone(routed.capsule),
+      treatment: clone(treatment),
+      routing: adaptiveRoutingView(routed.decision, routed.capsule),
+      idempotent: false
+    });
+  }
+  function validateActiveHypothesisBindings(state, hypotheses) {
+    if (!activeMetaLearning(state)) return { status: 'DISABLED', families: [] };
+    const current = state.adaptiveIntelligence?.routing?.current;
+    if (!current || current.consumed === true || current.retired === true) {
+      return {
+        status: 'REFUSED',
+        code: 'ADAPTIVE_ROUTING_REQUIRED',
+        message: 'Active-canary hypotheses require an unconsumed routing decision prepared before generation.'
+      };
+    }
+    const decision = current.decision;
+    if (decision.allocationSchedule.length !== hypotheses.length) {
+      return {
+        status: 'REFUSED',
+        code: 'ADAPTIVE_SCHEDULE_MISMATCH',
+        message: 'Hypothesis count does not match the persisted routing schedule.'
+      };
+    }
+    const families = [];
+    for (let position = 0; position < hypotheses.length; position++) {
+      const hypothesis = hypotheses[position];
+      const binding = hypothesis?.routingBinding || {};
+      const scheduled = decision.allocationSchedule[position];
+      const treatment = current.treatment?.positions?.find((item) => (
+        item.position === position
+      ));
+      const expectedTreatmentKind = scheduled.allocation === 'control'
+        ? 'control'
+        : treatment?.compiledTreatment
+          ? 'compiled'
+          : 'legacy';
+      const expectedTreatmentSha256 = treatment?.compiledTreatment?.packetSha256 || null;
+      const expectedInterfaceSha256 = treatment?.compiledTreatment?.interfaceSha256 || null;
+      const normalized = normalizeCausalFingerprint(hypothesis?.causalFingerprint);
+      if (normalized.status !== 'OK') return normalized;
+      const family = createMechanismFamilyRecord({ causalFingerprint: normalized.fingerprint });
+      if (family.status !== 'OK') return family;
+      const boundFamilyId = binding.familyId == null ? null : String(binding.familyId);
+      if (binding.routingDecisionId !== decision.routingDecisionId
+          || binding.routingDecisionSha256 !== decision.routingDecisionSha256
+          || binding.routingPacketSha256 !== decision.routingPacketSha256
+          || binding.mechanismCapsuleSha256 !== decision.mechanismCapsuleSha256
+          || binding.policyEpochId !== decision.policyEpochId
+          || binding.policyEpochSha256 !== decision.policyEpochSha256
+          || binding.targetSha256 !== decision.targetSha256
+          || binding.schedulePosition !== position
+          || binding.allocation !== scheduled.allocation
+          || boundFamilyId !== scheduled.familyId
+          || binding.treatmentKind !== expectedTreatmentKind
+          || (binding.treatmentSha256 || null) !== expectedTreatmentSha256
+          || (binding.interfaceSha256 || null) !== expectedInterfaceSha256
+          || (scheduled.allocation !== 'control' && family.record.familyId !== scheduled.familyId)) {
+        return {
+          status: 'REFUSED',
+          code: 'ADAPTIVE_BINDING_MISMATCH',
+          message: `Hypothesis ${position + 1} does not bind the persisted routing, policy, capsule, and primary family bytes.`
+        };
+      }
+      families.push(family.record);
+    }
+    return { status: 'OK', families };
+  }
+  function adaptiveFailure(state, stage, result) {
+    const failure = {
+      stage,
+      code: result?.code || 'ADAPTIVE_OPERATION_FAILED',
+      message: String(result?.message || 'Adaptive operation failed.').slice(0, 500),
+      at: clock()
+    };
+    state.adaptiveIntelligence.status = 'BLOCKED';
+    state.adaptiveIntelligence.lastError = failure;
+    logEvent(state, 'adaptive_intelligence_blocked', failure);
+    return { status: 'BLOCKED', ...failure };
+  }
+  function maybeAdvanceAdaptivePolicy(state, trigger = 'valid-attempt-window') {
+    if (!activeMetaLearning(state)) return { status: 'DISABLED' };
+    const chain = loadAdaptivePolicyChain(state.adaptiveIntelligence.policyScopeId);
+    if (chain.status !== 'OK') return adaptiveFailure(state, 'policy_chain_load', chain);
+    const baselineEpoch = chain.epochs[0];
+    const currentEpoch = chain.epochs.at(-1);
+    const operatorControl = operatorControlForRouting({ homeDir: adaptiveHome() });
+    if (operatorControl.status !== 'OK') {
+      return adaptiveFailure(state, 'operator_control_load', operatorControl);
+    }
+    if (operatorControl.policyOverride?.policyScopeId
+        === state.adaptiveIntelligence.policyScopeId) {
+      return {
+        status: 'WAITING',
+        reasonCode: 'OPERATOR_POLICY_ROLLBACK_ACTIVE',
+        policyEpochId: operatorControl.policyOverride.policyEpochId
+      };
+    }
+    const records = listAdaptiveRecords({ homeDir: adaptiveHome() });
+    if (records.status !== 'OK') return adaptiveFailure(state, 'policy_evidence_load', records);
+    const selectedApplications = selectLatestApplicationRevisions(records.records.filter((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.APPLICATION
+      && record.routing?.policyEpochId === currentEpoch.policyEpochId
+      && record.routing?.policyEpochSha256 === currentEpoch.policyEpochSha256
+      && record.partition === 'harvest'
+      && record.eligibleForRouting === true
+      && record.outcome?.valid === true
+    )));
+    if (selectedApplications.status !== 'OK') {
+      return adaptiveFailure(state, 'policy_application_selection', selectedApplications);
+    }
+    const applications = selectedApplications.applications.filter(
+      isCausallyAdmittedApplication
+    );
+    if (trigger === 'valid-attempt-window' && applications.length < 5) {
+      return {
+        status: 'WAITING',
+        validApplicationCount: applications.length,
+        required: 5
+      };
+    }
+    if (!applications.length) {
+      return { status: 'WAITING', validApplicationCount: 0, required: trigger === 'lane-boundary' ? 1 : 5 };
+    }
+    const routingDecisions = records.records.filter((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.ROUTING_DECISION
+    ));
+    const evidenceWindowSha256 = sha256(canonicalAdaptiveJson(applications.map((application) => ({
+      applicationReceiptId: application.applicationReceiptId,
+      applicationSha256: application.applicationSha256
+    }))));
+    const proposed = proposePolicyEpoch({
+      previousEpoch: currentEpoch,
+      baselineEpoch,
+      applications,
+      routingDecisions,
+      trigger,
+      evidenceWindowSha256
+    });
+    if (proposed.status !== 'OK') return adaptiveFailure(state, 'policy_epoch_proposal', proposed);
+    const persisted = persistAdaptiveRecord({
+      homeDir: adaptiveHome(),
+      record: proposed.epoch
+    });
+    if (persisted.status !== 'OK') return adaptiveFailure(state, 'policy_epoch_persist', persisted);
+    state.config.metaLearning.policyId = proposed.epoch.policyEpochId;
+    state.config.metaLearning.policySha256 = proposed.epoch.policyEpochSha256;
+    state.adaptiveIntelligence.policy.current = policyEpochSummary(proposed.epoch);
+    state.adaptiveIntelligence.policy.lastAction = proposed.action;
+    state.adaptiveIntelligence.policy.lastUpdatedAt = clock();
+    state.adaptiveIntelligence.status = 'READY';
+    state.adaptiveIntelligence.lastError = null;
+    if (proposed.action === 'ROLLBACK') {
+      state.adaptiveIntelligence.rollback = {
+        status: 'ACTIVATED',
+        targetEpochId: proposed.targetEpochId,
+        activatedAt: clock()
+      };
+    }
+    refreshAdaptiveCatalogState(state);
+    logEvent(state, 'adaptive_policy_epoch', {
+      policyEpochId: proposed.epoch.policyEpochId,
+      epochNumber: proposed.epoch.epochNumber,
+      action: proposed.action,
+      drift: proposed.epoch.drift,
+      driftTier: proposed.epoch.driftTier,
+      validApplicationCount: applications.length
+    });
+    return {
+      status: 'OK',
+      action: proposed.action,
+      epoch: policyEpochSummary(proposed.epoch),
+      validApplicationCount: applications.length
+    };
+  }
+  function recordAdaptiveApplication(state, hypothesis, test, legacyReceipt) {
+    if (!activeMetaLearning(state)) return { status: 'DISABLED' };
+    if (!hypothesis?.mechanismFamilyId || !hypothesis?.routingBinding || !legacyReceipt) {
+      return adaptiveFailure(state, 'application_inputs', {
+        code: 'ADAPTIVE_APPLICATION_INPUT_MISSING',
+        message: 'A bound family, routing receipt, and persisted legacy receipt are required.'
+      });
+    }
+    const artifacts = Array.isArray(legacyReceipt.provenance?.artifacts)
+      ? legacyReceipt.provenance.artifacts
+      : [];
+    const evidenceRefs = Array.isArray(legacyReceipt.provenance?.evidenceRefs)
+      ? legacyReceipt.provenance.evidenceRefs
+      : [];
+    const controlContradictions = Array.isArray(test.adaptiveControlEvidence?.reasonCodes)
+      ? test.adaptiveControlEvidence.reasonCodes.filter((code) => (
+          code === 'POSITIVE_SHAM_MOVEMENT'
+          || code === 'NEGATIVE_SHAM_MOVEMENT'
+          || code === 'CONTROL_REGRESSION'
+        ))
+      : [];
+    const contradictionCodes = [...new Set([
+      ...(legacyReceipt.outcome?.verdict === 'regression'
+        ? [legacyReceipt.outcome?.code || 'MEASURED_REGRESSION']
+        : []),
+      ...controlContradictions
+    ])];
+    const built = createMechanismApplicationRecord({
+      familyId: hypothesis.mechanismFamilyId,
+      appliedAt: legacyReceipt.generatedAt,
+      partition: legacyReceipt.partition,
+      source: {
+        runId: state.runId,
+        hypothesisId: hypothesis.id,
+        testId: test.id
+      },
+      context: {
+        targetSha256: hypothesis.routingBinding.targetSha256,
+        taskMode: state.task.mode,
+        loopRole: state.activeLoop || 'supervisor',
+        taskValueDimensions: state.benchmark.def?.taskValueDimensions || [],
+        resourceDimensions: state.benchmark.def?.resourceDimensions || []
+      },
+      routing: {
+        routingDecisionId: hypothesis.routingBinding.routingDecisionId,
+        routingDecisionSha256: hypothesis.routingBinding.routingDecisionSha256,
+        routingPacketSha256: hypothesis.routingBinding.routingPacketSha256,
+        policyEpochId: hypothesis.routingBinding.policyEpochId,
+        policyEpochSha256: hypothesis.routingBinding.policyEpochSha256,
+        allocation: hypothesis.routingBinding.allocation,
+        schedulePosition: hypothesis.routingBinding.schedulePosition
+      },
+      outcome: {
+        verdict: legacyReceipt.outcome.verdict,
+        valid: legacyReceipt.outcome.valid,
+        qualityDelta: legacyReceipt.measurement?.delta?.quality ?? null,
+        tokenCostDeltaPct: legacyReceipt.measurement?.delta?.tokenCostPct ?? null,
+        shamMovement: legacyReceipt.measurement?.shamMovement ?? null,
+        controlRegressions: legacyReceipt.measurement?.controlRegressions ?? null,
+        reverified: legacyReceipt.measurement?.reverified === true,
+        transferChecks: legacyReceipt.measurement?.transferChecks || [],
+        contradictionCodes
+      },
+      credit: {
+        confidence: legacyReceipt.measurement?.reverified === true
+          ? 1
+          : (legacyReceipt.outcome?.valid === true ? 0.65 : null),
+        authority: legacyReceipt.measurement?.qualityAuthority || null
+      },
+      provenance: {
+        legacyReceiptId: legacyReceipt.receiptId,
+        legacyReceiptSha256: legacyReceipt.receiptSha256,
+        benchmarkSha256: legacyReceipt.source?.benchmarkSha256,
+        artifactSetSha256: sha256(canonicalAdaptiveJson(artifacts)),
+        evidenceSetSha256: sha256(canonicalAdaptiveJson(evidenceRefs))
+      }
+    });
+    if (built.status !== 'OK') return adaptiveFailure(state, 'application_build', built);
+    const persisted = persistAdaptiveRecord({
+      homeDir: adaptiveHome(),
+      record: built.record
+    });
+    if (persisted.status !== 'OK') return adaptiveFailure(state, 'application_persist', persisted);
+    state.adaptiveIntelligence.lastApplication = {
+      applicationId: built.record.applicationId,
+      applicationReceiptId: built.record.applicationReceiptId,
+      applicationSha256: built.record.applicationSha256,
+      familyId: built.record.familyId,
+      verdict: built.record.outcome.verdict,
+      reverified: built.record.outcome.reverified,
+      allocation: built.record.routing.allocation,
+      recordedAt: clock()
+    };
+    refreshAdaptiveCatalogState(state);
+    logEvent(state, 'adaptive_application_recorded', {
+      applicationReceiptId: built.record.applicationReceiptId,
+      familyId: built.record.familyId,
+      allocation: built.record.routing.allocation,
+      verdict: built.record.outcome.verdict,
+      reverified: built.record.outcome.reverified
+    });
+    const policy = maybeAdvanceAdaptivePolicy(state);
+    return {
+      status: 'OK',
+      application: clone(state.adaptiveIntelligence.lastApplication),
+      policy
+    };
+  }
+  function buildAdaptiveControlSource(state, input) {
+    const exactKeys = (value, keys) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+      const actual = Object.keys(value).sort();
+      const expected = [...keys].sort();
+      return actual.length === expected.length
+        && actual.every((key, index) => key === expected[index]);
+    };
+    if (!exactKeys(input, ['schemaVersion', 'runId', 'testId', 'arms'])
+        || input.schemaVersion !== ADAPTIVE_CONTROL_ARTIFACT_SOURCE_SCHEMA
+        || input.runId !== state.runId
+        || !isSafeId(input.testId)
+        || !exactKeys(input.arms, ['baseline', 'routed', 'sham'])) {
+      return {
+        status: 'REFUSED',
+        code: 'ARTIFACT_SOURCE_SCHEMA_MISMATCH',
+        message: 'Control evidence requires exact baseline, routed, and sham artifact references.'
+      };
+    }
+    const benchmarkBinding = adaptiveControlBenchmarkBindings(state.benchmark.def);
+    if (benchmarkBinding.status !== 'OK') return benchmarkBinding;
+    const expectedCaseIds = state.benchmark.def.cases.map((item) => item.id).sort();
+    const common = {
+      runId: state.runId,
+      testId: input.testId,
+      ...benchmarkBinding.bindings,
+      measurementSchemaVersion: ADAPTIVE_CONTROL_MEASUREMENT_SCHEMA,
+      measurementAuthority: 'tool-computed'
+    };
+    const usedArtifactRefs = new Set();
+    const arms = {};
+    for (const armRole of ['baseline', 'routed', 'sham']) {
+      const rows = input.arms[armRole];
+      if (!Array.isArray(rows) || rows.length !== expectedCaseIds.length) {
+        return {
+          status: 'REFUSED',
+          code: 'ARTIFACT_CASE_SET_MISMATCH',
+          message: 'Every arm must reference every frozen benchmark case exactly once.'
+        };
+      }
+      const byCase = new Map();
+      for (const row of rows) {
+        if (!exactKeys(row, ['caseId', 'targetMeasurementRef', 'controlMeasurementRef'])
+            || !expectedCaseIds.includes(row.caseId)
+            || byCase.has(row.caseId)
+            || !isSafeId(row.targetMeasurementRef)
+            || !isSafeId(row.controlMeasurementRef)) {
+          return {
+            status: 'REFUSED',
+            code: 'ARTIFACT_REFERENCE_INVALID',
+            message: 'Control evidence artifact references are malformed, duplicated, or foreign to the frozen case set.'
+          };
+        }
+        const refs = [row.targetMeasurementRef, row.controlMeasurementRef];
+        if (refs.some((ref) => usedArtifactRefs.has(ref))) {
+          return {
+            status: 'REFUSED',
+            code: 'ARTIFACT_REFERENCE_REUSED',
+            message: 'Each target and control measurement must have a distinct persisted artifact.'
+          };
+        }
+        const artifacts = refs.map((ref) => store.readArtifact(state.runId, ref));
+        if (artifacts.some((artifact) => !artifact)) {
+          return {
+            status: 'REFUSED',
+            code: 'MEASUREMENT_ARTIFACT_MISSING',
+            message: 'A referenced control measurement artifact is missing.'
+          };
+        }
+        for (const artifact of artifacts) {
+          const measurement = artifact.measurement;
+          const metricRole = artifact === artifacts[0] ? 'target' : 'control';
+          if (!measurement
+              || measurement.qualityAuthority !== TOOL_AUTHORITY
+              || measurement.oracleScored !== true
+              || measurement.benchmarkSha256 !== common.benchmarkSha256
+              || measurement.oracleSha256 !== common.oracleSha256
+              || measurement.adaptiveControlBinding?.testId !== input.testId
+              || measurement.adaptiveControlBinding?.armRole !== armRole
+              || measurement.adaptiveControlBinding?.metricRole !== metricRole
+              || measurement.adaptiveControlBinding?.caseId !== row.caseId
+              || !Number.isFinite(measurement.quality)
+              || measurement.quality < 0
+              || measurement.quality > 1) {
+            return {
+              status: 'REFUSED',
+              code: 'MEASUREMENT_ARTIFACT_UNTRUSTED',
+              message: 'Control measurements must be tool-scored artifacts bound to the current frozen benchmark and oracle.'
+            };
+          }
+        }
+        refs.forEach((ref) => usedArtifactRefs.add(ref));
+        byCase.set(row.caseId, {
+          caseId: row.caseId,
+          targetQuality: artifacts[0].measurement.quality,
+          controlQuality: artifacts[1].measurement.quality
+        });
+      }
+      if (expectedCaseIds.some((caseId) => !byCase.has(caseId))) {
+        return {
+          status: 'REFUSED',
+          code: 'ARTIFACT_CASE_SET_MISMATCH',
+          message: 'Every arm must cover the complete frozen case set.'
+        };
+      }
+      const sealed = sealAdaptiveControlArmEvidence({
+        schemaVersion: ADAPTIVE_CONTROL_ARM_SCHEMA,
+        armRole,
+        provenance: { ...common },
+        measurements: expectedCaseIds.map((caseId) => byCase.get(caseId))
+      });
+      if (sealed.status !== 'OK') return sealed;
+      arms[armRole] = sealed.armEvidence;
+    }
+    const source = { schemaVersion: ADAPTIVE_CONTROL_SOURCE_SCHEMA, arms };
+    return {
+      status: 'OK',
+      source,
+      expected: {
+        runId: state.runId,
+        testId: input.testId,
+        ...benchmarkBinding.bindings,
+        sourceEvidenceSha256: sha256(canonicalAdaptiveJson(source)),
+        armEvidenceSha256: Object.fromEntries(
+          Object.entries(arms).map(([role, arm]) => [role, arm.armEvidenceSha256])
+        )
+      },
+      artifactSourceSha256: sha256(canonicalAdaptiveJson(input))
+    };
+  }
+  function recordAdaptiveControlEvidence(args = {}) {
+    if (!args.sourceArtifactRefs) {
+      return blocked(
+        'ADAPTIVE_CONTROL_EVIDENCE_REFUSED',
+        'Adaptive control evidence requires persisted tool-measurement artifact references.',
+        { reasonCode: 'ARTIFACT_SOURCE_REQUIRED' }
+      );
+    }
+    const state = loadRun({ runId: args.sourceArtifactRefs.runId });
+    if (!state) return blocked(BLOCK.UNKNOWN_RUN, `No run "${args.sourceArtifactRefs.runId}".`);
+    const initialized = requireInitialized(state);
+    if (initialized) return initialized;
+    if (!activeMetaLearning(state)) {
+      return blocked('ADAPTIVE_MODE_REQUIRED', 'Control evidence receipts require active-canary mode.');
+    }
+    const test = state.tests.find((item) => item.id === args.sourceArtifactRefs.testId);
+    if (!test) return blocked(BLOCK.BAD_INPUT, `Unknown testId "${args.sourceArtifactRefs.testId}".`);
+    if (test.reverified !== true) {
+      return blocked(BLOCK.NOT_REVERIFIED, 'Control evidence can bind only to a deep-reverified test.');
+    }
+    const builtSource = buildAdaptiveControlSource(state, args.sourceArtifactRefs);
+    if (builtSource.status !== 'OK') {
+      return blocked(
+        'ADAPTIVE_CONTROL_EVIDENCE_REFUSED',
+        builtSource.message,
+        { reasonCode: builtSource.code }
+      );
+    }
+    const derived = deriveAdaptiveControlEvidence(
+      builtSource.source,
+      builtSource.expected
+    );
+    if (derived.status !== 'OK') {
+      return blocked(
+        'ADAPTIVE_CONTROL_EVIDENCE_REFUSED',
+        derived.message || 'Adaptive control evidence was refused.',
+        { reasonCode: derived.code || null }
+      );
+    }
+    const evidence = derived.controlEvidence;
+    const {
+      automaticBankingEligible,
+      controlRegressions,
+      evidenceSha256,
+      reasonCodes,
+      shamMovement
+    } = evidence;
+    const payload = {
+      schemaVersion: 'adaptive-control-evidence-v1',
+      runId: state.runId,
+      testId: test.id,
+      controlRegressions,
+      shamMovement,
+      evidenceSha256,
+      artifactSourceSha256: builtSource.artifactSourceSha256,
+      authority: 'supervisor-tool-computed',
+      automaticBankingEligible,
+      reasonCodes,
+      sourceSummary: derived.sourceSummary
+    };
+    const receiptSha256 = sha256(canonicalAdaptiveJson(payload));
+    const receipt = { ...payload, receiptSha256 };
+    if (test.adaptiveControlEvidence) {
+      if (canonicalAdaptiveJson(test.adaptiveControlEvidence) !== canonicalAdaptiveJson(receipt)) {
+        return blocked(
+          'ADAPTIVE_CONTROL_EVIDENCE_LOCKED',
+          'A different immutable control-evidence receipt already exists for this test.'
+        );
+      }
+      return ok('Control evidence already recorded idempotently.', {
+        controlEvidence: clone(test.adaptiveControlEvidence),
+        idempotent: true
+      });
+    }
+    store.writeRunFile(
+      state.runId,
+      `adaptive-controls/${test.id}.json`,
+      `${canonicalAdaptiveJson(receipt)}\n`
+    );
+    test.adaptiveControlEvidence = receipt;
+    const hypothesis = state.hypotheses.find((item) => item.id === test.hypothesisId);
+    const legacy = recordImprovementReceipt(state, {
+      hypothesisId: test.hypothesisId,
+      testId: test.id,
+      outcomeOverlay: {
+        observedAt: test.reverifiedAt,
+        controlRegressions,
+        shamMovement,
+        transferChecks: [{
+          kind: 'heldOut',
+          attempted: true,
+          passed: controlRegressions === 0,
+          evidenceSha256
+        }]
+      }
+    });
+    let application = null;
+    if (legacy.status === 'OK') {
+      application = recordAdaptiveApplication(state, hypothesis, test, legacy.receipt);
+    }
+    logEvent(state, 'adaptive_control_evidence', {
+      testId: test.id,
+      receiptSha256,
+      controlRegressions,
+      shamMovement
+    });
+    state.updatedAt = clock();
+    writeDashboardForState(state);
+    store.save(state);
+    return ok('Persisted supervisor-owned sham and control evidence for automatic disposition.', {
+      controlEvidence: clone(receipt),
+      adaptiveApplication: application,
+      idempotent: false
+    });
+  }
+  function advanceMetaPolicy(args = {}) {
+    const state = loadRun(args);
+    if (!state) return blocked(BLOCK.UNKNOWN_RUN, `No run "${args.runId}".`);
+    const initialized = requireInitialized(state);
+    if (initialized) return initialized;
+    if (!activeMetaLearning(state)) {
+      return blocked('ADAPTIVE_MODE_REQUIRED', 'Meta-policy advancement requires active-canary mode.');
+    }
+    if (args.trigger !== 'lane-boundary') {
+      return blocked(BLOCK.BAD_INPUT, 'The operator surface accepts only trigger "lane-boundary".');
+    }
+    const result = maybeAdvanceAdaptivePolicy(state, 'lane-boundary');
+    state.updatedAt = clock();
+    writeDashboardForState(state);
+    store.save(state);
+    if (result.status === 'BLOCKED') {
+      return blocked(
+        'ADAPTIVE_POLICY_ADVANCE_FAILED',
+        result.message || 'Lane-boundary policy advancement failed.',
+        { reasonCode: result.code || null, stage: result.stage || null }
+      );
+    }
+    return ok(
+      result.status === 'OK'
+        ? 'Advanced the bounded meta-policy at the supervisor lane boundary.'
+        : 'No valid applications were available for a lane-boundary policy update.',
+      { policy: result }
+    );
+  }
+  function automaticPromotionDisposition(state, hypothesis, test, promotionDecision, {
+    routeOutputs,
+    fixtureOnly
+  } = {}) {
+    if (!activeMetaLearning(state)) return { status: 'DISABLED' };
+    const records = listAdaptiveRecords({ homeDir: adaptiveHome() });
+    if (records.status !== 'OK') return adaptiveFailure(state, 'automatic_decision_records', records);
+    const selectedApplications = selectLatestApplicationRevisions(records.records.filter((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.APPLICATION
+      && record.source.runId === state.runId
+      && record.source.hypothesisId === hypothesis.id
+      && record.source.testId === test.id
+    )));
+    if (selectedApplications.status !== 'OK') {
+      return adaptiveFailure(state, 'automatic_decision_application_selection', selectedApplications);
+    }
+    const application = selectedApplications.applications.at(-1) || null;
+    const binding = hypothesis.routingBinding || {};
+    const routingDecision = records.records.find((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.ROUTING_DECISION
+      && record.routingDecisionId === binding.routingDecisionId
+      && record.routingDecisionSha256 === binding.routingDecisionSha256
+    )) || null;
+    const policyEpoch = records.records.find((record) => (
+      record.schemaVersion === ADAPTIVE_SCHEMA.POLICY_EPOCH
+      && record.policyEpochId === binding.policyEpochId
+      && record.policyEpochSha256 === binding.policyEpochSha256
+    )) || null;
+    const controlEvidence = test.adaptiveControlEvidence || null;
+    const benchmarkSha256 = sha256(canonicalAdaptiveJson(state.benchmark.def || {}));
+    const baselineSha256 = /^[a-f0-9]{64}$/.test(String(state.baseline.sha256 || ''))
+      ? state.baseline.sha256
+      : sha256(canonicalAdaptiveJson(state.benchmark.baselineScore || {}));
+    const challengerSha256 = sha256(canonicalAdaptiveJson(
+      (routeOutputs || []).map((output) => ({
+        route: output.route,
+        ref: output.ref,
+        sha256: output.sha256
+      }))
+    ));
+    const gate = (code, passed, evidence) => ({
+      code,
+      passed: passed === true,
+      evidenceSha256: sha256(canonicalAdaptiveJson({ code, evidence }))
+    });
+    const routingBound = !!(
+      routingDecision
+      && policyEpoch
+      && routingDecision.policyEpochId === policyEpoch.policyEpochId
+      && routingDecision.policyEpochSha256 === policyEpoch.policyEpochSha256
+      && application
+      && application.routing.routingDecisionId === routingDecision.routingDecisionId
+      && application.routing.policyEpochId === policyEpoch.policyEpochId
+    );
+    const provenanceComplete = !!(
+      application
+      && application.outcome.reverified === true
+      && application.provenance.legacyReceiptSha256
+      && application.provenance.benchmarkSha256 === benchmarkSha256
+      && application.provenance.artifactSetSha256
+      && application.provenance.evidenceSetSha256
+    );
+    const driftSafe = !!(
+      policyEpoch
+      && (policyEpoch.driftTier < 3 || policyEpoch.metaCanaryReceiptSha256)
+    );
+    const shamStable = controlEvidence?.automaticBankingEligible === true
+      && Number.isFinite(controlEvidence?.shamMovement)
+      && Math.abs(controlEvidence.shamMovement) <= 1e-9;
+    const controlsSafe = controlEvidence?.controlRegressions === 0;
+    const gates = [
+      gate('DETERMINISTIC_ORACLE', isDeterministicOracle(state.benchmark.def?.oracle), {
+        oracleKind: state.benchmark.def?.oracle?.kind || null
+      }),
+      gate('REVERIFIED', test.reverified === true, {
+        testId: test.id,
+        reverifiedAt: test.reverifiedAt || null
+      }),
+      gate('TOOL_QUALITY', test.qualityAuthority === TOOL_AUTHORITY, {
+        authority: test.qualityAuthority
+      }),
+      gate('FRONTIER_MOVEMENT', promotionDecision.promote === true, {
+        kind: promotionDecision.kind,
+        deltas: promotionDecision.deltas
+      }),
+      gate('NEGATIVE_CONTROL', state.benchmark.negativeControl?.passed === false, {
+        negativeControl: state.benchmark.negativeControl || null
+      }),
+      gate('CONTROL_REGRESSIONS', controlsSafe, {
+        receiptSha256: controlEvidence?.receiptSha256 || null,
+        controlRegressions: controlEvidence?.controlRegressions ?? null
+      }),
+      gate('SHAM_STABILITY', shamStable, {
+        receiptSha256: controlEvidence?.receiptSha256 || null,
+        shamMovement: controlEvidence?.shamMovement ?? null
+      }),
+      gate('ROUTING_BINDING', routingBound, {
+        routingDecisionId: binding.routingDecisionId || null,
+        policyEpochId: binding.policyEpochId || null,
+        applicationReceiptId: application?.applicationReceiptId || null
+      }),
+      gate('PROVENANCE_COMPLETE', provenanceComplete, {
+        applicationSha256: application?.applicationSha256 || null,
+        benchmarkSha256
+      }),
+      gate('POLICY_DRIFT', driftSafe, {
+        driftTier: policyEpoch?.driftTier ?? null,
+        metaCanaryReceiptSha256: policyEpoch?.metaCanaryReceiptSha256 || null
+      }),
+      gate('NOT_FIXTURE', fixtureOnly !== true, { fixtureOnly: fixtureOnly === true }),
+      gate('CANONICAL_IMMUTABLE', true, { canonicalChange: false })
+    ];
+    const built = createAutomaticPromotionDecisionRecord({
+      source: {
+        runId: state.runId,
+        hypothesisId: hypothesis.id,
+        testId: test.id
+      },
+      evidence: {
+        benchmarkSha256,
+        baselineSha256,
+        challengerSha256,
+        qualityAuthority: test.qualityAuthority,
+        deterministicOracle: isDeterministicOracle(state.benchmark.def?.oracle),
+        reverified: test.reverified === true,
+        qualityDelta: promotionDecision.deltas?.qualityGain ?? null,
+        tokenCostDeltaPct: promotionDecision.deltas?.costRegressionPct ?? null,
+        controlRegressions: controlEvidence?.controlRegressions ?? null,
+        fixtureOnly: fixtureOnly === true
+      },
+      routing: {
+        routingDecisionId: binding.routingDecisionId || null,
+        routingDecisionSha256: binding.routingDecisionSha256 || null,
+        policyEpochId: binding.policyEpochId || null,
+        policyEpochSha256: binding.policyEpochSha256 || null
+      },
+      gates
+    });
+    if (built.status !== 'OK') return adaptiveFailure(state, 'automatic_decision_build', built);
+    const persisted = persistAdaptiveRecord({
+      homeDir: adaptiveHome(),
+      record: built.record
+    });
+    if (persisted.status !== 'OK') return adaptiveFailure(state, 'automatic_decision_persist', persisted);
+    store.writeRunFile(
+      state.runId,
+      `adaptive-decisions/${built.record.automaticPromotionDecisionId}.json`,
+      `${canonicalAdaptiveJson(built.record)}\n`
+    );
+    const previousId = state.adaptiveIntelligence.automaticDecisions.latest
+      ?.automaticPromotionDecisionId;
+    state.adaptiveIntelligence.automaticDecisions.latest = {
+      automaticPromotionDecisionId: built.record.automaticPromotionDecisionId,
+      automaticPromotionDecisionSha256: built.record.automaticPromotionDecisionSha256,
+      disposition: built.record.disposition,
+      eligible: built.record.eligible,
+      reasonCodes: [...built.record.reasonCodes],
+      recordedAt: clock()
+    };
+    if (previousId !== built.record.automaticPromotionDecisionId) {
+      if (built.record.eligible) state.adaptiveIntelligence.automaticDecisions.autoBanked++;
+      else state.adaptiveIntelligence.automaticDecisions.queuedHuman++;
+    }
+    logEvent(state, 'automatic_promotion_decision', {
+      automaticPromotionDecisionId: built.record.automaticPromotionDecisionId,
+      disposition: built.record.disposition,
+      eligible: built.record.eligible,
+      reasonCodes: built.record.reasonCodes
+    });
+    return { status: 'OK', decision: built.record };
   }
   function invalidIdBlock(label, value) {
     return blocked(BLOCK.BAD_INPUT,
@@ -664,7 +2421,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   function modelConfirmationOptions(requested) {
     return {
       useAnyway: `use it anyway — banlist off for this run, keep "${requested}"`,
-      pickAnother: 'name another model (e.g. claude-opus-4-8 or gpt-5.5)',
+      pickAnother: 'name another model (e.g. claude-fable-5 or gpt-5.6-terra)',
       defaults: `press enter / say "defaults" for ${DEFAULT_PRIMARY_MODEL} + standard frontier set`
     };
   }
@@ -756,7 +2513,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       assumptions: startIntent ? startAssumptions(state) : undefined,
       deeperExplanation: deeperFromAnswers ? deeperExplanation(state) : undefined,
       sotaAdvisory: `Using ${pol.primary} as the primary route (policy source: ${pol.source}, banlist: ${pol.banlist.mode}). Check current SOTA via web search at the start (OpenAI / Anthropic / Google / Z.ai), and override modelPolicy at init if a stronger frontier model exists. Run host_capability_preflight to see which frontier CLIs are installed locally. Under banlist mode "default", non-frontier routes (haiku/mini/nano/lite/prior-gen) are rejected for full tests; say "any model" at init to disable the banlist for this run.`,
-      builderRoutingAdvisory: `Builds and in-loop gating route to ${pol.builderRoutes.join(' or ')} under the active modelPolicy. Codex/GPT stays a supported host surface but is not a trusted in-loop builder/gating worker unless listed in modelPolicy.builderRoutes. Frontier test workers default to ${pol.testRoutes.join(', ')}.`,
+      builderRoutingAdvisory: `Builds and in-loop gating route to ${pol.builderRoutes.join(' or ')} under the active modelPolicy. A host alias such as "codex" is not a model route; additional builders must be listed in modelPolicy.builderRoutes. Frontier test workers default to ${pol.testRoutes.join(', ')}.`,
       failurePatience: state.config.failurePatience, branchRetirementBatches: state.config.branchRetirementBatches, mode: state.task.mode,
       runMode: state.config.runMode, maxCycles: state.config.maxCycles,
       limitNotice: state.config.runMode === 'bounded'
@@ -1283,6 +3040,18 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
 
     // Ask-once already satisfied → idempotent. NEVER ask again.
     if ([STATUS.INITIALIZED, STATUS.ACTIVE, STATUS.NEEDS_RESUME].includes(state.status)) {
+      if (activeMetaLearning(state)) {
+        const adaptive = initializeAdaptiveIntelligence(state);
+        if (adaptive.status !== 'OK') {
+          return blocked(
+            'ADAPTIVE_INITIALIZATION_FAILED',
+            adaptive.message || 'Adaptive policy initialization failed while resuming the run.',
+            { reasonCode: adaptive.code || null }
+          );
+        }
+        state.config.metaLearning.policyId = adaptive.currentEpoch.policyEpochId;
+        state.config.metaLearning.policySha256 = adaptive.currentEpoch.policyEpochSha256;
+      }
       if (Array.isArray(args.answers)) {
         state.answers = args.answers.map(answerRecord);
         state.task.path = computeCampaignPath(state) || state.task.path || null;
@@ -1355,6 +3124,61 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       // stop": the operator set the limit; the engine enforces it; the host obeys.
       state.config.maxCycles = Math.round(args.config.maxCycles);
       state.config.runMode = 'bounded';
+    }
+    if (args.config && args.config.metaLearning && args.config.metaLearning.enabled === true) {
+      const raw = args.config.metaLearning;
+      const mode = raw.mode == null ? 'shadow' : raw.mode;
+      if (!['shadow', 'active-canary'].includes(mode)) {
+        return blocked(BLOCK.BAD_INPUT, 'metaLearning mode must be "shadow" or "active-canary".');
+      }
+      if (mode === 'shadow' && raw.policyId != null && raw.policyId !== META_POLICY_V1.policyId) {
+        return blocked(BLOCK.BAD_INPUT, `metaLearning policyId must be "${META_POLICY_V1.policyId}".`);
+      }
+      if (mode === 'shadow' && raw.policySha256 != null
+          && String(raw.policySha256).toLowerCase() !== META_POLICY_V1.policySha256) {
+        return blocked(BLOCK.BAD_INPUT, 'metaLearning policySha256 does not match the bundled meta-policy-v1.');
+      }
+      if (mode === 'active-canary'
+          && raw.policyId != null
+          && raw.policyId !== 'adaptive-policy-v1') {
+        return blocked(
+          BLOCK.BAD_INPUT,
+          'active-canary policyId is supervisor-owned; omit it or use "adaptive-policy-v1".'
+        );
+      }
+      if (mode === 'active-canary' && raw.policySha256 != null) {
+        return blocked(
+          BLOCK.BAD_INPUT,
+          'active-canary policySha256 is loaded from the persisted epoch chain and cannot be supplied by a caller.'
+        );
+      }
+      if (raw.seed != null && !isSafeId(raw.seed)) {
+        return blocked(BLOCK.BAD_INPUT, 'metaLearning seed must be a safe ID with no spaces or path separators.');
+      }
+      if (raw.policyScopeId != null && !isSafeId(raw.policyScopeId)) {
+        return blocked(BLOCK.BAD_INPUT, 'metaLearning policyScopeId must be a safe ID.');
+      }
+      state.config.metaLearning = {
+        enabled: true,
+        mode,
+        policyId: mode === 'shadow' ? META_POLICY_V1.policyId : 'adaptive-policy-v1',
+        policySha256: mode === 'shadow' ? META_POLICY_V1.policySha256 : null,
+        seed: raw.seed || runId,
+        policyScopeId: raw.policyScopeId || runId
+      };
+      state.metaLearning = initialMetaLearningState(state.config.metaLearning);
+      if (mode === 'active-canary') {
+        const adaptive = initializeAdaptiveIntelligence(state);
+        if (adaptive.status !== 'OK') {
+          return blocked(
+            'ADAPTIVE_INITIALIZATION_FAILED',
+            adaptive.message || 'Adaptive policy initialization failed.',
+            { reasonCode: adaptive.code || null }
+          );
+        }
+        state.config.metaLearning.policyId = adaptive.currentEpoch.policyEpochId;
+        state.config.metaLearning.policySha256 = adaptive.currentEpoch.policyEpochSha256;
+      }
     }
     if (args.config && args.config.realTest && args.config.realTest.enabled === true) {
       const raw = args.config.realTest;
@@ -1594,6 +3418,36 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     // exists solely so the benchmark/test/promotion gates can prove they refuse it.
     let measurement = null;
     const wantsMeasurement = (args.measurement && typeof args.measurement === 'object') || args.measure === true;
+    let adaptiveControlBinding = null;
+    if (args.adaptiveControl != null) {
+      const binding = args.adaptiveControl;
+      const keys = binding && typeof binding === 'object' && !Array.isArray(binding)
+        ? Object.keys(binding).sort()
+        : [];
+      if (keys.join(',') !== 'armRole,caseId,metricRole,testId'
+          || !activeMetaLearning(state)
+          || !['baseline', 'routed', 'sham'].includes(binding.armRole)
+          || !['target', 'control'].includes(binding.metricRole)
+          || !isSafeId(binding.testId)
+          || !isSafeId(binding.caseId)
+          || !state.tests.some((test) => (
+            test.id === binding.testId && test.reverified === true
+          ))
+          || !state.benchmark.def?.cases?.some((item) => item.id === binding.caseId)
+          || !wantsMeasurement
+          || args.callerReported === true) {
+        return blocked(
+          BLOCK.BAD_INPUT,
+          'adaptiveControl must bind one tool measurement to a reverified test, arm, metric role, and frozen case.'
+        );
+      }
+      adaptiveControlBinding = {
+        testId: binding.testId,
+        armRole: binding.armRole,
+        metricRole: binding.metricRole,
+        caseId: binding.caseId
+      };
+    }
     if (wantsMeasurement) {
       const claimed = (args.measurement && typeof args.measurement === 'object') ? args.measurement : {};
       if (args.callerReported === true) {
@@ -1607,6 +3461,20 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       } else {
         const oracle = (state.benchmark && state.benchmark.frozen && state.benchmark.def) ? state.benchmark.def.oracle : null;
         measurement = deriveMeasurement(content, oracle, claimed);
+        const binding = oracle
+          ? adaptiveControlBenchmarkBindings(state.benchmark.def)
+          : null;
+        if (binding?.status === 'OK') {
+          measurement = {
+            ...measurement,
+            benchmarkSha256: binding.bindings.benchmarkSha256,
+            oracleSha256: binding.bindings.oracleSha256,
+            evaluatorSha256: binding.bindings.evaluatorSha256,
+            ...(adaptiveControlBinding
+              ? { adaptiveControlBinding }
+              : {})
+          };
+        }
       }
     }
     const classification = classifyArtifact({ role, name: args.name || aid, content, artifactClass: args.artifactClass, provesBehaviorChange: args.provesBehaviorChange });
@@ -2046,12 +3914,12 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (bad.length) return blocked(BLOCK.BANNED_ROUTE, `Route(s) rejected under modelPolicy banlist mode "${pol.banlist.mode}": ${bad.map((b) => b.model).join(', ')}. Default frontier set: ${KNOWN_FRONTIER_EXAMPLES.join(', ')}. Say "any model" at init (banlist off) or add banlist.extraAllow to permit a previously-banned route for this run.`, { rejected: bad, modelPolicy: { banlist: pol.banlist, primary: pol.primary } });
     // Builder/gating routing: a hypothesis MAY name the worker that BUILDS its
     // challenger. If named, it must be a trusted builder/gating route under the
-    // active modelPolicy (defaults: Opus 4.8 / GLM 5.2). Codex/GPT is a fine
-    // frontier TEST worker under the default banlist but not an in-loop builder
-    // unless listed in modelPolicy.builderRoutes.
+    // active modelPolicy (defaults: Fable 5 / GPT-5.6 Sol). A bare host alias
+    // such as "codex" is not a model route; additional builders must be listed
+    // in modelPolicy.builderRoutes.
     const builderRoutes = hyps.map((h) => (h.builderRoute && h.builderRoute.model) || h.builderRoute || '').filter(Boolean);
     const badBuilders = rejectedBuilderRoutes(builderRoutes, pol);
-    if (badBuilders.length) return blocked(BLOCK.BUILDER_ROUTE, `Builder/gating route(s) rejected: ${badBuilders.map((b) => b.model).join(', ')}. Builds and in-loop gating route to ${pol.builderRoutes.join(' or ')} under the active modelPolicy; Codex/GPT stays a host surface, not an in-loop builder, unless listed in modelPolicy.builderRoutes.`, { rejected: badBuilders, builderRoutes: pol.builderRoutes });
+    if (badBuilders.length) return blocked(BLOCK.BUILDER_ROUTE, `Builder/gating route(s) rejected: ${badBuilders.map((b) => b.model).join(', ')}. Builds and in-loop gating route to ${pol.builderRoutes.join(' or ')} under the active modelPolicy; a host alias such as "codex" is not a model route, and any additional builder must be listed in modelPolicy.builderRoutes.`, { rejected: badBuilders, builderRoutes: pol.builderRoutes });
     // Step 3 — wire OR block: a route that passes classifyRoute but maps to no executor
     // binary (opencode not on PATH) is NOT silently accepted. It is refused unless the caller
     // explicitly records it manually WITH provenance, so a hand-run route is honest, not invisible.
@@ -2067,6 +3935,42 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       return blocked(BLOCK.ROUTE_UNSPAWNABLE,
         `Route(s) ${unspawnable.map((u) => u.route).join(', ')} have no executor binary and opencode is not on PATH. Either install opencode, register a different (spawnable) route, or record manually with { manualRecord:true, provenance:"<CLI command + timestamp + operator note>" } so a hand-run result is traceable.`,
         { route: unspawnable[0].route, unspawnable: unspawnable.map((u) => u.route), manualAllowed: true });
+    }
+    if (strictRealTest) {
+      for (let i = 0; i < hyps.length; i++) {
+        const suppliedId = String(hyps[i]?.id || '');
+        const expectedId = state.config.realTest.findingId
+          ? `${state.config.realTest.findingId}-h${i + 1}`
+          : null;
+        if (!isSafeId(suppliedId)
+            || (expectedId && suppliedId !== expectedId)
+            || state.hypotheses.some((item) => item.id === suppliedId)) {
+          return blocked(
+            BLOCK.HYPOTHESIS_TOO_SHALLOW,
+            'Strict hypothesis IDs must match the supervisor-assigned finding IDs and be unique.'
+          );
+        }
+      }
+    }
+    let adaptiveBindings = null;
+    if (activeMetaLearning(state)) {
+      adaptiveBindings = validateActiveHypothesisBindings(state, hyps);
+      if (adaptiveBindings.status !== 'OK') {
+        return blocked(
+          adaptiveBindings.code || 'ADAPTIVE_BINDING_INVALID',
+          adaptiveBindings.message || 'Active hypothesis routing binding failed.'
+        );
+      }
+      for (const family of adaptiveBindings.families) {
+        const persisted = persistAdaptiveRecord({ homeDir: adaptiveHome(), record: family });
+        if (persisted.status !== 'OK') {
+          return blocked('ADAPTIVE_FAMILY_PERSIST_FAILED', persisted.message, {
+            reasonCode: persisted.code
+          });
+        }
+      }
+    } else if (shadowMetaLearning(state)) {
+      buildShadowPacket(state, hyps);
     }
     const created = [];
     hyps.forEach((h, i) => {
@@ -2090,12 +3994,41 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
         executorBin: meta.bin, spawnable: !!meta.bin, manualRecord: meta.manual, provenance: meta.provenance, executorRan: false,
         tradeoff: h.tradeoff || '', falsifier: h.falsifier || '',
         findingId: strictRealTest ? state.config.realTest.findingId : null,
+        ...(metaLearningEnabled(state)
+          ? { evidenceRefs: normalizeEvidenceRefs(h.evidenceRefs) }
+          : {}),
+        ...(activeMetaLearning(state)
+          ? {
+              causalFingerprint: adaptiveBindings.families[i].causalFingerprint,
+              mechanismFamilyId: adaptiveBindings.families[i].familyId,
+              routingBinding: clone(h.routingBinding)
+            }
+          : {}),
         status: 'REGISTERED', ts: clock()
       });
       created.push(hid);
     });
     if (created.some((id) => !id)) {
       return blocked(BLOCK.HYPOTHESIS_TOO_SHALLOW, 'Strict hypothesis IDs must match the supervisor-assigned finding IDs and be unique.');
+    }
+    if (activeMetaLearning(state)) {
+      const current = state.adaptiveIntelligence.routing.current;
+      current.consumed = true;
+      current.consumedAt = clock();
+      setAdaptiveRoutingRuntimeStatus(
+        state,
+        current,
+        'CONSUMED',
+        current.decision.affectedExecution
+      );
+      state.adaptiveIntelligence.affectedExecution = current.decision.affectedExecution;
+      state.metaLearning.affectedExecution = current.decision.affectedExecution;
+      refreshAdaptiveCatalogState(state);
+      logEvent(state, 'adaptive_routing_consumed', {
+        routingDecisionId: current.decision.routingDecisionId,
+        hypothesisIds: created,
+        affectedExecution: current.decision.affectedExecution
+      });
     }
     logEvent(state, 'hypotheses_registered', { count: created.length });
     clearContinuation(state, 'register_hypotheses', { hypothesisIds: created });
@@ -2211,6 +4144,24 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     }
     logEvent(state, 'full_test', { id: tid, hypothesisId: h.id, verdict, lane: lane.id, noImproveBatches: lane.noImproveBatches });
     state.updatedAt = clock();
+    let mechanismReceipt = null;
+    let adaptiveApplication = null;
+    if (metaLearningEnabled(state)) {
+      // The receipt is derived only after the measured test exists in persisted state.
+      store.save(state);
+      mechanismReceipt = recordImprovementReceipt(state, {
+        hypothesisId: h.id,
+        testId: tid
+      });
+      if (activeMetaLearning(state) && mechanismReceipt.status === 'OK') {
+        adaptiveApplication = recordAdaptiveApplication(
+          state,
+          h,
+          state.tests.find((test) => test.id === tid),
+          mechanismReceipt.receipt
+        );
+      }
+    }
     const dash = writeDashboardForState(state);
     store.save(state);
     return ok(`Full test ${tid} for ${h.id}: quality ${agg.quality} vs baseline ${state.benchmark.baselineScore.quality}, tokenCost ${agg.tokenCost} vs ${state.benchmark.baselineScore.tokenCost}. Verdict ${verdict} (pre-reverify — not yet shippable). ${mv.message}${retirement ? ` Branch retired after ${retirement.batches} valid no-improvement batches — supervisor auto-pivoted to the next lane (NOT a stop).` : ''}`, {
@@ -2227,6 +4178,37 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       branchRetirement: { laneId: lane.id, noImproveBatches: lane.noImproveBatches, threshold: state.config.branchRetirementBatches, retired: !!retirement },
       retirement: retirement || undefined,
       advisory: advisory || undefined,
+      ...(mechanismReceipt && mechanismReceipt.status === 'OK'
+        ? {
+            mechanismReceipt: {
+              status: 'OK',
+              receiptId: mechanismReceipt.receiptId,
+              receiptSha256: mechanismReceipt.receiptSha256,
+              mechanismId: mechanismReceipt.mechanismId,
+              partition: mechanismReceipt.partition,
+              eligibleForRouting: mechanismReceipt.eligibleForRouting,
+              verdict: mechanismReceipt.verdict,
+              lifecycle: mechanismReceipt.lifecycle
+            }
+          }
+        : (mechanismReceipt && mechanismReceipt.status === 'FALLBACK'
+          ? { mechanismReceipt: { status: 'FALLBACK', code: 'META_POLICY_FALLBACK' } }
+          : {})),
+      ...(adaptiveApplication
+        ? {
+            adaptiveApplication: adaptiveApplication.status === 'OK'
+              ? {
+                  status: 'OK',
+                  ...adaptiveApplication.application,
+                  policy: adaptiveApplication.policy
+                }
+              : {
+                  status: adaptiveApplication.status,
+                  code: adaptiveApplication.code,
+                  stage: adaptiveApplication.stage
+                }
+          }
+        : {}),
       dashboardPath: dash.path,
       continuation: continuationPayload(state),
       next: retirement
@@ -2432,9 +4414,93 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (reverified) clearContinuation(state, 'reverify_run', { testId: test.id });
     logEvent(state, 'reverify', { testId: test.id, reverified });
     state.updatedAt = clock();
+    let mechanismReceipt = null;
+    let adaptiveApplication = null;
+    if (metaLearningEnabled(state)) {
+      store.save(state);
+      const replayEvidenceSha256 = sha256(canonicalMetaJson({
+        testId: test.id,
+        reverified,
+        recomputed,
+        problems
+      }));
+      mechanismReceipt = recordImprovementReceipt(state, {
+        hypothesisId: test.hypothesisId,
+        testId: test.id,
+        outcomeOverlay: {
+          observedAt: test.reverifiedAt,
+          valid: reverified,
+          ...(reverified ? {} : { verdict: 'invalid' }),
+          code: reverified ? 'REVERIFY_PASSED' : 'REVERIFY_FAILED',
+          transferChecks: [{
+            kind: 'freshReplay',
+            attempted: true,
+            passed: reverified,
+            evidenceSha256: replayEvidenceSha256
+          }]
+        }
+      });
+      if (activeMetaLearning(state) && mechanismReceipt.status === 'OK') {
+        const hypothesis = state.hypotheses.find((item) => item.id === test.hypothesisId);
+        adaptiveApplication = recordAdaptiveApplication(
+          state,
+          hypothesis,
+          test,
+          mechanismReceipt.receipt
+        );
+      }
+      writeDashboardForState(state);
+    }
     store.save(state);
-    if (!reverified) return blocked(BLOCK.NOT_REVERIFIED, `Reverify FAILED for ${test.id}: ${problems.join('; ')}. Promotion stays blocked until the winning evidence reproduces from sealed raw artifacts.`, { testId: test.id, problems });
-    return ok(`Reverify PASSED for ${test.id}: all ${test.agentRuns.length} raw artifacts re-hashed clean and metrics reproduce. Winning evidence is independently confirmed.`, { testId: test.id, reverified: true, continuation: continuationPayload(state) });
+    const mechanismReceiptView = mechanismReceipt && mechanismReceipt.status === 'OK'
+      ? {
+          status: 'OK',
+          receiptId: mechanismReceipt.receiptId,
+          receiptSha256: mechanismReceipt.receiptSha256,
+          mechanismId: mechanismReceipt.mechanismId,
+          partition: mechanismReceipt.partition,
+          eligibleForRouting: mechanismReceipt.eligibleForRouting,
+          verdict: mechanismReceipt.verdict,
+          lifecycle: mechanismReceipt.lifecycle
+        }
+      : (mechanismReceipt && mechanismReceipt.status === 'FALLBACK'
+        ? { status: 'FALLBACK', code: 'META_POLICY_FALLBACK' }
+        : null);
+    const adaptiveApplicationView = adaptiveApplication
+      ? (adaptiveApplication.status === 'OK'
+          ? {
+              status: 'OK',
+              ...adaptiveApplication.application,
+              policy: adaptiveApplication.policy
+            }
+          : {
+              status: adaptiveApplication.status,
+              code: adaptiveApplication.code,
+              stage: adaptiveApplication.stage
+            })
+      : null;
+    if (!reverified) {
+      return blocked(
+        BLOCK.NOT_REVERIFIED,
+        `Reverify FAILED for ${test.id}: ${problems.join('; ')}. Promotion stays blocked until the winning evidence reproduces from sealed raw artifacts.`,
+        {
+          testId: test.id,
+          problems,
+          ...(mechanismReceiptView ? { mechanismReceipt: mechanismReceiptView } : {}),
+          ...(adaptiveApplicationView ? { adaptiveApplication: adaptiveApplicationView } : {})
+        }
+      );
+    }
+    return ok(
+      `Reverify PASSED for ${test.id}: all ${test.agentRuns.length} raw artifacts re-hashed clean and metrics reproduce. Winning evidence is independently confirmed.`,
+      {
+        testId: test.id,
+        reverified: true,
+        ...(mechanismReceiptView ? { mechanismReceipt: mechanismReceiptView } : {}),
+        ...(adaptiveApplicationView ? { adaptiveApplication: adaptiveApplicationView } : {}),
+        continuation: continuationPayload(state)
+      }
+    );
   }
 
   function promotion_request(args = {}) {
@@ -2566,48 +4632,6 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     }
     // ===================== end Integrity Gate =====================
 
-    // ===================== Step 2 — mandatory operator approval =====================
-    // A pareto win that clears the integrity gate is NECESSARY but NOT SUFFICIENT.
-    // The champion ships only after the operator Approves it on the dashboard (out of
-    // band). The model can queue/list reviews but can NEVER resolve them (DASHBOARD_ONLY);
-    // resolution flows only through engine.operator.applyDashboardDecisions (the dashboard
-    // server's inbox). This closes auto-promotion: even a real, measured, reverified win
-    // cannot self-ship.
-    const promoReview = (state.humanReviews || []).find((r) => r.kind === 'promotion' && r.hypothesisId === h.id);
-    if (!promoReview) {
-      const rid = nextId(state, 'review', 'rev');
-      state.humanReviews.push({ id: rid, ts: clock(), status: 'PENDING', title: `promote ${h.id}`, kind: 'promotion', summary: `${decision.kind}: ${decision.message}`, hypothesisId: h.id, evidenceRef: best.id, loopId: null, loopContent: null, notes: null });
-      requireContinuation(state, 'promotion_needs_approval', `Promotion of ${h.id} won the pareto math and cleared integrity, but needs operator Approve on the dashboard; queue it and continue the next lane while it waits.`);
-      logEvent(state, 'promotion_review_queued', { reviewId: rid, hypothesisId: h.id });
-      state.updatedAt = clock();
-      const dash = writeDashboardForState(state);
-      store.save(state);
-      return blocked(BLOCK.PROMOTION_NEEDS_APPROVAL,
-        'Challenger won the pareto math but cannot ship without operator approval. Queue a promotion review.',
-        { queuedReviewId: rid, hypothesisId: h.id, reviewAuthority: 'dashboard-only', dashboardPath: dash.path, continuation: continuationPayload(state) });
-    }
-    if (promoReview.status === 'PENDING') {
-      state.updatedAt = clock();
-      store.save(state);
-      return blocked(BLOCK.PROMOTION_NEEDS_APPROVAL,
-        `Promotion of ${h.id} is queued for operator Approve on the dashboard (review ${promoReview.id}) and cannot ship yet.`,
-        { queuedReviewId: promoReview.id, hypothesisId: h.id, reviewAuthority: 'dashboard-only', continuation: continuationPayload(state) });
-    }
-    if (promoReview.status !== 'APPROVED') {
-      // SLUDGE / REJECTED → the operator declined this champion on the dashboard.
-      // NB: key is reviewStatus, not status — an extra `status` would clobber blocked()'s.
-      return blocked(BLOCK.PROMOTION_REJECTED,
-        `Promotion of ${h.id} was declined by the operator on the dashboard (${promoReview.status}).`,
-        { reviewId: promoReview.id, hypothesisId: h.id, reviewStatus: promoReview.status });
-    }
-    // Idempotency: an already-recorded approved promotion is not re-banked.
-    const existingPromo = (state.promotions || []).find((p) => p.hypothesisId === h.id);
-    if (existingPromo) {
-      return ok(`Promotion ${existingPromo.id} for ${h.id} already recorded (operator-approved).`, { promotionId: existingPromo.id, decision: { promote: true, kind: existingPromo.kind }, integrity: existingPromo.integrity, alreadyRecorded: true, continuation: continuationPayload(state) });
-    }
-    // promoReview.status === 'APPROVED' and not yet recorded → record the promotion below.
-    // ===================== end Step 2 approval gate =====================
-
     const defOverrides = (Array.isArray(def.integrityOverride) ? def.integrityOverride : (def.integrityOverride ? [def.integrityOverride] : []));
     const overridesApplied = defOverrides
       .map((o) => ({ o, v: findOverride({ integrityOverride: [o] }, o.guard) }))
@@ -2615,21 +4639,157 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       .map((x) => ({ guard: x.o.guard, scope: x.v.scope, fixture: !!x.v.fixture, reason: x.o.reason }));
     const fixtureOnly = overridesApplied.some((o) => o.fixture);
     const promotedClass = fixtureOnly ? ARTIFACT_CLASS.TEST_FIXTURE : cls.artifactClass;
+    const existingPromo = (state.promotions || []).find((p) => p.hypothesisId === h.id);
+    if (existingPromo) {
+      return ok(`Promotion ${existingPromo.id} for ${h.id} already recorded.`, {
+        promotionId: existingPromo.id,
+        decision: { promote: true, kind: existingPromo.kind },
+        integrity: existingPromo.integrity,
+        automaticPromotionDecisionId: existingPromo.automaticPromotionDecisionId || null,
+        alreadyRecorded: true,
+        continuation: continuationPayload(state)
+      });
+    }
+
+    let automaticDecision = null;
+    if (activeMetaLearning(state)) {
+      const automatic = automaticPromotionDisposition(state, h, best, decision, {
+        routeOutputs,
+        fixtureOnly
+      });
+      if (automatic.status !== 'OK') {
+        state.updatedAt = clock();
+        writeDashboardForState(state);
+        store.save(state);
+        return blocked(
+          'AUTOMATIC_PROMOTION_DECISION_FAILED',
+          'The adaptive promotion receipt could not be built and persisted; promotion failed closed.',
+          { reasonCode: automatic.code || null, stage: automatic.stage || null }
+        );
+      }
+      automaticDecision = automatic.decision;
+    }
+    const automaticAuthorized = automaticDecision?.eligible === true;
+
+    // Feature-off and shadow runs keep the historical human gate. Active runs may
+    // bypass it only when the deterministic, hash-bound supervisor receipt authorizes
+    // an internal champion. Missing, subjective, unsafe, or fixture evidence stays queued.
+    const promoReview = (state.humanReviews || []).find((r) => (
+      r.kind === 'promotion' && r.hypothesisId === h.id
+    ));
+    if (!automaticAuthorized) {
+      if (!promoReview) {
+        const rid = nextId(state, 'review', 'rev');
+        state.humanReviews.push({
+          id: rid,
+          ts: clock(),
+          status: 'PENDING',
+          title: `promote ${h.id}`,
+          kind: 'promotion',
+          summary: `${decision.kind}: ${decision.message}`,
+          hypothesisId: h.id,
+          evidenceRef: best.id,
+          loopId: null,
+          loopContent: null,
+          notes: automaticDecision
+            ? `Automatic disposition: ${automaticDecision.reasonCodes.join(', ')}`
+            : null
+        });
+        requireContinuation(state, 'promotion_needs_approval', `Promotion of ${h.id} needs operator review; queue it and continue the next lane while it waits.`);
+        logEvent(state, 'promotion_review_queued', {
+          reviewId: rid,
+          hypothesisId: h.id,
+          automaticPromotionDecisionId: automaticDecision?.automaticPromotionDecisionId || null
+        });
+        state.updatedAt = clock();
+        const dash = writeDashboardForState(state);
+        store.save(state);
+        return blocked(
+          BLOCK.PROMOTION_NEEDS_APPROVAL,
+          'Challenger won the frontier math but the automatic safety receipt did not authorize it. Queued for operator review.',
+          {
+            queuedReviewId: rid,
+            hypothesisId: h.id,
+            reviewAuthority: 'dashboard-only',
+            automaticPromotionDecisionId: automaticDecision?.automaticPromotionDecisionId || null,
+            automaticReasonCodes: automaticDecision?.reasonCodes || [],
+            dashboardPath: dash.path,
+            continuation: continuationPayload(state)
+          }
+        );
+      }
+      if (promoReview.status === 'PENDING') {
+        state.updatedAt = clock();
+        store.save(state);
+        return blocked(
+          BLOCK.PROMOTION_NEEDS_APPROVAL,
+          `Promotion of ${h.id} is queued for operator review (${promoReview.id}).`,
+          {
+            queuedReviewId: promoReview.id,
+            hypothesisId: h.id,
+            reviewAuthority: 'dashboard-only',
+            automaticPromotionDecisionId: automaticDecision?.automaticPromotionDecisionId || null,
+            continuation: continuationPayload(state)
+          }
+        );
+      }
+      if (promoReview.status !== 'APPROVED') {
+        return blocked(
+          BLOCK.PROMOTION_REJECTED,
+          `Promotion of ${h.id} was declined by the operator on the dashboard (${promoReview.status}).`,
+          { reviewId: promoReview.id, hypothesisId: h.id, reviewStatus: promoReview.status }
+        );
+      }
+    } else if (promoReview?.status === 'PENDING') {
+      promoReview.status = 'AUTO_APPROVED';
+      promoReview.resolvedAt = clock();
+      promoReview.notes = `Superseded by ${automaticDecision.automaticPromotionDecisionId}.`;
+    }
 
     const pid = nextId(state, 'promotion', 'promo');
     state.promotions.push({
       id: pid, hypothesisId: h.id, kind: decision.kind, baseline: state.benchmark.baselineScore, challenger,
-      deltas: decision.deltas, ts: clock(), authority: 'measured-frontier-movement', canonicalChange: false,
+      deltas: decision.deltas,
+      ts: clock(),
+      authority: automaticAuthorized
+        ? 'deterministic-supervisor-auto-bank'
+        : 'operator-approved-measured-frontier',
+      automaticPromotionDecisionId: automaticDecision?.automaticPromotionDecisionId || null,
+      canonicalChange: false,
       integrity: { passed: true, artifactClass: promotedClass, stoneEligible: !fixtureOnly, fixtureOnly, negativeControl: state.benchmark.negativeControl || null, overrides: overridesApplied },
-      note: "Disposition recorded as internal champion. Changing the operator's canonical loop file requires explicit operator authority (HUMAN-GATED); this tool never overwrites it."
+      note: "Disposition recorded as an internal champion. This tool never overwrites the operator's canonical loop."
     });
     h.status = 'PROMOTED_INTERNAL';
-    logEvent(state, 'promotion', { id: pid, hypothesisId: h.id, kind: decision.kind, fixtureOnly });
+    logEvent(state, 'promotion', {
+      id: pid,
+      hypothesisId: h.id,
+      kind: decision.kind,
+      fixtureOnly,
+      automatic: automaticAuthorized,
+      automaticPromotionDecisionId: automaticDecision?.automaticPromotionDecisionId || null
+    });
     requireContinuation(state, 'promotion', `Promotion ${pid} recorded as an internal champion; continue into the next bottleneck/lane while dashboard review stays available.`);
     state.updatedAt = clock();
     const dash = writeDashboardForState(state);
     store.save(state);
-    return ok(`PROMOTE ${h.id} (${decision.kind}): ${decision.message}. Recorded as internal champion. Changing the canonical loop still requires operator authority through the dashboard. The campaign remains active.`, { promotionId: pid, decision, integrity: { passed: true, artifactClass: promotedClass, stoneEligible: !fixtureOnly, fixtureOnly }, dashboardPath: dash.path, continuation: continuationPayload(state), next: continuationDirective(state) });
+    return ok(
+      `PROMOTE ${h.id} (${decision.kind}): ${decision.message}. Recorded as an internal champion; the canonical loop remains unchanged.`,
+      {
+        promotionId: pid,
+        decision,
+        automatic: automaticAuthorized,
+        automaticPromotionDecisionId: automaticDecision?.automaticPromotionDecisionId || null,
+        integrity: {
+          passed: true,
+          artifactClass: promotedClass,
+          stoneEligible: !fixtureOnly,
+          fixtureOnly
+        },
+        dashboardPath: dash.path,
+        continuation: continuationPayload(state),
+        next: continuationDirective(state)
+      }
+    );
   }
 
   function cycle_decision_request(args = {}) {
@@ -2718,6 +4878,7 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
       cyclesDone: (state.counters && state.counters.test) || 0,
       boundedComplete: boundedComplete(state),
       realTest: state.realTest ? clone(state.realTest) : null,
+      scheduler: state.scheduler ? clone(state.scheduler) : null,
       stopCondition: STOP_CONDITION_WARNING,
       continuation: continuationPayload(state)
     });
@@ -3534,7 +5695,22 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   // Operator-only surface — consumed by the apply-decisions CLI and the autonomous
   // supervisor, NEVER by the model. It is an object (not a top-level function), so the
   // tools/call dispatch (`engine[name]`, function-typed only) cannot reach it.
-  api.operator = { adoptLoop, rollbackLoop, recordSupervisorEvent, recordCampaignProgress, applyDashboardDecisions, applyInboxDecisions };
+  api.operator = {
+    adoptLoop,
+    rollbackLoop,
+    recordSupervisorEvent,
+    recordCampaignProgress,
+    applyDashboardDecisions,
+    applyInboxDecisions,
+    loadCampaignSchedulerCheckpoint,
+    recordCampaignSchedulerCheckpoint,
+    prepareMechanismRouting,
+    resumeMechanismRouting,
+    retireMechanismRouting,
+    importAdaptiveExecutableCanary,
+    recordAdaptiveControlEvidence,
+    advanceMetaPolicy
+  };
   // The autonomous supervisor: one call drives the whole campaign (intake → mine →
   // improve targets → bank Stones → advance/retire → re-mine) with the executor as
   // the real worker, validating every worker output through the enforcement boundary.

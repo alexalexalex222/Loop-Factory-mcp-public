@@ -7,14 +7,14 @@
     "primary": "gpt-5.6-sol",
     "testRoutes": [
       "gpt-5.6-sol",
-      "claude-opus-4-8",
-      "glm-5.2"
+      "claude-fable-5",
+      "gpt-5.6-terra"
     ],
     "builderRoutes": [
-      "claude-opus-4-8",
-      "glm-5.2"
+      "claude-fable-5",
+      "gpt-5.6-sol"
     ],
-    "judgeRoute": "claude-opus-4-8",
+    "judgeRoute": "claude-fable-5",
     "banlist": {
       "mode": "default",
       "extraDeny": [],

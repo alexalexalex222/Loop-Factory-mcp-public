@@ -1,21 +1,90 @@
 // Local-first persistence. Everything lives on the operator's own disk under a
 // home dir; nothing leaves the machine. State is plain JSON; artifacts (raw run
 // logs the benchmark measures) are separate files so they can be re-hashed during
-// reverify. Writes are atomic (tmp file + rename) so a crash can't corrupt state.
-import { mkdirSync, writeFileSync, readFileSync, renameSync, existsSync, readdirSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+// reverify. Writes are process-atomic by default; paid VNext launchers opt into
+// file-and-directory fsync so a power loss cannot roll back a dispatch barrier.
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  durableAtomicWriteFileSync,
+  durableRenameSync,
+  supportsPowerLossDurability
+} from './durable-file.mjs';
 import { isPortableId, isSafeId, portableId, safeId } from './util.mjs';
 import { parseSkillFile } from './skill-schema.mjs';
 
-export function createStore(homeDir) {
-  const runsRoot = resolve(homeDir, 'runs');
-  const loopsRoot = resolve(homeDir, 'custom-loops');
-  const skillsRoot = resolve(homeDir, 'skills');
+export const STORE_DURABILITY = Object.freeze({
+  PROCESS_ATOMIC: 'process-atomic',
+  POWER_LOSS: 'power-loss'
+});
+
+export function createStore(homeDir, {
+  durability = STORE_DURABILITY.PROCESS_ATOMIC
+} = {}) {
+  if (!Object.values(STORE_DURABILITY).includes(durability)) {
+    throw new Error(`Unsupported store durability: ${durability}`);
+  }
+  if (durability === STORE_DURABILITY.POWER_LOSS
+      && !supportsPowerLossDurability()) {
+    const error = new Error(
+      `Power-loss durability is unsupported on ${process.platform}.`
+    );
+    error.code = 'DURABLE_PLATFORM_UNSUPPORTED';
+    throw error;
+  }
+  const homeRoot = resolve(homeDir);
+  const runsRoot = resolve(homeRoot, 'runs');
+  const loopsRoot = resolve(homeRoot, 'custom-loops');
+  const skillsRoot = resolve(homeRoot, 'skills');
 
   function assertWithin(base, target, label) {
     const rel = relative(base, target);
     if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       throw new Error(`${label} escaped the super-loop home`);
+    }
+  }
+
+  function assertNoSymlinkPath(target, label) {
+    assertWithin(homeRoot, target, label);
+    if (!existsSync(homeRoot)) return;
+    const homeStat = lstatSync(homeRoot);
+    if (homeStat.isSymbolicLink() || !homeStat.isDirectory()) {
+      throw new Error(`${label} traversed an unsafe store home`);
+    }
+    let current = homeRoot;
+    const parts = relative(homeRoot, target).split(sep).filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      current = join(current, parts[index]);
+      if (!existsSync(current)) break;
+      const stat = lstatSync(current);
+      if (stat.isSymbolicLink()) throw new Error(`${label} traversed a symbolic link`);
+      if (index < parts.length - 1 && !stat.isDirectory()) {
+        throw new Error(`${label} traversed a non-directory path`);
+      }
+    }
+  }
+
+  function ensureDirectory(directory, label) {
+    assertWithin(homeRoot, directory, label);
+    if (!existsSync(homeRoot)) mkdirSync(homeRoot, { recursive: true });
+    assertNoSymlinkPath(homeRoot, label);
+    let current = homeRoot;
+    for (const part of relative(homeRoot, directory).split(sep).filter(Boolean)) {
+      current = join(current, part);
+      if (!existsSync(current)) mkdirSync(current);
+      const stat = lstatSync(current);
+      if (stat.isSymbolicLink()) throw new Error(`${label} traversed a symbolic link`);
+      if (!stat.isDirectory()) throw new Error(`${label} requires ordinary directories`);
     }
   }
 
@@ -45,13 +114,29 @@ export function createStore(homeDir) {
   }
 
   function atomicWrite(path, contents) {
-    const tmp = `${path}.tmp`;
-    writeFileSync(tmp, contents);
-    renameSync(tmp, path);
+    assertNoSymlinkPath(path, 'store write');
+    if (durability === STORE_DURABILITY.POWER_LOSS) {
+      durableAtomicWriteFileSync(path, contents);
+      return;
+    }
+    const tmp = join(
+      dirname(path),
+      `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`
+    );
+    try {
+      writeFileSync(tmp, contents, { flag: 'wx' });
+      renameSync(tmp, path);
+    } catch (error) {
+      try { unlinkSync(tmp); } catch (cleanupError) {
+        if (cleanupError?.code !== 'ENOENT') throw cleanupError;
+      }
+      throw error;
+    }
   }
 
   function namesUnder(root) {
     if (!existsSync(root)) return [];
+    assertNoSymlinkPath(root, 'store listing');
     try { return readdirSync(root); } catch { return []; }
   }
 
@@ -77,6 +162,7 @@ export function createStore(homeDir) {
 
   return {
     homeDir,
+    durability,
     runDir,
 
     runIdCollision(runId) {
@@ -84,13 +170,15 @@ export function createStore(homeDir) {
     },
 
     exists(runId) {
-      return exactEntry(runsRoot, String(runId)) && existsSync(statePath(runId));
+      const path = statePath(runId);
+      assertNoSymlinkPath(path, 'run state');
+      return exactEntry(runsRoot, String(runId)) && existsSync(path);
     },
 
     save(state) {
       assertNewPortableEntry(runsRoot, state.runId, 'runId');
-      mkdirSync(runDir(state.runId), { recursive: true });
-      mkdirSync(artifactsDir(state.runId), { recursive: true });
+      ensureDirectory(runDir(state.runId), 'run directory');
+      ensureDirectory(artifactsDir(state.runId), 'artifact directory');
       atomicWrite(statePath(state.runId), JSON.stringify(state, null, 2));
       return state;
     },
@@ -102,45 +190,56 @@ export function createStore(homeDir) {
 
     listRuns() {
       if (!existsSync(runsRoot)) return [];
+      assertNoSymlinkPath(runsRoot, 'run listing');
       return readdirSync(runsRoot).filter((name) => isSafeId(name) && existsSync(statePath(name)));
     },
 
     /** Persist a raw artifact (run log, baseline copy, measurement record). */
     writeArtifact(runId, artifactId, record) {
-      mkdirSync(artifactsDir(runId), { recursive: true });
+      ensureDirectory(artifactsDir(runId), 'artifact directory');
       atomicWrite(artifactPath(runId, artifactId), JSON.stringify(record, null, 2));
       return artifactId;
     },
 
     readArtifact(runId, artifactId) {
       const path = artifactPath(runId, artifactId);
+      assertNoSymlinkPath(path, 'artifact read');
       if (!existsSync(path)) return null;
       return JSON.parse(readFileSync(path, 'utf8'));
     },
 
     /** Write a human-facing file (dashboard.html / report.md) into the run dir. */
     writeRunFile(runId, relPath, contents) {
-      mkdirSync(runDir(runId), { recursive: true });
+      ensureDirectory(runDir(runId), 'run directory');
       const full = runFilePath(runId, relPath);
-      mkdirSync(dirname(full), { recursive: true });
+      ensureDirectory(dirname(full), 'run file directory');
       atomicWrite(full, contents);
       return full;
     },
     readRunFile(runId, relPath) {
       const full = runFilePath(runId, relPath);
+      assertNoSymlinkPath(full, 'run file read');
       if (!existsSync(full)) return null;
       try { return readFileSync(full, 'utf8'); } catch { return null; }
     },
     runFileExists(runId, relPath) {
-      return existsSync(runFilePath(runId, relPath));
+      const full = runFilePath(runId, relPath);
+      assertNoSymlinkPath(full, 'run file existence check');
+      return existsSync(full);
     },
     // Atomically move a run file (used to archive a consumed inbox so it is not re-applied).
     moveRunFile(runId, fromRel, toRel) {
       const from = runFilePath(runId, fromRel);
+      assertNoSymlinkPath(from, 'run file move source');
       if (!existsSync(from)) return false;
       const to = runFilePath(runId, toRel);
-      mkdirSync(dirname(to), { recursive: true });
-      renameSync(from, to);
+      ensureDirectory(dirname(to), 'run file move destination');
+      assertNoSymlinkPath(to, 'run file move destination');
+      if (durability === STORE_DURABILITY.POWER_LOSS) {
+        durableRenameSync(from, to);
+      } else {
+        renameSync(from, to);
+      }
       return true;
     },
 
@@ -161,18 +260,20 @@ export function createStore(homeDir) {
     },
     writeLoop(record) {
       assertNewPortableEntry(loopsRoot, record.id, 'loopId', '.json');
-      mkdirSync(loopsRoot, { recursive: true });
+      ensureDirectory(loopsRoot, 'loop library');
       atomicWrite(this.loopPath(record.id), JSON.stringify(record, null, 2));
       return record.id;
     },
     readLoop(loopId) {
       if (!isSafeId(loopId)) return null;
       const path = this.loopPath(loopId);
+      assertNoSymlinkPath(path, 'loop read');
       if (!existsSync(path)) return null;
       return JSON.parse(readFileSync(path, 'utf8'));
     },
     listLoops() {
       if (!existsSync(loopsRoot)) return [];
+      assertNoSymlinkPath(loopsRoot, 'loop listing');
       return readdirSync(loopsRoot)
         .filter((f) => f.endsWith('.json'))
         .map((f) => f.slice(0, -5))
@@ -199,19 +300,21 @@ export function createStore(homeDir) {
     },
     writeSkill(record) {
       assertNewPortableEntry(skillsRoot, record.id, 'skillId', '.md');
-      mkdirSync(skillsRoot, { recursive: true });
+      ensureDirectory(skillsRoot, 'skill library');
       atomicWrite(this.skillPath(record.id), record.content);
       return record.id;
     },
     readSkill(skillId) {
       if (!isSafeId(skillId)) return null;
       const path = this.skillPath(skillId);
+      assertNoSymlinkPath(path, 'skill read');
       if (!existsSync(path)) return null;
       const raw = readFileSync(path, 'utf8');
       return splitSkillMarkdown(raw);
     },
     listSkills() {
       if (!existsSync(skillsRoot)) return [];
+      assertNoSymlinkPath(skillsRoot, 'skill listing');
       return readdirSync(skillsRoot)
         .filter((f) => f.endsWith('.md'))
         .map((f) => f.slice(0, -3))
@@ -219,30 +322,37 @@ export function createStore(homeDir) {
     },
     writeIndex(skillId, obj) {
       assertNewPortableEntry(skillsRoot, skillId, 'skillId', '.index.json');
-      mkdirSync(skillsRoot, { recursive: true });
+      ensureDirectory(skillsRoot, 'skill library');
       atomicWrite(this.indexPath(skillId), JSON.stringify(obj, null, 2));
       return skillId;
     },
     readIndex(skillId) {
       if (!isSafeId(skillId)) return null;
       const path = this.indexPath(skillId);
+      assertNoSymlinkPath(path, 'skill index read');
       if (!existsSync(path)) return null;
       return JSON.parse(readFileSync(path, 'utf8'));
     },
     archiveSkill(skillId) {
       const archiveDir = join(skillsRoot, 'archive');
-      mkdirSync(archiveDir, { recursive: true });
+      ensureDirectory(archiveDir, 'skill archive');
       const mdPath = this.skillPath(skillId);
+      assertNoSymlinkPath(mdPath, 'skill archive source');
       if (!existsSync(mdPath)) return false;
       const parsed = splitSkillMarkdown(readFileSync(mdPath, 'utf8'));
       const index = this.readIndex(skillId);
       const version = index?.version ?? parsed.frontmatter.version ?? 1;
       const digest = index?.sha256 ?? parsed.frontmatter.sha256 ?? 'unknown';
       const prefix = `${safeId(skillId, 'skillId')}-v${version}-${String(digest).slice(0, 12)}`;
-      renameSync(mdPath, join(archiveDir, `${prefix}.md`));
+      const archivedMarkdown = join(archiveDir, `${prefix}.md`);
+      assertNoSymlinkPath(archivedMarkdown, 'skill archive destination');
+      renameSync(mdPath, archivedMarkdown);
       const idxPath = this.indexPath(skillId);
       if (existsSync(idxPath)) {
-        renameSync(idxPath, join(archiveDir, `${prefix}.index.json`));
+        const archivedIndex = join(archiveDir, `${prefix}.index.json`);
+        assertNoSymlinkPath(idxPath, 'skill index archive source');
+        assertNoSymlinkPath(archivedIndex, 'skill index archive destination');
+        renameSync(idxPath, archivedIndex);
       }
       return true;
     }

@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "executable-interface-contract-v1",
+  "title": "Worker-visible executable repair interface",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "exportName",
+    "inputPaths",
+    "decisions",
+    "codes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "executable-interface-contract-v1"
+    },
+    "exportName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_$][A-Za-z0-9_$]{0,79}$"
+    },
+    "inputPaths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 120,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(\\[\\])?(\\.[A-Za-z_$][A-Za-z0-9_$]*(\\[\\])?)*$"
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["ACCEPT", "REJECT"]
+      },
+      "allOf": [
+        { "contains": { "const": "ACCEPT" } },
+        { "contains": { "const": "REJECT" } }
+      ]
+    },
+    "codes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "meaning"],
+        "properties": {
+          "value": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,119}$"
+          },
+          "meaning": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 500
+          }
+        }
+      }
+    }
+  }
+}

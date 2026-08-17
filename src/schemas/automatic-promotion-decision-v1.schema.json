@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "automatic-promotion-decision-v1",
+  "title": "Supervisor-owned deterministic internal promotion decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "automaticPromotionDecisionId",
+    "automaticPromotionDecisionSha256",
+    "source",
+    "evidence",
+    "routing",
+    "gates",
+    "eligible",
+    "disposition",
+    "reasonCodes",
+    "promotionAuthorized",
+    "canonicalChange"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "automatic-promotion-decision-v1" },
+    "automaticPromotionDecisionId": {
+      "type": "string",
+      "pattern": "^auto-promo-[a-f0-9]{24}$"
+    },
+    "automaticPromotionDecisionSha256": { "$ref": "#/definitions/sha256" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "hypothesisId", "testId"],
+      "properties": {
+        "runId": { "$ref": "#/definitions/safeId" },
+        "hypothesisId": { "$ref": "#/definitions/safeId" },
+        "testId": { "$ref": "#/definitions/safeId" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmarkSha256",
+        "baselineSha256",
+        "challengerSha256",
+        "qualityAuthority",
+        "deterministicOracle",
+        "reverified",
+        "qualityDelta",
+        "tokenCostDeltaPct",
+        "controlRegressions",
+        "fixtureOnly"
+      ],
+      "properties": {
+        "benchmarkSha256": { "$ref": "#/definitions/sha256" },
+        "baselineSha256": { "$ref": "#/definitions/sha256" },
+        "challengerSha256": { "$ref": "#/definitions/sha256" },
+        "qualityAuthority": { "$ref": "#/definitions/kind" },
+        "deterministicOracle": { "type": "boolean" },
+        "reverified": { "type": "boolean" },
+        "qualityDelta": { "$ref": "#/definitions/nullableNumber" },
+        "tokenCostDeltaPct": { "$ref": "#/definitions/nullableNumber" },
+        "controlRegressions": { "type": ["integer", "null"] },
+        "fixtureOnly": { "type": "boolean" }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routingDecisionId",
+        "routingDecisionSha256",
+        "policyEpochId",
+        "policyEpochSha256"
+      ],
+      "properties": {
+        "routingDecisionId": {
+          "type": ["string", "null"],
+          "pattern": "^route-[a-f0-9]{24}$"
+        },
+        "routingDecisionSha256": { "$ref": "#/definitions/nullableSha256" },
+        "policyEpochId": {
+          "type": ["string", "null"],
+          "pattern": "^epoch-[a-f0-9]{24}$"
+        },
+        "policyEpochSha256": { "$ref": "#/definitions/nullableSha256" }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "passed", "evidenceSha256"],
+        "properties": {
+          "code": { "$ref": "#/definitions/reason" },
+          "passed": { "type": "boolean" },
+          "evidenceSha256": { "$ref": "#/definitions/nullableSha256" }
+        }
+      }
+    },
+    "eligible": { "type": "boolean" },
+    "disposition": { "enum": ["AUTO_BANK_INTERNAL", "QUEUE_HUMAN_REVIEW"] },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/reason" }
+    },
+    "promotionAuthorized": { "type": "boolean" },
+    "canonicalChange": { "const": false }
+  },
+  "definitions": {
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableSha256": {
+      "anyOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }]
+    },
+    "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$" },
+    "reason": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" },
+    "nullableNumber": { "type": ["number", "null"] }
+  }
+}

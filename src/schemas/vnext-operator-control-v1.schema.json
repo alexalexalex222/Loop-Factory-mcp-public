@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-operator-control-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revision", "previousProjectionSha256", "actionId", "actionSha256", "appliedAt", "disposition", "quarantinedFamilyIds", "shadowOnlyFamilyIds", "policyOverride", "activationAuthorized", "promotionAuthorized", "projectionSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-operator-control-v1" }, "revision": { "type": "integer", "minimum": 0 }, "previousProjectionSha256": { "$ref": "#/$defs/nullableSha" }, "actionId": { "anyOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] }, "actionSha256": { "$ref": "#/$defs/nullableSha" }, "appliedAt": { "type": "string", "format": "date-time" }, "disposition": { "$ref": "#/$defs/id" },
+    "quarantinedFamilyIds": { "$ref": "#/$defs/families" }, "shadowOnlyFamilyIds": { "$ref": "#/$defs/families" },
+    "policyOverride": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["id", "sha256", "scopeId"], "properties": { "id": { "type": "string", "pattern": "^epoch-[a-f0-9]{24}$" }, "sha256": { "$ref": "#/$defs/sha" }, "scopeId": { "$ref": "#/$defs/id" } } }] },
+    "activationAuthorized": { "const": false }, "promotionAuthorized": { "const": false }, "projectionSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": { "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "nullableSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }, "families": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^family-[a-f0-9]{24}$" } } }
+}

@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-wave-event-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sequence",
+    "seriesRunId",
+    "waveId",
+    "type",
+    "at",
+    "detail",
+    "detailSha256",
+    "previousEventSha256",
+    "eventSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-wave-event-v1" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "seriesRunId": { "$ref": "#/$defs/id" },
+    "waveId": { "$ref": "#/$defs/id" },
+    "type": {
+      "enum": [
+        "WAVE_STARTED",
+        "PREPARATION_DISPATCHED",
+        "PREPARATION_PERSISTED",
+        "PREPARATION_REJECTED",
+        "EXECUTION_BOUND",
+        "EXPERIMENT_DISPATCHED",
+        "EXPERIMENT_VERIFIED",
+        "IMPORT_PERSISTED",
+        "RESULT_PERSISTED",
+        "WAVE_BLOCKED"
+      ]
+    },
+    "at": { "type": "string", "format": "date-time" },
+    "detail": {},
+    "detailSha256": { "$ref": "#/$defs/sha" },
+    "previousEventSha256": { "$ref": "#/$defs/nullableSha" },
+    "eventSha256": { "$ref": "#/$defs/sha" }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "type": { "const": "WAVE_STARTED" },
+            "detail": { "$ref": "#/$defs/startedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "PREPARATION_DISPATCHED" },
+            "detail": { "$ref": "#/$defs/preparationDispatchedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "PREPARATION_PERSISTED" },
+            "detail": { "$ref": "#/$defs/preparationPersistedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "PREPARATION_REJECTED" },
+            "detail": { "$ref": "#/$defs/preparationRejectedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "EXECUTION_BOUND" },
+            "detail": { "$ref": "#/$defs/executionBoundDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "EXPERIMENT_DISPATCHED" },
+            "detail": { "$ref": "#/$defs/experimentDispatchedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "EXPERIMENT_VERIFIED" },
+            "detail": { "$ref": "#/$defs/experimentVerifiedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "IMPORT_PERSISTED" },
+            "detail": { "$ref": "#/$defs/importPersistedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "RESULT_PERSISTED" },
+            "detail": { "$ref": "#/$defs/resultPersistedDetail" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "WAVE_BLOCKED" },
+            "detail": { "$ref": "#/$defs/blockedDetail" }
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
+    },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableSha": {
+      "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }]
+    },
+    "startedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wavePlanSha256", "waveInputEvidenceSha256"],
+      "properties": {
+        "wavePlanSha256": { "$ref": "#/$defs/sha" },
+        "waveInputEvidenceSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "preparationDispatchedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparationRunId", "budgetPolicySha256"],
+      "properties": {
+        "preparationRunId": { "$ref": "#/$defs/id" },
+        "budgetPolicySha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "preparationPersistedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparationRunId", "preparationEvidenceSha256"],
+      "properties": {
+        "preparationRunId": { "$ref": "#/$defs/id" },
+        "preparationEvidenceSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "preparationRejectedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "preparationEvidenceSha256"],
+      "properties": {
+        "disposition": { "type": "string", "minLength": 1 },
+        "preparationEvidenceSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "executionBoundDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindingSha256", "candidateFamilySha256", "evolutionSha256"],
+      "properties": {
+        "bindingSha256": { "$ref": "#/$defs/sha" },
+        "candidateFamilySha256": { "$ref": "#/$defs/sha" },
+        "evolutionSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "experimentDispatchedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experimentRunId", "experimentPlanSha256", "maximumCalls"],
+      "properties": {
+        "experimentRunId": { "$ref": "#/$defs/id" },
+        "experimentPlanSha256": { "$ref": "#/$defs/sha" },
+        "maximumCalls": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "experimentVerifiedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experimentRunId", "experimentEvidenceSha256", "leaseEvidenceSha256"],
+      "properties": {
+        "experimentRunId": { "$ref": "#/$defs/id" },
+        "experimentEvidenceSha256": { "$ref": "#/$defs/sha" },
+        "leaseEvidenceSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "importPersistedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordId",
+        "recordSha256",
+        "evidenceLedgerSha256",
+        "catalogRecordSetSha256"
+      ],
+      "properties": {
+        "recordId": { "$ref": "#/$defs/id" },
+        "recordSha256": { "$ref": "#/$defs/sha" },
+        "evidenceLedgerSha256": { "$ref": "#/$defs/sha" },
+        "catalogRecordSetSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "resultPersistedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receiptSha256"],
+      "properties": { "receiptSha256": { "$ref": "#/$defs/sha" } }
+    },
+    "blockedDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/id" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    }
+  }
+}

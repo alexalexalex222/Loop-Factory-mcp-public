@@ -1,0 +1,1086 @@
+{
+  "schemaVersion": "loop-factory-vnext-offline-retrieval-evidence-v1",
+  "generatedAt": "2026-08-05T06:00:00.000Z",
+  "fixtureOnly": true,
+  "historicalOutcomeAuthority": false,
+  "generalizedImprovementClaim": false,
+  "purpose": "Contract and leakage-resistance ablation only.",
+  "report": {
+    "schemaVersion": "vnext-retrieval-benchmark-v1",
+    "chronological": true,
+    "leakageResistant": true,
+    "fixtureOnly": true,
+    "k": 2,
+    "strategyIds": [
+      "current-deterministic-router",
+      "lexical-only",
+      "semantic-only",
+      "llm-only-unfiltered",
+      "hybrid-ranked",
+      "hybrid-diversity-negative"
+    ],
+    "caseCount": 8,
+    "caseResults": [
+      {
+        "caseId": "offline-01-incident-triage",
+        "queryAt": "2026-08-01T12:00:00.000Z",
+        "caseSha256": "dc22d6513e6257f44ae34adce7b184cccadc2a121dbe8dd11d5a134996c0ccbb",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-968e6fb2d2b86e56c0a8c037",
+              "mech-8d50788f2ead1b183926560c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 0,
+            "harmfulRetrievalRate": 0.5,
+            "reciprocalRank": 1,
+            "ndcgAtK": 0.8879528281859163,
+            "downstreamUtility": 0.5,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-909a791feb7d88e626528738",
+              "mech-968e6fb2d2b86e56c0a8c037"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 0.5,
+            "ndcgAtK": 0.7378264247076021,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-968e6fb2d2b86e56c0a8c037",
+              "mech-909a791feb7d88e626528738"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-968e6fb2d2b86e56c0a8c037",
+              "mech-909a791feb7d88e626528738"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-968e6fb2d2b86e56c0a8c037",
+              "mech-909a791feb7d88e626528738"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-968e6fb2d2b86e56c0a8c037",
+              "mech-909a791feb7d88e626528738"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-02-schema-integrity",
+        "queryAt": "2026-08-02T12:00:00.000Z",
+        "caseSha256": "e3e616effb51295c7941e3ac9c9c477362af97d0c023581eae8f8d1ffa0af0ff",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-5d4df260e575843654afb1a2",
+              "mech-7f9d6a1ad6a0d73f19ece645"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-5d4df260e575843654afb1a2",
+              "mech-7f9d6a1ad6a0d73f19ece645"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-5d4df260e575843654afb1a2",
+              "mech-7f9d6a1ad6a0d73f19ece645"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-5d4df260e575843654afb1a2",
+              "mech-7f9d6a1ad6a0d73f19ece645"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-5d4df260e575843654afb1a2",
+              "mech-7f9d6a1ad6a0d73f19ece645"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-5d4df260e575843654afb1a2",
+              "mech-7f9d6a1ad6a0d73f19ece645"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-03-context-saturation",
+        "queryAt": "2026-08-03T12:00:00.000Z",
+        "caseSha256": "fa826c97b09decfa9b4385cef62f08638b467634e947d1c459d7122d1861d57b",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-9daa96efe153c17496b72058",
+              "mech-355290ecb50271625a01e280"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 0,
+            "harmfulRetrievalRate": 0.5,
+            "reciprocalRank": 1,
+            "ndcgAtK": 0.8879528281859163,
+            "downstreamUtility": 0.5,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-7bc62f11dff25598274c4f3a",
+              "mech-9daa96efe153c17496b72058"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 0.5,
+            "ndcgAtK": 0.7378264247076021,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-9daa96efe153c17496b72058",
+              "mech-7bc62f11dff25598274c4f3a"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-9daa96efe153c17496b72058",
+              "mech-7bc62f11dff25598274c4f3a"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-9daa96efe153c17496b72058",
+              "mech-7bc62f11dff25598274c4f3a"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-9daa96efe153c17496b72058",
+              "mech-7bc62f11dff25598274c4f3a"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-04-evaluator-isolation",
+        "queryAt": "2026-08-04T12:00:00.000Z",
+        "caseSha256": "5f73b9e89b588c56658af64ca9228c5316758ec9c41b5a90a944c72a2be481a8",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-1e881048d80d95d92664c83b",
+              "mech-a6a7a7d3bdce5fd88bebdff6"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-1e881048d80d95d92664c83b",
+              "mech-a6a7a7d3bdce5fd88bebdff6"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-1e881048d80d95d92664c83b",
+              "mech-a6a7a7d3bdce5fd88bebdff6"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-1e881048d80d95d92664c83b",
+              "mech-a6a7a7d3bdce5fd88bebdff6"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-1e881048d80d95d92664c83b",
+              "mech-a6a7a7d3bdce5fd88bebdff6"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-1e881048d80d95d92664c83b",
+              "mech-a6a7a7d3bdce5fd88bebdff6"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-05-routing-contradiction",
+        "queryAt": "2026-08-05T12:00:00.000Z",
+        "caseSha256": "8e9fb9ecf98cecc7d87ee67a005d41de8560f9837f33e5ff4baec17654570618",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-61d03d7672b698e4773a095d",
+              "mech-efd75d7c0cd87dd149613f6c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-61d03d7672b698e4773a095d",
+              "mech-efd75d7c0cd87dd149613f6c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-61d03d7672b698e4773a095d",
+              "mech-efd75d7c0cd87dd149613f6c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-61d03d7672b698e4773a095d",
+              "mech-efd75d7c0cd87dd149613f6c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-61d03d7672b698e4773a095d",
+              "mech-efd75d7c0cd87dd149613f6c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-61d03d7672b698e4773a095d",
+              "mech-efd75d7c0cd87dd149613f6c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-06-crash-recovery",
+        "queryAt": "2026-08-06T12:00:00.000Z",
+        "caseSha256": "983f3c184f699987bdfbf41eebe59dc18e915c69e908db3f3c45d9daf1a27e94",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-7edb60fb40b9fc8e84e6c57d",
+              "mech-1c0145543cc95091ee6a3f5f"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 0,
+            "harmfulRetrievalRate": 0.5,
+            "reciprocalRank": 1,
+            "ndcgAtK": 0.8879528281859163,
+            "downstreamUtility": 0.5,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-7edb60fb40b9fc8e84e6c57d",
+              "mech-b3d5e7daf927ba061e293b18"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-7edb60fb40b9fc8e84e6c57d",
+              "mech-b3d5e7daf927ba061e293b18"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-7edb60fb40b9fc8e84e6c57d",
+              "mech-b3d5e7daf927ba061e293b18"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-7edb60fb40b9fc8e84e6c57d",
+              "mech-b3d5e7daf927ba061e293b18"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-7edb60fb40b9fc8e84e6c57d",
+              "mech-b3d5e7daf927ba061e293b18"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-07-operator-control",
+        "queryAt": "2026-08-07T12:00:00.000Z",
+        "caseSha256": "b4d676792f95eda331fd052c3feec20d59b3b112a186b9376f22890264e8dbd3",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-a6e8ecfbc08f7fee44e41de8",
+              "mech-ca45c78ae7b49f1d8e4e5e0c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 0,
+            "harmfulRetrievalRate": 0.5,
+            "reciprocalRank": 1,
+            "ndcgAtK": 0.8879528281859163,
+            "downstreamUtility": 0.5,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-a6e8ecfbc08f7fee44e41de8",
+              "mech-fb0a93e272689d4eaa77e05e"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-a6e8ecfbc08f7fee44e41de8",
+              "mech-fb0a93e272689d4eaa77e05e"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-a6e8ecfbc08f7fee44e41de8",
+              "mech-fb0a93e272689d4eaa77e05e"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-a6e8ecfbc08f7fee44e41de8",
+              "mech-fb0a93e272689d4eaa77e05e"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-a6e8ecfbc08f7fee44e41de8",
+              "mech-fb0a93e272689d4eaa77e05e"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      },
+      {
+        "caseId": "offline-08-transfer-check",
+        "queryAt": "2026-08-08T12:00:00.000Z",
+        "caseSha256": "50ba63d19e31c4ecf69abda9308e038a44f80bbeb921e06a13191ecfefb7432b",
+        "futureRecordCount": 1,
+        "strategies": {
+          "current-deterministic-router": {
+            "selectedIds": [
+              "mech-5998e8c18ae944f026bda930",
+              "mech-e7a60c3feb624f285bee284b"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 0,
+            "harmfulRetrievalRate": 0.5,
+            "reciprocalRank": 1,
+            "ndcgAtK": 0.8879528281859163,
+            "downstreamUtility": 0.5,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "lexical-only": {
+            "selectedIds": [
+              "mech-5998e8c18ae944f026bda930",
+              "mech-e7ecd0eb5ac4a5af3669be7c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "semantic-only": {
+            "selectedIds": [
+              "mech-5998e8c18ae944f026bda930",
+              "mech-e7ecd0eb5ac4a5af3669be7c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "llm-only-unfiltered": {
+            "selectedIds": [
+              "mech-5998e8c18ae944f026bda930",
+              "mech-e7ecd0eb5ac4a5af3669be7c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-ranked": {
+            "selectedIds": [
+              "mech-5998e8c18ae944f026bda930",
+              "mech-e7ecd0eb5ac4a5af3669be7c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          },
+          "hybrid-diversity-negative": {
+            "selectedIds": [
+              "mech-5998e8c18ae944f026bda930",
+              "mech-e7ecd0eb5ac4a5af3669be7c"
+            ],
+            "beneficialRecallAtK": 1,
+            "negativeRecallAtK": 1,
+            "harmfulRetrievalRate": 0,
+            "reciprocalRank": 1,
+            "ndcgAtK": 1,
+            "downstreamUtility": 1.2,
+            "downstreamSuccess": true,
+            "selectedCount": 2,
+            "cost": {
+              "tokens": 0,
+              "latencyMs": 0,
+              "costUsd": 0
+            }
+          }
+        }
+      }
+    ],
+    "summary": {
+      "current-deterministic-router": {
+        "beneficialRecallAtK": 1,
+        "negativeRecallAtK": 0.375,
+        "harmfulRetrievalRate": 0.3125,
+        "reciprocalRank": 1,
+        "ndcgAtK": 0.9299705176161978,
+        "downstreamUtility": 0.7625000000000001,
+        "downstreamSuccessRate": 1,
+        "caseCount": 8,
+        "tokens": 0,
+        "latencyMs": 0,
+        "costUsd": 0
+      },
+      "lexical-only": {
+        "beneficialRecallAtK": 1,
+        "negativeRecallAtK": 1,
+        "harmfulRetrievalRate": 0,
+        "reciprocalRank": 0.875,
+        "ndcgAtK": 0.9344566061769005,
+        "downstreamUtility": 1.2,
+        "downstreamSuccessRate": 1,
+        "caseCount": 8,
+        "tokens": 0,
+        "latencyMs": 0,
+        "costUsd": 0
+      },
+      "semantic-only": {
+        "beneficialRecallAtK": 1,
+        "negativeRecallAtK": 1,
+        "harmfulRetrievalRate": 0,
+        "reciprocalRank": 1,
+        "ndcgAtK": 1,
+        "downstreamUtility": 1.2,
+        "downstreamSuccessRate": 1,
+        "caseCount": 8,
+        "tokens": 0,
+        "latencyMs": 0,
+        "costUsd": 0
+      },
+      "llm-only-unfiltered": {
+        "beneficialRecallAtK": 1,
+        "negativeRecallAtK": 1,
+        "harmfulRetrievalRate": 0,
+        "reciprocalRank": 1,
+        "ndcgAtK": 1,
+        "downstreamUtility": 1.2,
+        "downstreamSuccessRate": 1,
+        "caseCount": 8,
+        "tokens": 0,
+        "latencyMs": 0,
+        "costUsd": 0
+      },
+      "hybrid-ranked": {
+        "beneficialRecallAtK": 1,
+        "negativeRecallAtK": 1,
+        "harmfulRetrievalRate": 0,
+        "reciprocalRank": 1,
+        "ndcgAtK": 1,
+        "downstreamUtility": 1.2,
+        "downstreamSuccessRate": 1,
+        "caseCount": 8,
+        "tokens": 0,
+        "latencyMs": 0,
+        "costUsd": 0
+      },
+      "hybrid-diversity-negative": {
+        "beneficialRecallAtK": 1,
+        "negativeRecallAtK": 1,
+        "harmfulRetrievalRate": 0,
+        "reciprocalRank": 1,
+        "ndcgAtK": 1,
+        "downstreamUtility": 1.2,
+        "downstreamSuccessRate": 1,
+        "caseCount": 8,
+        "tokens": 0,
+        "latencyMs": 0,
+        "costUsd": 0
+      }
+    },
+    "activationAuthority": false,
+    "noModelCallsDuringReplay": true,
+    "reportSha256": "253f60b9f06d903e1fc95edaedafc5aa7bff7e32b3a0a8cdc3cfde8a4d7da47c"
+  },
+  "artifactSha256": "b12ffe5444f5a630637978013fa4722ee28263d022eb5ff8077f6653f9696436"
+}

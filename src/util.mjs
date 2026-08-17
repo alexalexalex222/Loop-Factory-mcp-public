@@ -1,6 +1,7 @@
 // Tiny shared helpers. No state, no surprises.
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import { isAbsolute, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** sha256 hex of a string or Buffer. */
@@ -89,6 +90,12 @@ export function portableId(value, label = 'id') {
     throw new Error(`${label} must be a portable filesystem id (not a Windows device name and no trailing period)`);
   }
   return id;
+}
+
+/** Reject absolute paths from either path grammar, regardless of host OS. */
+export function isAbsoluteOnAnyPlatform(value) {
+  const path = String(value || '');
+  return isAbsolute(path) || win32.isAbsolute(path);
 }
 
 /** Minimal HTML escaping so untrusted transcript text can never become markup. */

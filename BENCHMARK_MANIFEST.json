@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "loop-factory-vnext-benchmark-manifest-v1",
+  "generatedAt": "2026-08-17T13:14:44.000Z",
+  "status": "BLOCKED_PENDING_LIVE_ABLATIONS_AND_EXTERNAL_CUSTODIAN",
+  "repository": {
+    "startingCommit": "1b9dbb6d0dab9797f4f5e70ebb26c05ca311b9fb",
+    "branch": "vnext-public-integration-20260816",
+    "dirty": true,
+    "gitStatusSha256": "056ba88eab388600926258719e04cef588b0aba79e7922a3375973169f7d5518",
+    "sourceTreeSha256": "2f2db58401d8b5f7e597417069025999c98e261fad838db50bb02061d64dd324",
+    "implementationFileCount": 501
+  },
+  "evidence": {
+    "fullSuite": {
+      "path": "proof/public-integration-verification-20260817/npm-test-node24-portability-r6.log",
+      "sha256": "7f3e39a60cd32e302fa2f4893ba9c2a4c372d9cfd51637366e4dbed4a5eb6bb9",
+      "tests": 956,
+      "pass": 951,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 5,
+      "platformExclusions": [
+        "executable evaluator refuses unsupported hosts before sandbox access",
+        "Windows command shims refuse percent expansion in model argv",
+        "a timed-out Windows command shim kills its complete descendant process tree",
+        "code candidate execution refuses unsupported platforms before filesystem access",
+        "task-pack build reports an unsupported evaluator host directly"
+      ],
+      "todo": 0
+    },
+    "contextBoundaryArtifactSha256": "6f8c5e1d16cffecdc0cb98c5a53b6702073b08b74b14b51d204861cb88f0adf5",
+    "ablationMatrixSha256": "371bc7d6ac489c54d8aaa20604e51e6dddf7fa76a6eb3b503a8ac1e31cd557af",
+    "retrievalArtifactSha256": "b12ffe5444f5a630637978013fa4722ee28263d022eb5ff8077f6653f9696436",
+    "retrievalAuthority": "fixture-only",
+    "acceptorArtifactSha256": null,
+    "acceptorAuthority": "not-in-public-source-release",
+    "ablationProtocolSha256": null,
+    "evaluatorProofPlanSha256": null,
+    "evaluatorProofResult": null,
+    "slingIntegration": null
+  },
+  "sealedBenchmark": {
+    "taskPack": null,
+    "taskPackSha256": null,
+    "finalTaskBytesPresent": false,
+    "result": null,
+    "generalizedImprovementClaim": false,
+    "implementationAgentMayAccessFinalTasks": false,
+    "requiredPartition": "final",
+    "promotionEnabled": false,
+    "blockedReasons": [
+      "counterbalanced semantic-judge security qualification has not run",
+      "matched P0-P3 ablations have not run",
+      "exact-candidate P4 transfer has not run",
+      "external custodian final task pack is absent",
+      "no sealed execution has occurred"
+    ]
+  },
+  "executionPolicy": {
+    "model": "gpt-5.6-sol",
+    "reasoning": "high",
+    "transport": "Codex CLI with authenticated ChatGPT OAuth",
+    "fallbackModels": [],
+    "retriesPerInvocation": 0,
+    "candidatesPerAblationArm": 1,
+    "ablationArms": [
+      "B0",
+      "B2",
+      "B3",
+      "B4",
+      "B5a",
+      "B5b",
+      "B5c",
+      "B6"
+    ],
+    "nonCausalQualifications": [
+      "SQ1-semantic-judge-security"
+    ],
+    "experimentalDisabledArms": [
+      "B7"
+    ],
+    "exactCallCount": 120,
+    "exactTaskClusters": 10,
+    "replicatesPerArm": 3,
+    "arms": [
+      "candidate",
+      "cold",
+      "parent",
+      "sham"
+    ],
+    "localReceiptLedgerTokenCeiling": 4800000,
+    "perCallReservedInputTokens": 32000,
+    "perCallReservedOutputTokens": 8000,
+    "providerEnforcedOutputTokenLimit": null,
+    "tokenCeilingEnforcement": "local reservation before dispatch and receipt settlement after each call; no provider-side output preemption",
+    "localTimeoutCeilingMs": 72000000,
+    "meteredUsdCeiling": 0,
+    "exposureStatus": "UNFROZEN_PUBLIC_PLAN_ONLY"
+  },
+  "statisticalPolicy": {
+    "unit": "task-cluster",
+    "optionalStoppingControlled": true,
+    "repeatedCandidateSearchControlled": true,
+    "shamAndRegressionGatesRequired": true,
+    "costGateRequired": true,
+    "finalRuleMutableAfterObservation": false
+  },
+  "manifestSha256": "1ca34514453cc9f58910b6f02e215cc6738f1a120cef026cf49bf08aef8efaca"
+}

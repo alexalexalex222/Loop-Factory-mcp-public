@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mechanism-mutation-output-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operations",
+    "reasonCodes",
+    "expectedEffectCode",
+    "memoryRecordIds",
+    "explanation"
+  ],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "collection",
+          "expectedItemSha256",
+          "insertBeforeRuleId",
+          "value"
+        ],
+        "properties": {
+          "action": { "enum": ["add", "remove", "replace"] },
+          "collection": {
+            "enum": [
+              "bindings",
+              "fallback",
+              "forbiddenBindings",
+              "metrics",
+              "rules",
+              "selectors"
+            ]
+          },
+          "expectedItemSha256": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            ]
+          },
+          "insertBeforeRuleId": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }
+            ]
+          },
+          "value": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "object" }
+            ]
+          }
+        }
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" }
+    },
+    "expectedEffectCode": {
+      "type": "string",
+      "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+    },
+    "memoryRecordIds": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }
+    },
+    "explanation": { "type": "string", "minLength": 1, "maxLength": 2000 }
+  }
+}

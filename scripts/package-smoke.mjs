@@ -56,7 +56,14 @@ try {
     'package.json', 'LICENSE', 'README.md', 'hosts/registry.json',
     'examples/campaign.json', 'examples/campaign-improve-only.json',
     'loops/strip-miner.txt', 'loops/loop-de-loop.md',
-    'src/server.mjs', 'scripts/run-campaign.mjs'
+    'src/server.mjs', 'src/process-launch.mjs', 'src/process-tree-runner.mjs',
+    'src/codex-oauth-authority.mjs', 'src/vnext-pipeline.mjs',
+    'src/vnext-custodian-package.mjs',
+    'src/schemas/vnext-wave-config-v1.schema.json',
+    'src/native/darwin-fullfsync',
+    'scripts/run-campaign.mjs', 'scripts/plan-vnext-custodian-final.mjs',
+    'scripts/verify-adaptive-recursive-null.mjs',
+    'docs/loop-factory-vnext/14_FINAL_HANDOFF.md'
   ];
   for (const rel of required) assert.ok(existsSync(join(packageRoot, rel)), `packed file exists: ${rel}`);
 
@@ -65,6 +72,10 @@ try {
     'super-loop-mcp': 'src/server.mjs',
     'super-loop-run': 'scripts/run-campaign.mjs'
   });
+  assert.equal(installedPackage.scripts['vnext:custodian:plan'],
+    'node scripts/plan-vnext-custodian-final.mjs');
+  assert.equal(installedPackage.scripts['verify:recursive-null'],
+    'node scripts/verify-adaptive-recursive-null.mjs');
   const binRoot = join(installDir, 'node_modules', '.bin');
   const mcpBin = join(binRoot, process.platform === 'win32' ? 'super-loop-mcp.cmd' : 'super-loop-mcp');
   const runBin = join(binRoot, process.platform === 'win32' ? 'super-loop-run.cmd' : 'super-loop-run');
@@ -130,6 +141,7 @@ try {
     loops: manifest.map((loop) => ({ id: loop.id, sha256: loop.sha256, lines: loop.lines })),
     stateRoundTrip: true,
     installedEntrypoints: ['super-loop-mcp', 'super-loop-run'],
+    vnextPackageSurface: true,
     packageRootStateCreated: false,
     installPathContainedSpaces: true
   }, null, 2)}\n`);

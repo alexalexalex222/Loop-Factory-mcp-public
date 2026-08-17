@@ -1,0 +1,7 @@
+{
+  "finding": "finding-001",
+  "cases": [
+    { "id": "alpha-dev-gap", "observation": "alpha development target remains unresolved" },
+    { "id": "alpha-dev-control", "observation": "alpha development control remains stable" }
+  ]
+}

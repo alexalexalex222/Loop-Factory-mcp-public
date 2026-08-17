@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "packageId", "generatedAt", "protocol", "source",
+    "transfer", "executionContract", "custodyBoundary",
+    "implementationSha256", "files", "fileSetSha256", "manifestSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-custodian-package-v1" },
+    "packageId": { "$ref": "#/$defs/id" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "protocol": { "$ref": "#/$defs/openObject" },
+    "source": { "$ref": "#/$defs/openObject" },
+    "transfer": { "$ref": "#/$defs/openObject" },
+    "executionContract": { "$ref": "#/$defs/openObject" },
+    "custodyBoundary": { "$ref": "#/$defs/openObject" },
+    "implementationSha256": { "$ref": "#/$defs/sha" },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/file" }
+    },
+    "fileSetSha256": { "$ref": "#/$defs/sha" },
+    "manifestSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "openObject": { "type": "object", "additionalProperties": true },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha" }
+      }
+    }
+  }
+}
