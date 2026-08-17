@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policyId", "scopeId", "compatibility", "epoch", "minInputTokens", "maxInputTokens", "allocatedInputTokens", "permanentControlFraction", "maximumStepFraction", "action", "evidence", "compaction", "previousPolicySha256", "createdAt", "policySha256"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-context-policy-v1" },
+    "policyId": { "$ref": "#/$defs/id" },
+    "scopeId": { "$ref": "#/$defs/id" },
+    "compatibility": { "$ref": "#/$defs/compatibility" },
+    "epoch": { "type": "integer", "minimum": 1 },
+    "minInputTokens": { "type": "integer", "minimum": 1 },
+    "maxInputTokens": { "type": "integer", "minimum": 1 },
+    "allocatedInputTokens": { "type": "integer", "minimum": 1 },
+    "permanentControlFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+    "maximumStepFraction": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.1 },
+    "action": { "type": "string", "minLength": 1 },
+    "evidence": { "$ref": "#/$defs/evidence" },
+    "compaction": { "type": "object", "additionalProperties": false, "required": ["mode", "contentDeletionAuthorized"], "properties": { "mode": { "const": "lossless-reference-and-hydration" }, "contentDeletionAuthorized": { "const": false } } },
+    "previousPolicySha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "policySha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "harnessSha256", "model", "toolEnvironmentSha256"],
+      "properties": {
+        "domain": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "harnessSha256": { "$ref": "#/$defs/sha" },
+        "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "toolEnvironmentSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adaptiveObservations", "controlObservations", "pairedClusters", "medianSaturation", "medianQualityEffect", "medianControlEffect", "missedRelevantRecords", "observationSha256s"],
+      "properties": {
+        "adaptiveObservations": { "type": "integer", "minimum": 0 },
+        "controlObservations": { "type": "integer", "minimum": 0 },
+        "pairedClusters": { "type": "integer", "minimum": 0 },
+        "medianSaturation": { "type": ["number", "null"] },
+        "medianQualityEffect": { "type": ["number", "null"] },
+        "medianControlEffect": { "type": ["number", "null"] },
+        "missedRelevantRecords": { "type": "integer", "minimum": 0 },
+        "observationSha256s": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/sha" } }
+      }
+    }
+  }
+}

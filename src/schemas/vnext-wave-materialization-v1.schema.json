@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-wave-materialization-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "seriesRunId", "waveId", "taskMaterialBundleSha256", "entries", "materializationSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-wave-materialization-v1" },
+    "seriesRunId": { "$ref": "#/$defs/id" },
+    "waveId": { "$ref": "#/$defs/id" },
+    "taskMaterialBundleSha256": { "$ref": "#/$defs/sha" },
+    "entries": {
+      "type": "array", "minItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["taskId", "kind", "path", "contentSha256", "persistedBytesSha256"],
+        "properties": { "taskId": { "$ref": "#/$defs/id" }, "kind": { "enum": ["source", "incident", "interface", "oracle"] }, "path": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" }, "contentSha256": { "$ref": "#/$defs/sha" }, "persistedBytesSha256": { "$ref": "#/$defs/sha" } }
+      }
+    },
+    "materializationSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": { "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

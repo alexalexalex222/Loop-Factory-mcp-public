@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-wave-verifier-evidence-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "seriesRunId", "waveId", "wavePlanSha256", "implementationSha256", "receiptSha256", "waveJournalSha256", "terminalEventSha256", "preparationEvidenceSha256", "experimentEvidenceSha256", "leaseEvidenceSha256", "importedRecordSha256", "taskPartition", "importedRecordId", "evidenceLedgerSha256AtImport", "budgetLedgerSha256s", "disposition", "causalPass", "activationEligible", "promotionAuthorized"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-wave-verifier-evidence-v1" },
+    "seriesRunId": { "$ref": "#/$defs/id" }, "waveId": { "$ref": "#/$defs/id" },
+    "wavePlanSha256": { "$ref": "#/$defs/sha" }, "implementationSha256": { "$ref": "#/$defs/sha" }, "receiptSha256": { "$ref": "#/$defs/sha" }, "waveJournalSha256": { "$ref": "#/$defs/sha" }, "terminalEventSha256": { "$ref": "#/$defs/sha" }, "preparationEvidenceSha256": { "$ref": "#/$defs/sha" },
+    "experimentEvidenceSha256": { "$ref": "#/$defs/nullableSha" }, "leaseEvidenceSha256": { "$ref": "#/$defs/nullableSha" }, "importedRecordSha256": { "$ref": "#/$defs/nullableSha" }, "taskPartition": { "enum": ["development", "validation"] }, "importedRecordId": { "anyOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] }, "evidenceLedgerSha256AtImport": { "$ref": "#/$defs/nullableSha" },
+    "budgetLedgerSha256s": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/sha" } },
+    "disposition": { "enum": ["PREPARATION_REJECTED", "EXPERIMENT_VERIFIED"] }, "causalPass": { "type": "boolean" }, "activationEligible": { "type": "boolean" }, "promotionAuthorized": { "const": false }
+  },
+  "$defs": { "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "nullableSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] } }
+}

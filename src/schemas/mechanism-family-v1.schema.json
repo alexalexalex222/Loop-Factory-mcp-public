@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mechanism-family-v1",
+  "title": "Reusable causal mechanism family",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "familyId",
+    "fingerprintSha256",
+    "causalFingerprint",
+    "familySha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "mechanism-family-v1" },
+    "familyId": { "type": "string", "pattern": "^family-[a-f0-9]{24}$" },
+    "fingerprintSha256": { "$ref": "#/definitions/sha256" },
+    "familySha256": { "$ref": "#/definitions/sha256" },
+    "causalFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bottleneckKind",
+        "interventionKind",
+        "operationKind",
+        "expectedEffectKind",
+        "preconditions",
+        "applicability"
+      ],
+      "properties": {
+        "bottleneckKind": { "$ref": "#/definitions/kind" },
+        "interventionKind": { "$ref": "#/definitions/kind" },
+        "operationKind": { "$ref": "#/definitions/kind" },
+        "expectedEffectKind": { "$ref": "#/definitions/kind" },
+        "preconditions": { "$ref": "#/definitions/kinds" },
+        "procedureSteps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/kind" }
+        },
+        "program": { "$ref": "mechanism-program-v1.schema.json" },
+        "applicability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "taskModes",
+            "loopRoles",
+            "taskValueDimensions",
+            "resourceDimensions"
+          ],
+          "properties": {
+            "taskModes": { "$ref": "#/definitions/kinds" },
+            "loopRoles": { "$ref": "#/definitions/kinds" },
+            "taskValueDimensions": { "$ref": "#/definitions/kinds" },
+            "resourceDimensions": { "$ref": "#/definitions/kinds" }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$" },
+    "kinds": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/kind" }
+    }
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mechanism-evolution-admission-v2",
+  "title": "Replicated placebo-calibrated mechanism evolution admission",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "admissionId",
+    "state",
+    "recordedAt",
+    "previous",
+    "sourceEvolution",
+    "parent",
+    "candidate",
+    "evidence",
+    "outcome",
+    "authority",
+    "reasonCodes",
+    "admissionReceiptId",
+    "admissionSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "mechanism-evolution-admission-v2" },
+    "admissionId": { "type": "string", "pattern": "^admission-[a-f0-9]{24}$" },
+    "state": { "enum": ["VERIFIED", "ACTIVE", "REJECTED"] },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "previous": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["admissionReceiptId", "admissionSha256", "state"],
+          "properties": {
+            "admissionReceiptId": { "type": "string", "pattern": "^admission-receipt-[a-f0-9]{24}$" },
+            "admissionSha256": { "$ref": "#/definitions/sha256" },
+            "state": { "enum": ["VERIFIED", "ACTIVE", "REJECTED"] }
+          }
+        }
+      ]
+    },
+    "sourceEvolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evolutionId", "evolutionReceiptId", "evolutionSha256", "state"],
+      "properties": {
+        "evolutionId": { "type": "string", "pattern": "^evolution-[a-f0-9]{24}$" },
+        "evolutionReceiptId": { "type": "string", "pattern": "^evolution-receipt-[a-f0-9]{24}$" },
+        "evolutionSha256": { "$ref": "#/definitions/sha256" },
+        "state": { "const": "SHADOW" }
+      }
+    },
+    "parent": { "$ref": "#/definitions/familyRef" },
+    "candidate": { "$ref": "#/definitions/familyRef" },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calibrationMeasurementId",
+        "calibrationMeasurementSha256",
+        "confirmationMeasurementId",
+        "confirmationMeasurementSha256",
+        "calibrationAnalysisSha256",
+        "confirmationAnalysisSha256",
+        "verifierEvidenceSha256",
+        "activationEvidenceSha256",
+        "rejectionEvidenceSha256"
+      ],
+      "properties": {
+        "calibrationMeasurementId": { "$ref": "#/definitions/measurementId" },
+        "calibrationMeasurementSha256": { "$ref": "#/definitions/sha256" },
+        "confirmationMeasurementId": { "$ref": "#/definitions/measurementId" },
+        "confirmationMeasurementSha256": { "$ref": "#/definitions/sha256" },
+        "calibrationAnalysisSha256": { "$ref": "#/definitions/sha256" },
+        "confirmationAnalysisSha256": { "$ref": "#/definitions/sha256" },
+        "verifierEvidenceSha256": { "$ref": "#/definitions/sha256" },
+        "activationEvidenceSha256": {
+          "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }]
+        },
+        "rejectionEvidenceSha256": {
+          "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }]
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exactVsBaselineDelta",
+        "exactVsParentDelta",
+        "decisionVsParentDelta",
+        "shamExactVsBaselineDelta",
+        "candidateVsParentLower95",
+        "placeboUpper95",
+        "adjustedExactDelta",
+        "adjustedTaskP",
+        "targetRegressions",
+        "controlRegressions",
+        "candidateTokenDelta"
+      ],
+      "properties": {
+        "exactVsBaselineDelta": { "type": "number" },
+        "exactVsParentDelta": { "type": "number" },
+        "decisionVsParentDelta": { "type": "number" },
+        "shamExactVsBaselineDelta": { "type": "number" },
+        "candidateVsParentLower95": { "type": "number" },
+        "placeboUpper95": { "type": "number" },
+        "adjustedExactDelta": { "type": "number" },
+        "adjustedTaskP": { "type": "number", "minimum": 0, "maximum": 1 },
+        "targetRegressions": { "type": "integer", "minimum": 0 },
+        "controlRegressions": { "type": "integer", "minimum": 0 },
+        "candidateTokenDelta": { "type": "number" }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification", "activation", "promotionAuthorized"],
+      "properties": {
+        "verification": { "const": "independent-replicated-verifier" },
+        "activation": { "enum": ["none", "routing-only"] },
+        "promotionAuthorized": { "const": false }
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" }
+    },
+    "admissionReceiptId": { "type": "string", "pattern": "^admission-receipt-[a-f0-9]{24}$" },
+    "admissionSha256": { "$ref": "#/definitions/sha256" }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "measurementId": { "type": "string", "pattern": "^measurement-[a-f0-9]{24}$" },
+    "familyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["familyId", "familySha256", "programSha256", "semanticSha256"],
+      "properties": {
+        "familyId": { "type": "string", "pattern": "^family-[a-f0-9]{24}$" },
+        "familySha256": { "$ref": "#/definitions/sha256" },
+        "programSha256": { "$ref": "#/definitions/sha256" },
+        "semanticSha256": { "$ref": "#/definitions/sha256" }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "id": "delta-hidden-target", "deltaBaselineMarker": "MISSED" },
+    { "id": "delta-hidden-clean", "deltaControlMarker": "ACCEPT" },
+    { "id": "delta-hidden-guard", "deltaGuardMarker": "REJECT" }
+  ]
+}

@@ -9,6 +9,7 @@ import {
   extractResult,
   inspectWorkerIsolation,
   normalizeStructuredWorkerOutput,
+  normalizeSupervisorBoundProposalOutput,
   parseTokenUsage
 } from './executor.mjs';
 import { parseCaseResults } from './measure.mjs';
@@ -69,7 +70,7 @@ function artifactHashMatches(artifact) {
     && sha256(artifact.content) === String(artifact.sha256).toLowerCase());
 }
 
-function strictLaunchEvidence(metadata, raw, result) {
+function strictLaunchEvidence(metadata, raw, result, normalizationContract = null) {
   const argv = Array.isArray(metadata?.argv) ? metadata.argv.map(String) : [];
   const disabled = new Set(
     Array.isArray(metadata?.disabledFeatures) ? metadata.disabledFeatures.map(String) : []
@@ -77,7 +78,13 @@ function strictLaunchEvidence(metadata, raw, result) {
   const cwdIndex = argv.indexOf('-C');
   const schemaIndex = argv.indexOf('--output-schema');
   const rawResult = raw ? extractResult('codex', raw.content) : null;
-  const normalizedResult = rawResult ? normalizeStructuredWorkerOutput({}, rawResult) : null;
+  const supervisorBound = metadata?.resultNormalization
+    === 'json-schema-supervisor-bound-v1';
+  const normalizedResult = rawResult
+    ? (supervisorBound
+        ? normalizeSupervisorBoundProposalOutput(normalizationContract || {}, rawResult)
+        : normalizeStructuredWorkerOutput({}, rawResult))
+    : null;
   const reasons = [];
   if (metadata?.strictIsolation !== true || metadata?.binaryFamily !== 'codex') {
     reasons.push('receipt is not marked as a strict Codex launch');
@@ -96,7 +103,9 @@ function strictLaunchEvidence(metadata, raw, result) {
     || !SHA256_RE.test(String(metadata?.outputSchemaSha256 || ''))) {
     reasons.push('strict worker output schema is not hash-bound in the receipt');
   }
-  if (metadata?.resultNormalization !== 'json-schema-v1'
+  if (![...(
+    normalizationContract ? ['json-schema-supervisor-bound-v1'] : []
+  ), 'json-schema-v1'].includes(metadata?.resultNormalization)
     || sha256(String(rawResult || '')) !== String(metadata?.rawResultSha256 || '')
     || normalizedResult !== result?.content) {
     reasons.push('schema-constrained model output does not normalize to the persisted final artifact');
@@ -232,7 +241,9 @@ export function verifyPersistedAgentRun(store, runId, run) {
   };
 }
 
-export function verifyPersistedProposalRun(store, runId, run) {
+export function verifyPersistedProposalRun(store, runId, run, {
+  normalizationContract = null
+} = {}) {
   const reasons = [];
   const raw = safeArtifact(store, runId, run?.rawArtifactRef);
   const result = safeArtifact(store, runId, run?.resultArtifactRef);
@@ -265,7 +276,7 @@ export function verifyPersistedProposalRun(store, runId, run) {
     || sha256(String(parsed.payload?.revisedContent || '')) !== run.procedureSha256) {
     reasons.push('proposal revised procedure does not rederive from the persisted final artifact');
   }
-  const launch = strictLaunchEvidence(run, raw, result);
+  const launch = strictLaunchEvidence(run, raw, result, normalizationContract);
   if (!launch.ok) reasons.push(...launch.reasons);
   return {
     ok: reasons.length === 0,

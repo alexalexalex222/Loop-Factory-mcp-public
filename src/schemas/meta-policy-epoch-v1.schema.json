@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "meta-policy-epoch-v1",
+  "title": "Hash-chained bounded adaptive routing policy epoch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "policyEpochId",
+    "policyEpochSha256",
+    "policyScopeId",
+    "epochNumber",
+    "previousEpochId",
+    "previousEpochSha256",
+    "trigger",
+    "evidenceWindow",
+    "baselinePolicySha256",
+    "baselinePolicy",
+    "policySha256",
+    "policy",
+    "changes",
+    "drift",
+    "driftTier",
+    "quarantinedFamilyIds",
+    "rollbackTargetEpochId",
+    "metaCanaryReceiptSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "meta-policy-epoch-v1" },
+    "policyEpochId": { "type": "string", "pattern": "^epoch-[a-f0-9]{24}$" },
+    "policyEpochSha256": { "$ref": "#/definitions/sha256" },
+    "policyScopeId": { "$ref": "#/definitions/safeId" },
+    "epochNumber": { "type": "integer", "minimum": 0 },
+    "previousEpochId": {
+      "type": ["string", "null"],
+      "pattern": "^epoch-[a-f0-9]{24}$"
+    },
+    "previousEpochSha256": { "$ref": "#/definitions/nullableSha256" },
+    "trigger": { "enum": ["initial", "valid-attempt-window", "lane-boundary", "rollback"] },
+    "evidenceWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validApplicationCount", "sha256"],
+      "properties": {
+        "validApplicationCount": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "baselinePolicySha256": { "$ref": "#/definitions/sha256" },
+    "baselinePolicy": { "$ref": "#/definitions/policy" },
+    "policySha256": { "$ref": "#/definitions/sha256" },
+    "policy": { "$ref": "#/definitions/policy" },
+    "changes": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "before", "after", "delta"],
+        "properties": {
+          "field": {
+            "enum": [
+              "allocations.related",
+              "allocations.adjacent",
+              "allocations.failureDerived",
+              "allocations.wildcard",
+              "scoring.relevanceWeight",
+              "scoring.confidenceWeight",
+              "scoring.positiveEffectWeight",
+              "scoring.contradictionPenaltyWeight",
+              "penalties.cooldown",
+              "penalties.failedTransfer"
+            ]
+          },
+          "before": { "type": "number" },
+          "after": { "type": "number" },
+          "delta": { "type": "number", "minimum": -0.05, "maximum": 0.05 }
+        }
+      }
+    },
+    "drift": { "type": "number", "minimum": 0 },
+    "driftTier": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "quarantinedFamilyIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^family-[a-f0-9]{24}$" }
+    },
+    "rollbackTargetEpochId": {
+      "type": ["string", "null"],
+      "pattern": "^epoch-[a-f0-9]{24}$"
+    },
+    "metaCanaryReceiptSha256": { "$ref": "#/definitions/nullableSha256" }
+  },
+  "definitions": {
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableSha256": {
+      "anyOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }]
+    },
+    "allocations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control", "related", "adjacent", "failureDerived", "wildcard"],
+      "properties": {
+        "control": { "type": "number", "minimum": 0.2, "maximum": 1 },
+        "related": { "$ref": "#/definitions/unit" },
+        "adjacent": { "$ref": "#/definitions/unit" },
+        "failureDerived": { "$ref": "#/definitions/unit" },
+        "wildcard": { "$ref": "#/definitions/unit" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allocations", "scoring", "penalties"],
+      "properties": {
+        "allocations": { "$ref": "#/definitions/allocations" },
+        "scoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "relevanceWeight",
+            "confidenceWeight",
+            "positiveEffectWeight",
+            "contradictionPenaltyWeight"
+          ],
+          "properties": {
+            "relevanceWeight": { "$ref": "#/definitions/unit" },
+            "confidenceWeight": { "$ref": "#/definitions/unit" },
+            "positiveEffectWeight": { "$ref": "#/definitions/unit" },
+            "contradictionPenaltyWeight": { "$ref": "#/definitions/unit" }
+          }
+        },
+        "penalties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cooldown", "failedTransfer"],
+          "properties": {
+            "cooldown": { "$ref": "#/definitions/unit" },
+            "failedTransfer": { "$ref": "#/definitions/unit" }
+          }
+        }
+      }
+    },
+    "unit": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

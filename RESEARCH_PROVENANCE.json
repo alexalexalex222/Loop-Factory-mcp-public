@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "loop-factory-research-provenance-v1",
+  "frozenAt": "2026-08-05",
+  "sourceCodeCopied": false,
+  "primarySourceCapture": {
+    "path": "proof/vnext-prior-art-capture-v3/state/prior-art-primary-capture-v3",
+    "planSha256": "02b172b3e46f5ec7b89dc01f099cadd700661ae150119a6675ea5f7a4385c4f0",
+    "receiptSha256": "723b7ba569442e6ca4b1a3f0ddc59a984687b361d1de1e95326f25162ab8caf8",
+    "evidenceSha256": "24f9f642e0b65a5b1eece62690c06afef06271e45f3f79a68a2bb6ca0a5bc8fc",
+    "sourceCount": 10,
+    "totalRawBytes": 439422,
+    "networkPerformed": true,
+    "modelCalls": 0,
+    "activationAuthority": false,
+    "promotionAuthority": false
+  },
+  "sources": [
+    {
+      "id": "gepa",
+      "paper": "https://arxiv.org/abs/2507.19457",
+      "repository": "https://github.com/gepa-ai/gepa",
+      "license": "MIT",
+      "decision": "emulate-independently"
+    },
+    {
+      "id": "meta-harness",
+      "paper": "https://arxiv.org/abs/2603.28052",
+      "repository": "https://github.com/stanford-iris-lab/meta-harness",
+      "license": "MIT",
+      "decision": "experimental-plugin-only"
+    },
+    {
+      "id": "skillopt",
+      "paper": "https://arxiv.org/abs/2605.23904",
+      "repository": "https://github.com/microsoft/SkillOpt",
+      "license": "MIT",
+      "decision": "adopt-concepts"
+    },
+    {
+      "id": "harnessbank",
+      "paper": "https://arxiv.org/abs/2607.13683",
+      "repository": null,
+      "license": null,
+      "decision": "adopt-concepts-no-code-dependency"
+    },
+    {
+      "id": "self-harness",
+      "paper": "https://arxiv.org/abs/2606.09498",
+      "repository": null,
+      "license": null,
+      "decision": "failure-mining-only"
+    },
+    {
+      "id": "agentic-harness-engineering",
+      "paper": "https://arxiv.org/abs/2604.25850",
+      "repository": "https://github.com/china-qijizhifeng/agentic-harness-engineering",
+      "license": "MIT",
+      "decision": "adopt-concepts"
+    },
+    {
+      "id": "harnesscompass",
+      "paper": "https://arxiv.org/abs/2608.01918",
+      "repository": null,
+      "license": null,
+      "decision": "adopt-cautiously"
+    },
+    {
+      "id": "harness-handbook",
+      "paper": "https://arxiv.org/abs/2607.13285",
+      "repository": "https://github.com/Ruhan-Wang/Harness_Handbook",
+      "license": "Apache-2.0",
+      "decision": "adopt-concepts"
+    },
+    {
+      "id": "pace",
+      "paper": "https://arxiv.org/abs/2606.08106",
+      "repository": null,
+      "license": null,
+      "decision": "adopt-inside-v2"
+    },
+    {
+      "id": "moss",
+      "paper": "https://arxiv.org/abs/2605.22794",
+      "repository": "https://github.com/hkgai-official/Moss",
+      "license": "Apache-2.0-additions-over-vendored-MIT",
+      "decision": "disposable-experimental-plugin-only"
+    }
+  ]
+}

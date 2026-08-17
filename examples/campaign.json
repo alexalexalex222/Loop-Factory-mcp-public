@@ -1,9 +1,9 @@
 {
   "task": "Improve a code-review loop so it catches more real bugs at equal or lower token cost",
   "routes": [
-    "claude-opus-4-8",
-    "glm-5.2",
-    "claude-opus-4-8"
+    "gpt-5.6-sol",
+    "claude-fable-5",
+    "gpt-5.6-terra"
   ],
   "remineOnEmpty": true,
   "benchmark": {
@@ -38,9 +38,9 @@
     {
       "kind": "mine",
       "routes": [
-        "claude-opus-4-8",
-        "glm-5.2",
-        "claude-opus-4-8"
+        "gpt-5.6-sol",
+        "claude-fable-5",
+        "gpt-5.6-terra"
       ]
     },
     {
@@ -48,9 +48,9 @@
       "loop": "loop-de-loop",
       "baselineContent": "## Purpose\nThis baseline is the operator-authored reference loop a challenger must beat. It captures the full procedure for durable reader waves over a recorded session corpus, isolates the real bottleneck before any change is attempted, and extracts candidate workflows that are gated on recorded evidence before they can count as qualified loops. Every phase leaves an artifact on disk so nothing is skipped and nothing is trusted on a confidence claim alone.\n\n## Procedure\nFirst, open the corpus read-only and reproduce the failure or opportunity on the smallest triggering input. Second, stream each phase one section at a time and record an observation or artifact for every phase so nothing is skipped. Third, replay the strongest candidate in a clean context and prove an independent root task end to end with sealed run logs. Fourth, sweep for contradictions and drop any candidate that cannot be reproduced from sealed bytes. Fifth, freeze the scorecard and measure the baseline bar with tool-computed cost and quality before any challenger runs.\n\n## Acceptance\nA candidate qualifies only when its measured quality holds at equal or lower token cost than this baseline and the result reverifies from the sealed run logs. A summary, a confidence claim, or a bare tool call is never progress; only a supervisor-accepted transition counts. The operator is the only stop condition. Do not paste a stub here — replace this text with your real loop when you have one, but this fixture is long enough to clear the baseline integrity floor for copy-paste demos.\n",
       "routes": [
-        "claude-opus-4-8",
-        "glm-5.2",
-        "claude-opus-4-8"
+        "gpt-5.6-sol",
+        "claude-fable-5",
+        "gpt-5.6-terra"
       ]
     }
   ]

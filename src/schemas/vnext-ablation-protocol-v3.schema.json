@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "protocolId", "createdAt", "parentFamilyId",
+    "parentFamilySha256", "modelPolicy", "semanticJudgeQualification",
+    "consumedEvaluatorProofs", "implementationSha256", "packs",
+    "identityLedger", "phases", "selectionRule", "inferencePolicy",
+    "exposure", "authority", "protocolSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-ablation-protocol-v3" },
+    "protocolId": { "$ref": "#/$defs/id" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "parentFamilyId": { "$ref": "#/$defs/id" },
+    "parentFamilySha256": { "$ref": "#/$defs/sha" },
+    "modelPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoningEffort", "authMode"],
+      "properties": {
+        "model": { "const": "gpt-5.6-sol" },
+        "reasoningEffort": { "const": "high" },
+        "authMode": { "const": "chatgpt-oauth" }
+      }
+    },
+    "semanticJudgeQualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "role", "status", "qualification", "forms",
+        "maximumCalls", "paidCallsCompleted", "retriesPerCall",
+        "causalScoringAuthority", "requiredForDeterministicPhases",
+        "requiredBeforeSemanticJudging", "bindingSha256"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "loop-factory-vnext-semantic-judge-qualification-binding-v1"
+        },
+        "role": { "const": "semantic-judge-security-qualification" },
+        "status": { "const": "PLANNED_UNLAUNCHED" },
+        "qualification": { "$ref": "#/$defs/qualification" },
+        "forms": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "formId", "proofHome", "proofId", "planSha256",
+              "requestSha256", "implementationSha256"
+            ],
+            "properties": {
+              "formId": { "enum": ["form-1", "form-2"] },
+              "proofHome": { "type": "string", "minLength": 1 },
+              "proofId": { "$ref": "#/$defs/id" },
+              "planSha256": { "$ref": "#/$defs/sha" },
+              "requestSha256": { "$ref": "#/$defs/sha" },
+              "implementationSha256": { "$ref": "#/$defs/sha" }
+            }
+          }
+        },
+        "maximumCalls": { "const": 2 },
+        "paidCallsCompleted": { "const": 0 },
+        "retriesPerCall": { "const": 0 },
+        "causalScoringAuthority": { "const": false },
+        "requiredForDeterministicPhases": { "const": false },
+        "requiredBeforeSemanticJudging": { "const": true },
+        "bindingSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "consumedEvaluatorProofs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/consumedEvaluatorProof" }
+    },
+    "implementationSha256": { "$ref": "#/$defs/sha" },
+    "packs": { "type": "array", "minItems": 5, "maxItems": 5, "items": {} },
+    "identityLedger": { "$ref": "#/$defs/identityLedger" },
+    "phases": { "type": "array", "minItems": 5, "maxItems": 5, "items": {} },
+    "selectionRule": { "$ref": "#/$defs/selectionRule" },
+    "inferencePolicy": { "$ref": "#/$defs/inferencePolicy" },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "liveEvaluatorCalls", "semanticJudgeSecurityQualificationMaximumCalls",
+        "historicalConsumedEvaluatorCalls", "internalMaximumCalls",
+        "externalCustodianMaximumCalls", "retriesPerCall", "hardUsdCeiling",
+        "billingMode", "stagedApprovalRequired"
+      ],
+      "properties": {
+        "liveEvaluatorCalls": { "const": 0 },
+        "semanticJudgeSecurityQualificationMaximumCalls": { "const": 2 },
+        "historicalConsumedEvaluatorCalls": { "type": "integer", "minimum": 0 },
+        "internalMaximumCalls": { "type": "integer", "minimum": 1 },
+        "externalCustodianMaximumCalls": { "const": 120 },
+        "retriesPerCall": { "const": 0 },
+        "hardUsdCeiling": { "const": 0 },
+        "billingMode": { "const": "subscription-no-metered-usd" },
+        "stagedApprovalRequired": { "const": true }
+      }
+    },
+    "authority": { "$ref": "#/$defs/authority" },
+    "protocolSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "qualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "qualificationId", "seedCommitment", "forms",
+        "answerKeySha256", "exposure", "qualificationSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "vnext-semantic-judge-security-qualification-v1" },
+        "qualificationId": { "$ref": "#/$defs/id" },
+        "seedCommitment": { "$ref": "#/$defs/seedCommitment" },
+        "forms": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["formId", "request", "pairwiseReceipt"],
+            "properties": {
+              "formId": { "enum": ["form-1", "form-2"] },
+              "request": {},
+              "pairwiseReceipt": {}
+            }
+          }
+        },
+        "answerKeySha256": { "$ref": "#/$defs/sha" },
+        "exposure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maximumCalls", "retriesPerCall", "promotionAuthorized",
+            "causalScoringAuthority"
+          ],
+          "properties": {
+            "maximumCalls": { "const": 2 },
+            "retriesPerCall": { "const": 0 },
+            "promotionAuthorized": { "const": false },
+            "causalScoringAuthority": { "const": false }
+          }
+        },
+        "qualificationSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "seedCommitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "qualificationId", "committedAt", "formCount",
+        "seedSha256s", "commitmentSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "vnext-evaluator-counterbalance-seed-commitment-v1" },
+        "qualificationId": { "$ref": "#/$defs/id" },
+        "committedAt": { "type": "string", "format": "date-time" },
+        "formCount": { "const": 2 },
+        "seedSha256s": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha" }
+        },
+        "commitmentSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "consumedEvaluatorProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "proofHome", "proofId", "planSha256",
+        "planFileSha256", "launchSha256", "launchFileSha256",
+        "failureEvidencePath", "failureEvidenceSha256", "status",
+        "maximumCalls", "retriesAuthorized"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "loop-factory-vnext-consumed-evaluator-proof-v1" },
+        "proofHome": { "type": "string", "minLength": 1 },
+        "proofId": { "$ref": "#/$defs/id" },
+        "planSha256": { "$ref": "#/$defs/sha" },
+        "planFileSha256": { "$ref": "#/$defs/sha" },
+        "launchSha256": { "$ref": "#/$defs/sha" },
+        "launchFileSha256": { "$ref": "#/$defs/sha" },
+        "failureEvidencePath": { "type": "string", "minLength": 1 },
+        "failureEvidenceSha256": { "$ref": "#/$defs/sha" },
+        "status": { "const": "CONSUMED_FAILURE_NO_RETRY" },
+        "maximumCalls": { "const": 1 },
+        "retriesAuthorized": { "const": false }
+      }
+    },
+    "identityLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "algorithm", "identityCount", "identityDigests",
+        "ledgerSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "vnext-internal-identity-digest-ledger-v1" },
+        "algorithm": { "const": "sha256" },
+        "identityCount": { "type": "integer", "minimum": 1 },
+        "identityDigests": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha" }
+        },
+        "ledgerSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "selectionRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "developmentAuthority", "eligibleGeneratorArms",
+        "requiredBeforeSelection", "order", "abstainWhenNoEligibleArm",
+        "selectedCandidateCount"
+      ],
+      "properties": {
+        "developmentAuthority": { "const": "selection-only-no-generalized-claim" },
+        "eligibleGeneratorArms": { "const": ["B5a", "B5b", "B5c"] },
+        "requiredBeforeSelection": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "abstainWhenNoEligibleArm": { "const": true },
+        "selectedCandidateCount": { "const": 1 }
+      }
+    },
+    "inferencePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "developmentResultsAreNotFinalClaims", "finalValidationCandidateCount",
+        "validationAlpha", "transferRequiresExactFrozenCandidate",
+        "transferMayRegenerateCandidate", "generalizedClaimRequiresValidationAndTransfer",
+        "finalCustodianConfirmationStillRequired", "taskClusterIsStatisticalUnit",
+        "noRepeatedFinalOpening"
+      ],
+      "properties": {
+        "developmentResultsAreNotFinalClaims": { "const": true },
+        "finalValidationCandidateCount": { "const": 1 },
+        "validationAlpha": { "const": 0.05 },
+        "transferRequiresExactFrozenCandidate": { "const": true },
+        "transferMayRegenerateCandidate": { "const": false },
+        "generalizedClaimRequiresValidationAndTransfer": { "const": true },
+        "finalCustodianConfirmationStillRequired": { "const": true },
+        "taskClusterIsStatisticalUnit": { "const": true },
+        "noRepeatedFinalOpening": { "const": true }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementationAgentMayAccessInternalPacks",
+        "implementationAgentMayAccessFinalCustodianPack",
+        "activationAuthority", "promotionAuthorized"
+      ],
+      "properties": {
+        "implementationAgentMayAccessInternalPacks": { "const": true },
+        "implementationAgentMayAccessFinalCustodianPack": { "const": false },
+        "activationAuthority": { "const": false },
+        "promotionAuthorized": { "const": false }
+      }
+    }
+  }
+}

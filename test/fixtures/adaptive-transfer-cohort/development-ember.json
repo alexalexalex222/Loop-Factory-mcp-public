@@ -1,0 +1,7 @@
+{
+  "finding": "finding-005",
+  "cases": [
+    { "id": "ember-dev-gap", "observation": "ember development target remains unresolved" },
+    { "id": "ember-dev-control", "observation": "ember development control remains stable" }
+  ]
+}

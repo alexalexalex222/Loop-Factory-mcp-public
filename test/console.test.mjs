@@ -510,3 +510,96 @@ test('new blocked canary failure evidence is strictly allowlisted', () => {
     assert.ok(!json.includes(forbidden), `failure allowlist must omit ${forbidden}`);
   }
 });
+
+test('VNext campaign snapshot separates banked evidence from routing admission', () => {
+  const snapshot = buildConsoleSnapshot({
+    schemaVersion: 'loop-factory-campaign-series-state-v1',
+    kind: 'vnext-campaign-series',
+    seriesId: 'series-console',
+    runId: 'vnext-console',
+    planSha256: '1'.repeat(64),
+    status: 'IDLE_NO_NEW_WORK',
+    revision: 4,
+    createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:04:00.000Z',
+    queue: [],
+    currentWave: null,
+    completedWaves: [{
+      waveId: 'wave-development',
+      position: 0,
+      configId: 'config-wave-development',
+      maximumCalls: 127,
+      status: 'VERIFIED',
+      evidenceSha256: '2'.repeat(64),
+      budgetUsageSha256: '3'.repeat(64),
+      budgetUsage: [{
+        policyId: 'development-budget',
+        policySha256: '4'.repeat(64),
+        ledgerSha256: '5'.repeat(64),
+        calls: 16,
+        inputTokens: 1200,
+        outputTokens: 300,
+        usdMicros: 0
+      }],
+      outcome: {
+        disposition: 'DEVELOPMENT_EVIDENCE_BANKED',
+        causalPass: true,
+        activationEligible: false,
+        promotionAuthorized: false
+      }
+    }],
+    taskIdentities: ['task:task-1', 'task:task-2', 'source:secret-source-hash'],
+    totalAuthorizedCalls: 127,
+    totalAuthorizedInputTokens: 10000,
+    totalAuthorizedOutputTokens: 5000,
+    totalAuthorizedTokens: 15000,
+    totalAuthorizedUsdMicros: 0,
+    operatorStop: false,
+    events: [{
+      index: 0,
+      type: 'SERIES_INITIALIZED',
+      at: '2026-08-05T00:00:00.000Z',
+      detailSha256: '6'.repeat(64),
+      privatePrompt: 'VNEXT_EVENT_SECRET'
+    }],
+    stateSha256: '7'.repeat(64)
+  });
+
+  assert.equal(snapshot.kind, 'vnext-campaign-series');
+  assert.equal(snapshot.recursive.mode, 'vnext-campaign');
+  assert.equal(snapshot.recursive.callsObserved, 16);
+  assert.equal(snapshot.recursive.callsMaximum, 127);
+  assert.equal(snapshot.recursive.taskCount, 2);
+  assert.equal(snapshot.recursive.causalPass, true);
+  assert.equal(snapshot.recursive.decisions[0].status, 'EVIDENCE_BANKED');
+  assert.equal(snapshot.recursive.reviews, undefined);
+  assert.equal(snapshot.reviews.approved, 0);
+  assert.equal(snapshot.recursive.operator.canStop, true);
+  assert.equal(snapshot.recursive.operator.stopRequested, false);
+  assert.equal(snapshot.recursive.tokenUsage.total, 1500);
+  assert.ok(!JSON.stringify(snapshot).includes('VNEXT_EVENT_SECRET'));
+});
+
+test('an unmeasured VNext campaign remains unknown rather than failing by default', () => {
+  const snapshot = buildConsoleSnapshot({
+    schemaVersion: 'loop-factory-campaign-series-state-v1',
+    kind: 'vnext-campaign-series',
+    seriesId: 'series-unmeasured',
+    runId: 'vnext-unmeasured',
+    planSha256: '1'.repeat(64),
+    status: 'IDLE_NO_NEW_WORK',
+    revision: 0,
+    createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:00:00.000Z',
+    queue: [],
+    currentWave: null,
+    completedWaves: [],
+    taskIdentities: [],
+    totalAuthorizedCalls: 0,
+    operatorStop: false,
+    events: [],
+    stateSha256: '2'.repeat(64)
+  });
+  assert.equal(snapshot.recursive.experimentValid, null);
+  assert.equal(snapshot.recursive.causalPass, null);
+});

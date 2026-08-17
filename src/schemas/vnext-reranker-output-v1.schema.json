@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "rankings", "abstain", "abstainReason"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-reranker-output-v1" },
+    "rankings": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recordId", "applicability", "structuralSimilarity", "expectedBenefit", "transferUncertainty", "contradictionRisk", "reason", "confidence"],
+        "properties": {
+          "recordId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+          "applicability": { "$ref": "#/$defs/probability" },
+          "structuralSimilarity": { "$ref": "#/$defs/probability" },
+          "expectedBenefit": { "$ref": "#/$defs/probability" },
+          "transferUncertainty": { "$ref": "#/$defs/probability" },
+          "contradictionRisk": { "$ref": "#/$defs/probability" },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "confidence": { "$ref": "#/$defs/probability" }
+        }
+      }
+    },
+    "abstain": { "type": "boolean" },
+    "abstainReason": { "type": ["string", "null"], "maxLength": 1000 }
+  },
+  "$defs": {
+    "probability": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

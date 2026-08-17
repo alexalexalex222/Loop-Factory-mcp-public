@@ -1,0 +1,393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-vnext-wave-config-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "waveId", "preparationRunId", "experimentRunId", "createdAt", "proposalRecordedAt", "shadowRecordedAt", "preparationBudgetPolicyId", "experimentBudgetPolicyId", "requireProductionEvidence", "runtimeAuthority", "evaluatorAuthority", "ablationProfile", "preparation", "mechanism", "taskSplit", "recursiveCanary", "pace", "configSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-wave-config-v1" },
+    "waveId": { "$ref": "#/$defs/id" },
+    "preparationRunId": { "$ref": "#/$defs/id" },
+    "experimentRunId": { "$ref": "#/$defs/id" },
+    "createdAt": { "$ref": "#/$defs/dateTime" },
+    "proposalRecordedAt": { "$ref": "#/$defs/dateTime" },
+    "shadowRecordedAt": { "$ref": "#/$defs/dateTime" },
+    "preparationBudgetPolicyId": { "$ref": "#/$defs/id" },
+    "experimentBudgetPolicyId": { "$ref": "#/$defs/id" },
+    "requireProductionEvidence": { "const": true },
+    "runtimeAuthority": { "$ref": "#/$defs/runtimeAuthority" },
+    "evaluatorAuthority": { "$ref": "#/$defs/evaluatorAuthority" },
+    "ablationProfile": { "$ref": "#/$defs/ablationProfile" },
+    "preparation": { "$ref": "#/$defs/preparation" },
+    "mechanism": { "$ref": "#/$defs/mechanism" },
+    "taskSplit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calibrationTaskIds", "confirmationTaskIds"],
+      "properties": {
+        "calibrationTaskIds": { "$ref": "#/$defs/fiveIds" },
+        "confirmationTaskIds": { "$ref": "#/$defs/fiveIds" }
+      }
+    },
+    "recursiveCanary": { "$ref": "#/$defs/recursiveCanary" },
+    "pace": { "$ref": "#/$defs/pace" },
+    "configSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "nonEmpty": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "stringSet": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 240 } },
+    "hashSet": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/sha" } },
+    "jsonValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } },
+        { "$ref": "#/$defs/jsonObject" }
+      ]
+    },
+    "jsonObject": { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } },
+    "fiveIds": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "ablationProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "armId", "internalResearchEnabled", "hypothesisFalsificationEnabled", "modelRerankerEnabled", "candidateStrategy", "selectedGeneratorArm", "evaluatorIsolationRequired", "performanceClaimAuthority", "activationAuthority", "profileSha256"],
+      "properties": {
+        "schemaVersion": { "const": "vnext-ablation-profile-v1" },
+        "armId": { "enum": ["B0", "B1", "B2", "B3", "B4", "B5a", "B5b", "B5c", "B6", "B7"] },
+        "internalResearchEnabled": { "type": "boolean" },
+        "hypothesisFalsificationEnabled": { "type": "boolean" },
+        "modelRerankerEnabled": { "type": "boolean" },
+        "candidateStrategy": { "enum": ["native", "reflective-pareto", "bounded-skill", "bank-recombination", "code-level-experimental"] },
+        "selectedGeneratorArm": { "type": ["string", "null"], "enum": [null, "B5a", "B5b", "B5c"] },
+        "evaluatorIsolationRequired": { "const": true },
+        "performanceClaimAuthority": { "const": "none-until-matched-live-verification" },
+        "activationAuthority": { "const": false },
+        "profileSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "runtimeAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "authMode", "requestedModel", "reasoningEffort", "binary", "catalog", "selectionAuthority", "backendIdentitySurface", "authoritySha256"],
+      "properties": {
+        "schemaVersion": { "const": "codex-oauth-model-authority-v1" },
+        "authMode": { "const": "chatgpt-oauth" },
+        "requestedModel": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "reasoningEffort": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "binary": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "basename", "sha256", "bytes", "version"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "basename": { "enum": ["codex", "codex.real", "codex.exe", "codex.cmd", "codex.bat"] },
+            "sha256": { "$ref": "#/$defs/sha" },
+            "bytes": { "type": "integer", "minimum": 1 },
+            "version": { "type": "string", "pattern": "^[Cc]odex-cli\\s+\\S+$" }
+          }
+        },
+        "catalog": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sha256", "modelEntrySha256", "model"],
+          "properties": {
+            "sha256": { "$ref": "#/$defs/sha" },
+            "modelEntrySha256": { "$ref": "#/$defs/sha" },
+            "model": {
+              "type": "object", "additionalProperties": false,
+              "required": ["slug", "displayName", "visibility", "supportedInApi", "supportedReasoningLevels", "defaultReasoningLevel", "serviceTiers"],
+              "properties": {
+                "slug": { "type": "string", "minLength": 1 },
+                "displayName": { "type": ["string", "null"] },
+                "visibility": { "type": ["string", "null"] },
+                "supportedInApi": { "type": "boolean" },
+                "supportedReasoningLevels": {
+                  "type": "array", "minItems": 1,
+                  "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["effort", "description"],
+                    "properties": { "effort": { "type": "string" }, "description": { "type": "string" } }
+                  }
+                },
+                "defaultReasoningLevel": { "type": ["string", "null"] },
+                "serviceTiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["id", "name"],
+                    "properties": { "id": { "type": "string" }, "name": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "selectionAuthority": { "const": "oauth-catalog+explicit-model-flag" },
+        "backendIdentitySurface": { "const": "codex-exec-jsonl-optional" },
+        "authoritySha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "evaluatorAuthority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "platform", "architecture", "node", "sandbox", "bootstrap", "limits", "permissions", "authoritySha256"],
+      "properties": {
+        "schemaVersion": { "const": "executable-evaluator-authority-v1" },
+        "platform": { "const": "darwin" },
+        "architecture": { "type": "string", "minLength": 1 },
+        "node": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "basename", "version", "sha256"],
+          "properties": { "path": { "type": "string" }, "basename": { "type": "string" }, "version": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha" } }
+        },
+        "sandbox": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "basename", "sha256", "profile", "profileSha256"],
+          "properties": { "path": { "type": "string" }, "basename": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha" }, "profile": { "type": "string" }, "profileSha256": { "$ref": "#/$defs/sha" } }
+        },
+        "bootstrap": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": { "path": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha" } }
+        },
+        "limits": {
+          "type": "object", "additionalProperties": false,
+          "required": ["timeoutMs", "maxBytes", "maxBufferBytes", "heapMb"],
+          "properties": { "timeoutMs": { "type": "integer", "minimum": 1 }, "maxBytes": { "type": "integer", "minimum": 1 }, "maxBufferBytes": { "type": "integer", "minimum": 1 }, "heapMb": { "type": "integer", "minimum": 1 } }
+        },
+        "permissions": {
+          "type": "object", "additionalProperties": false,
+          "required": ["nodeFlag", "filesystem", "childProcesses", "workers", "network"],
+          "properties": { "nodeFlag": { "enum": ["--permission", "--experimental-permission"] }, "filesystem": { "const": "candidate-and-bootstrap-read-only" }, "childProcesses": { "const": "denied" }, "workers": { "const": "denied" }, "network": { "const": "denied" } }
+        },
+        "authoritySha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "failureInput": {
+      "type": "object", "additionalProperties": false,
+      "required": ["failureId", "summary", "behavior", "component", "symptoms", "environment", "sourceEvidence"],
+      "properties": {
+        "failureId": { "$ref": "#/$defs/id" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "behavior": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "component": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "symptoms": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "environment": { "$ref": "#/$defs/jsonObject" },
+        "sourceEvidence": {
+          "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "schemaVersion", "sha256", "availableAt", "locator"],
+            "properties": { "id": { "$ref": "#/$defs/id" }, "schemaVersion": { "type": "string", "minLength": 1, "maxLength": 120 }, "sha256": { "$ref": "#/$defs/sha" }, "availableAt": { "$ref": "#/$defs/dateTime" }, "locator": { "type": "string", "minLength": 1, "maxLength": 500 } }
+          }
+        },
+        "authority": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "evidenceRecord": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "recordId", "recordSha256", "kind", "availableAt", "createdAt", "sourceIds", "verifierEvidenceHashes", "verifierEligible", "authority", "compatibility", "lifecycle", "metrics", "content", "callerClaims"],
+      "properties": {
+        "schemaVersion": { "const": "vnext-evidence-record-v1" },
+        "recordId": { "$ref": "#/$defs/id" },
+        "recordSha256": { "$ref": "#/$defs/sha" },
+        "kind": { "enum": ["positive", "no-improvement", "regression", "contradiction", "sham", "transfer", "failure"] },
+        "availableAt": { "$ref": "#/$defs/dateTime" },
+        "createdAt": { "$ref": "#/$defs/dateTime" },
+        "sourceIds": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "verifierEvidenceHashes": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/sha" } },
+        "verifierEligible": { "type": "boolean" },
+        "authority": { "$ref": "#/$defs/evidenceAuthority" },
+        "compatibility": { "$ref": "#/$defs/recordCompatibility" },
+        "lifecycle": {
+          "type": "object", "additionalProperties": false,
+          "required": ["state", "quarantined", "quarantineReason"],
+          "properties": { "state": { "enum": ["observed", "replicated", "active", "retired", "contradicted"] }, "quarantined": { "type": "boolean" }, "quarantineReason": { "type": ["string", "null"], "maxLength": 1000 } }
+        },
+        "metrics": {
+          "type": "object", "additionalProperties": false,
+          "required": ["qualityDelta", "costUsd", "latencyMs", "tokenCost", "uncertainty"],
+          "properties": { "qualityDelta": { "type": ["number", "null"] }, "costUsd": { "type": ["number", "null"], "minimum": 0 }, "latencyMs": { "type": ["number", "null"], "minimum": 0 }, "tokenCost": { "type": ["number", "null"], "minimum": 0 }, "uncertainty": { "type": ["number", "null"], "minimum": 0, "maximum": 1 } }
+        },
+        "content": { "$ref": "#/$defs/jsonObject" },
+        "callerClaims": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "evidenceAuthority": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schemaVersion", "kind", "authoritySha256"],
+          "properties": {
+            "schemaVersion": { "const": "vnext-evidence-authority-v1" },
+            "kind": { "const": "unverified" },
+            "authoritySha256": { "$ref": "#/$defs/sha" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schemaVersion", "kind", "fixtureId", "authoritySha256"],
+          "properties": {
+            "schemaVersion": { "const": "vnext-evidence-authority-v1" },
+            "kind": { "const": "fixture" },
+            "fixtureId": { "$ref": "#/$defs/id" },
+            "authoritySha256": { "$ref": "#/$defs/sha" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["schemaVersion", "kind", "verifierId", "sourceRunId", "sourceCompletedAt", "primaryEvidenceSha256", "leaseEvidenceSha256", "preparationEvidenceSha256", "authoritySha256"],
+          "properties": {
+            "schemaVersion": { "const": "vnext-evidence-authority-v1" },
+            "kind": { "const": "verifier-owned" },
+            "verifierId": { "const": "adaptive-recursive-canary-v2-replay" },
+            "sourceRunId": { "$ref": "#/$defs/id" },
+            "sourceCompletedAt": { "$ref": "#/$defs/dateTime" },
+            "primaryEvidenceSha256": { "$ref": "#/$defs/sha" },
+            "leaseEvidenceSha256": { "$ref": "#/$defs/sha" },
+            "preparationEvidenceSha256": { "$ref": "#/$defs/sha" },
+            "authoritySha256": { "$ref": "#/$defs/sha" }
+          }
+        }
+      ]
+    },
+    "recordCompatibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["domains", "tags", "component", "schemaVersions", "models", "harnessSha256s", "toolEnvironmentSha256s", "permissions", "securityRequirements", "versionConstraints"],
+      "properties": { "domains": { "$ref": "#/$defs/stringSet" }, "tags": { "$ref": "#/$defs/stringSet" }, "component": { "type": ["string", "null"], "maxLength": 120 }, "schemaVersions": { "$ref": "#/$defs/stringSet" }, "models": { "$ref": "#/$defs/stringSet" }, "harnessSha256s": { "$ref": "#/$defs/hashSet" }, "toolEnvironmentSha256s": { "$ref": "#/$defs/hashSet" }, "permissions": { "$ref": "#/$defs/stringSet" }, "securityRequirements": { "$ref": "#/$defs/stringSet" }, "versionConstraints": { "$ref": "#/$defs/stringSet" } }
+    },
+    "locator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "symbol", "symbolSha256", "startLine", "endLine", "sourceSha256", "locatorSha256"],
+      "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 500 }, "symbol": { "type": "string", "minLength": 1, "maxLength": 240 }, "symbolSha256": { "$ref": "#/$defs/sha" }, "startLine": { "type": "integer", "minimum": 1 }, "endLine": { "type": "integer", "minimum": 1 }, "sourceSha256": { "$ref": "#/$defs/sha" }, "locatorSha256": { "$ref": "#/$defs/sha" } }
+    },
+    "behaviorMap": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "repositoryRootSha256", "authority", "canAuthorizeEdits", "behaviors", "behaviorMapSha256"],
+      "properties": {
+        "schemaVersion": { "const": "vnext-harness-handbook-v1" },
+        "repositoryRootSha256": { "$ref": "#/$defs/sha" },
+        "authority": { "const": "descriptive-source-map-only" },
+        "canAuthorizeEdits": { "const": false },
+        "behaviors": {
+          "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "description", "locators", "tests", "dependencies", "permissions", "summary"],
+            "properties": { "id": { "$ref": "#/$defs/id" }, "description": { "$ref": "#/$defs/nonEmpty" }, "locators": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/locator" } }, "tests": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/locator" } }, "dependencies": { "$ref": "#/$defs/stringSet" }, "permissions": { "$ref": "#/$defs/stringSet" }, "summary": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["text", "authority", "canAuthorizeEdits"], "properties": { "text": { "$ref": "#/$defs/nonEmpty" }, "authority": { "const": "descriptive-only" }, "canAuthorizeEdits": { "const": false } } }] } }
+          }
+        },
+        "behaviorMapSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "targetCompatibility": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "component": { "type": "string", "minLength": 1 }, "domains": { "$ref": "#/$defs/stringSet" }, "schemaVersions": { "$ref": "#/$defs/stringSet" }, "model": { "type": "string", "minLength": 1 }, "models": { "$ref": "#/$defs/stringSet" }, "harnessSha256": { "$ref": "#/$defs/sha" }, "harnessSha256s": { "$ref": "#/$defs/hashSet" }, "toolEnvironmentSha256": { "$ref": "#/$defs/sha" }, "toolEnvironmentSha256s": { "$ref": "#/$defs/hashSet" }, "permissions": { "$ref": "#/$defs/stringSet" }, "securityRequirements": { "$ref": "#/$defs/stringSet" }, "versionConstraints": { "$ref": "#/$defs/stringSet" } }
+    },
+    "externalSource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "url", "title", "authorityClass", "retrievedAt", "content", "contentSha256"],
+      "properties": { "id": { "$ref": "#/$defs/id" }, "url": { "type": "string", "format": "uri", "pattern": "^https://" }, "title": { "type": "string", "minLength": 1, "maxLength": 500 }, "authorityClass": { "const": "primary" }, "retrievedAt": { "$ref": "#/$defs/dateTime" }, "content": { "type": "string", "minLength": 1, "maxLength": 32000 }, "contentSha256": { "$ref": "#/$defs/sha" } }
+    },
+    "modelRoute": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "reasoningEffort", "identityPolicy"],
+      "properties": { "model": { "type": "string", "minLength": 1, "maxLength": 120 }, "reasoningEffort": { "type": "string", "minLength": 1, "maxLength": 40 }, "identityPolicy": { "$ref": "vnext-model-identity-policy-v1.schema.json" } }
+    },
+    "callBudget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maxInputTokens", "maxOutputTokens"],
+      "properties": { "maxInputTokens": { "type": "integer", "minimum": 1 }, "maxOutputTokens": { "type": "integer", "minimum": 1 } }
+    },
+    "preparation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["failure", "evidenceRecords", "behaviorMap", "targetBehaviorIds", "feedbackArtifacts", "architectureFacts", "architectureConstraints", "publicMeasurementContract", "compatibility", "embeddings", "queryEmbedding", "maximumCandidates", "maximumSelected", "exploreUncertainty", "enableModelReranker", "internalResearchEnabled", "hypothesisFalsificationEnabled", "externalResearchEnabled", "sealedMode", "externalSources", "externalSourceAllowlist", "dossierMaximumItems", "dossierMaximumBytes", "candidateStrategy", "candidateFeatureFlags", "candidateStrategyState", "protectedSurfaces", "maxOperations", "modelPolicy", "callBudgets"],
+      "properties": {
+        "failure": { "$ref": "#/$defs/failureInput" },
+        "evidenceRecords": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/evidenceRecord" } },
+        "behaviorMap": { "$ref": "#/$defs/behaviorMap" },
+        "targetBehaviorIds": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "feedbackArtifacts": { "type": "array", "maxItems": 64, "items": { "$ref": "vnext-stage-envelope-v1.schema.json" } },
+        "architectureFacts": { "$ref": "#/$defs/jsonObject" },
+        "architectureConstraints": { "$ref": "#/$defs/stringSet" },
+        "publicMeasurementContract": { "$ref": "#/$defs/jsonObject" },
+        "compatibility": { "$ref": "#/$defs/targetCompatibility" },
+        "embeddings": { "type": "object", "propertyNames": { "$ref": "#/$defs/id" }, "additionalProperties": { "type": "array", "minItems": 1, "maxItems": 4096, "items": { "type": "number" } } },
+        "queryEmbedding": { "anyOf": [{ "type": "null" }, { "type": "array", "minItems": 1, "maxItems": 4096, "items": { "type": "number" } }] },
+        "maximumCandidates": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maximumSelected": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "exploreUncertainty": { "type": "boolean" },
+        "enableModelReranker": { "type": "boolean" },
+        "internalResearchEnabled": { "type": "boolean" },
+        "hypothesisFalsificationEnabled": { "type": "boolean" },
+        "externalResearchEnabled": { "type": "boolean" },
+        "sealedMode": { "type": "boolean" },
+        "externalSources": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/externalSource" } },
+        "externalSourceAllowlist": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" } },
+        "externalResearchPolicy": { "anyOf": [{ "type": "null" }, { "$ref": "vnext-external-research-policy-v1.schema.json" }] },
+        "dossierMaximumItems": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "dossierMaximumBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 },
+        "candidateStrategy": { "enum": ["native", "reflective-pareto", "bounded-skill", "bank-recombination", "code-level-experimental"] },
+        "candidateFeatureFlags": {
+          "type": "object", "additionalProperties": false,
+          "properties": { "vnextCandidateNativeEnabled": { "type": "boolean" }, "vnextCandidateReflectiveParetoEnabled": { "type": "boolean" }, "vnextCandidateBoundedSkillEnabled": { "type": "boolean" }, "vnextCandidateBankRecombinationEnabled": { "type": "boolean" }, "vnextCandidateCodeLevelExperimentalEnabled": { "type": "boolean" } }
+        },
+        "candidateStrategyState": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/jsonObject" }] },
+        "protectedSurfaces": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 240 } },
+        "maxOperations": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "modelPolicy": {
+          "type": "object", "additionalProperties": false,
+          "required": ["candidate-generator", "falsifier-initial", "falsifier-revision", "hypothesis-reviser", "hypothesizer", "reranker", "researcher"],
+          "properties": { "candidate-generator": { "$ref": "#/$defs/modelRoute" }, "external-researcher": { "$ref": "#/$defs/modelRoute" }, "falsifier-initial": { "$ref": "#/$defs/modelRoute" }, "falsifier-revision": { "$ref": "#/$defs/modelRoute" }, "hypothesis-reviser": { "$ref": "#/$defs/modelRoute" }, "hypothesizer": { "$ref": "#/$defs/modelRoute" }, "reranker": { "$ref": "#/$defs/modelRoute" }, "researcher": { "$ref": "#/$defs/modelRoute" } }
+        },
+        "callBudgets": {
+          "type": "object", "additionalProperties": false,
+          "required": ["candidate-generator", "falsifier", "hypothesizer", "reranker", "researcher"],
+          "properties": { "candidate-generator": { "$ref": "#/$defs/callBudget" }, "external-researcher": { "$ref": "#/$defs/callBudget" }, "falsifier": { "$ref": "#/$defs/callBudget" }, "hypothesizer": { "$ref": "#/$defs/callBudget" }, "reranker": { "$ref": "#/$defs/callBudget" }, "researcher": { "$ref": "#/$defs/callBudget" } }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "externalResearchEnabled": { "const": true } }, "required": ["externalResearchEnabled"] },
+          "then": {
+            "required": ["externalResearchPolicy"],
+            "properties": {
+              "externalResearchPolicy": { "$ref": "vnext-external-research-policy-v1.schema.json" },
+              "externalSources": { "maxItems": 0 },
+              "modelPolicy": { "required": ["external-researcher"] },
+              "callBudgets": { "required": ["external-researcher"] }
+            }
+          }
+        }
+      ]
+    },
+    "mutationObjective": {
+      "type": "object", "additionalProperties": false,
+      "required": ["measurementId", "measurementSha256", "failureCaseSetSha256", "successCaseSetSha256", "targetMetric", "direction"],
+      "properties": { "measurementId": { "type": "string", "pattern": "^measurement-[a-f0-9]{24}$" }, "measurementSha256": { "$ref": "#/$defs/sha" }, "failureCaseSetSha256": { "$ref": "#/$defs/sha" }, "successCaseSetSha256": { "$ref": "#/$defs/sha" }, "targetMetric": { "enum": ["code-rate", "control-exact-rate", "decision-rate", "exact-case-rate", "full-repair-rate", "target-exact-rate", "token-cost"] }, "direction": { "enum": ["increase", "decrease"] } }
+    },
+    "mechanism": {
+      "type": "object", "additionalProperties": false,
+      "required": ["parentFamily", "mutationObjective", "reasonCodes", "expectedEffectCode"],
+      "properties": { "parentFamily": { "$ref": "mechanism-family-v1.schema.json" }, "mutationObjective": { "$ref": "#/$defs/mutationObjective" }, "reasonCodes": { "type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" } }, "expectedEffectCode": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" } }
+    },
+    "recursiveCanary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "reasoningEffort", "authMode", "retries", "promotionEnabled", "historicalTokenEstimate", "replicatesPerArm", "calibrationRule", "confirmationRule", "perCallBudget"],
+      "properties": { "model": { "type": "string", "minLength": 1, "maxLength": 120 }, "reasoningEffort": { "type": "string", "minLength": 1, "maxLength": 40 }, "authMode": { "const": "chatgpt-oauth" }, "retries": { "const": 0 }, "promotionEnabled": { "const": false }, "historicalTokenEstimate": { "type": "integer", "minimum": 1 }, "replicatesPerArm": { "const": 3 }, "calibrationRule": { "const": "paired-placebo-upper-bound-v1" }, "confirmationRule": { "const": "five-task-adjusted-sign-test-v1" }, "perCallBudget": { "$ref": "#/$defs/callBudget" } }
+    },
+    "lambdaPolicy": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": { "kind": { "const": "fixed" }, "value": { "type": "number", "minimum": 0, "maximum": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "maximum", "priorLosses", "priorWins"], "properties": { "kind": { "const": "predictable-empirical" }, "maximum": { "type": "number", "minimum": 0, "maximum": 1 }, "priorLosses": { "type": "number", "exclusiveMinimum": 0 }, "priorWins": { "type": "number", "exclusiveMinimum": 0 } } }
+      ]
+    },
+    "pace": {
+      "type": "object", "additionalProperties": false,
+      "required": ["lambdaPolicy", "maximumShamMovement", "maximumRelativeTokenIncrease"],
+      "properties": { "lambdaPolicy": { "$ref": "#/$defs/lambdaPolicy" }, "maximumShamMovement": { "type": "number", "minimum": 0 }, "maximumRelativeTokenIncrease": { "type": "number", "minimum": 0 } }
+    }
+  }
+}

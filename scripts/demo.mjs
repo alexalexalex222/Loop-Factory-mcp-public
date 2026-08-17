@@ -11,6 +11,7 @@ import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { buildMeasuredContent, DEFAULT_QUALITY_ORACLE } from '../src/measure.mjs';
 import { createStore } from '../src/store.mjs';
 import { reviewDecisionBinding } from '../src/review-decisions.mjs';
+import { BUILDER_GATING_ROUTES, DEFAULT_PRIMARY_MODEL } from '../src/constants.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEMO_HOME = join(ROOT, 'proof', '.super-loop-demo');
@@ -104,7 +105,8 @@ async function main() {
   expect('initialized with no further questions', initd.status === 'OK' && !initd.questions);
   expect('init surfaces the stop-condition notice up front', initd.stopCondition === 'WARNING: You are the stop condition. This loop does not stop until you stop it.');
   expect('defaults model policy persisted on the run (primary + banlist default)',
-    initd.modelPolicy && initd.modelPolicy.primary === 'claude-opus-4-8' && initd.modelPolicy.banlist.mode === 'default');
+    initd.modelPolicy && initd.modelPolicy.primary === DEFAULT_PRIMARY_MODEL && initd.modelPolicy.banlist.mode === 'default');
+  const [routeA, routeB, routeC] = initd.modelPolicy.testRoutes;
 
   log('\n=== 3b. Deeper explanation honored only when asked (leak #2) ===');
   expect('no deeper explanation when the operator says keep moving', !initd.deeperExplanation);
@@ -165,7 +167,7 @@ async function main() {
     && cs.branchRetirementThreshold === 30 && Array.isArray(cs.lanes) && cs.lanes.length >= 2
     && cs.modelPolicy && cs.modelPolicy.banlist && cs.modelPolicy.banlist.mode === 'default'
     && JSON.stringify(cs.builderGatingRoutes) === JSON.stringify(cs.modelPolicy.builderRoutes)
-    && JSON.stringify(cs.modelPolicy.builderRoutes) === JSON.stringify(['claude-opus-4-8', 'glm-5.2']));
+    && JSON.stringify(cs.modelPolicy.builderRoutes) === JSON.stringify(BUILDER_GATING_ROUTES));
 
   log('\n=== 5. Benchmark-first: hash-lock baseline, freeze scorecard, set the bar ===');
   const baselineFixture = [
@@ -294,9 +296,9 @@ async function main() {
     && confResolve.model && confResolve.model.primary === 'claude-haiku-4-5');
 
   const reg = await call('register_hypotheses', { runId: RUN, hypotheses: [
-    { title: 'restructure reader routing', bottleneck: 'precision', operation: 'restructure', route: { model: 'claude-opus-4-8' } },
-    { title: 'add contradiction sweep gate', bottleneck: 'false positives', operation: 'verify', route: { model: 'gpt-5.5' } },
-    { title: 'compress evidence schema', bottleneck: 'cost', operation: 'remove', route: { model: 'glm-5.2' } }
+    { title: 'restructure reader routing', bottleneck: 'precision', operation: 'restructure', route: { model: routeA } },
+    { title: 'add contradiction sweep gate', bottleneck: 'false positives', operation: 'verify', route: { model: routeB } },
+    { title: 'compress evidence schema', bottleneck: 'cost', operation: 'remove', route: { model: routeC } }
   ] });
   log('registered:', reg.hypothesisIds.join(', '));
   expect('3 frontier hypotheses accepted', reg.status === 'OK' && reg.hypothesisIds.length === 3);
@@ -304,7 +306,7 @@ async function main() {
 
   log('\n=== 7. Full test (3 frontier agents, tool-measured) ===');
   const refs = [];
-  for (const [m, c, q] of [['claude-opus-4-8', 1010, 0.80], ['gpt-5.5', 1000, 0.83], ['glm-5.2', 1015, 0.82]]) {
+  for (const [m, c, q] of [[routeA, 1010, 0.80], [routeB, 1000, 0.83], [routeC, 1015, 0.82]]) {
     refs.push({ model: m, measurementRef: (await call('artifact_record', { runId: RUN, name: `run-${m}`, role: 'runlog', content: buildMeasuredContent(c, q), measurement: { tokenCost: c, quality: q } })).artifactId });
   }
   const ft = await call('test_hypothesis', { runId: RUN, hypothesisId: winner, fullTest: { agentRuns: refs } });
@@ -364,9 +366,9 @@ async function main() {
   const nextReg = await call('register_hypotheses', {
     runId: RUN,
     hypotheses: [
-      { title: 'next-lane-a', bottleneck: 'next bottleneck', operation: 'restructure', route: { model: 'claude-opus-4-8' } },
-      { title: 'next-lane-b', bottleneck: 'next bottleneck', operation: 'verify', route: { model: 'gpt-5.5' } },
-      { title: 'next-lane-c', bottleneck: 'next bottleneck', operation: 'route', route: { model: 'glm-5.2' } }
+      { title: 'next-lane-a', bottleneck: 'next bottleneck', operation: 'restructure', route: { model: routeA } },
+      { title: 'next-lane-b', bottleneck: 'next bottleneck', operation: 'verify', route: { model: routeB } },
+      { title: 'next-lane-c', bottleneck: 'next bottleneck', operation: 'route', route: { model: routeC } }
     ]
   });
   expect('a real progress tool clears the continuation obligation', nextReg.status === 'OK' && nextReg.continuation.required === false);

@@ -34,6 +34,22 @@ test('portability contract freezes tool names and package binary names', () => {
     'super-loop-mcp': 'src/server.mjs',
     'super-loop-run': 'scripts/run-campaign.mjs'
   });
+  assert.equal(pkg.engines.node, '>=22');
+  assert.equal(pkg.scripts['vnext:custodian:plan'],
+    'node scripts/plan-vnext-custodian-final.mjs');
+  assert.equal(pkg.scripts['verify:recursive-null'],
+    'node scripts/verify-adaptive-recursive-null.mjs');
+});
+
+test('combined portability workflow covers every supported OS and runtime floor', () => {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/portability.yml'), 'utf8');
+  for (const value of [
+    'ubuntu-latest', 'windows-latest', 'macos-latest',
+    'node: [22]', 'npm test', 'npm run package:smoke',
+    'npm run verify:recursive-null'
+  ]) {
+    assert.equal(workflow.includes(value), true, `workflow includes ${value}`);
+  }
 });
 
 test('worker execution remains opt-in and disabled by default', () => {

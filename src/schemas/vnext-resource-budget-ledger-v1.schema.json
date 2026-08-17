@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-resource-budget-ledger-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "policy", "createdAt", "entries", "ledgerSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-resource-budget-ledger-v1" },
+    "runId": { "$ref": "#/$defs/id" },
+    "policy": { "$ref": "vnext-resource-budget-v1.schema.json" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "ledgerSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] },
+    "entry": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["index", "kind", "reservationId", "callId", "maxInputTokens", "maxOutputTokens", "maxUsdMicros", "createdAt", "previousEntrySha256", "entrySha256"],
+          "properties": { "index": { "type": "integer", "minimum": 0 }, "kind": { "const": "reservation" }, "reservationId": { "$ref": "#/$defs/id" }, "callId": { "$ref": "#/$defs/id" }, "maxInputTokens": { "type": "integer", "minimum": 1 }, "maxOutputTokens": { "type": "integer", "minimum": 1 }, "maxUsdMicros": { "type": "integer", "minimum": 0 }, "createdAt": { "type": "string", "format": "date-time" }, "previousEntrySha256": { "$ref": "#/$defs/nullableSha" }, "entrySha256": { "$ref": "#/$defs/sha" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["index", "kind", "reservationId", "inputTokens", "outputTokens", "usdMicros", "usageAuthority", "settledAt", "withinReservation", "previousEntrySha256", "entrySha256"],
+          "properties": { "index": { "type": "integer", "minimum": 0 }, "kind": { "const": "settlement" }, "reservationId": { "$ref": "#/$defs/id" }, "inputTokens": { "type": "integer", "minimum": 0 }, "outputTokens": { "type": "integer", "minimum": 0 }, "usdMicros": { "type": "integer", "minimum": 0 }, "usageAuthority": { "enum": ["cli-receipt", "provider-receipt"] }, "settledAt": { "type": "string", "format": "date-time" }, "withinReservation": { "type": "boolean" }, "previousEntrySha256": { "$ref": "#/$defs/nullableSha" }, "entrySha256": { "$ref": "#/$defs/sha" } }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "adaptive-transfer-cohort-v1",
+  "title": "Five-task confirmatory adaptive transfer cohort",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "privateEvidencePolicy",
+    "model",
+    "fixtureOnly",
+    "historicalTokenEstimate",
+    "maxConcurrency",
+    "seed",
+    "developmentEvidenceSources",
+    "developmentEvidenceManifest",
+    "developmentEvidenceCapsule",
+    "heldOutEvidenceSources",
+    "heldOutEvidenceManifest",
+    "heldOutEvidenceCapsule",
+    "mechanismEvidenceSources",
+    "mechanismEvidenceManifest",
+    "mechanismEvidenceCapsule",
+    "mechanismEvidenceRefs",
+    "implementationManifest",
+    "implementationCapsule",
+    "runtimeAuthority",
+    "mechanismContext",
+    "tasks"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "adaptive-transfer-cohort-v1" },
+    "privateEvidencePolicy": { "const": "source-qualified-v2" },
+    "model": { "const": "gpt-5.6-sol" },
+    "fixtureOnly": { "type": "boolean" },
+    "historicalTokenEstimate": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "maxConcurrency": { "const": 2 },
+    "seed": { "type": "string", "minLength": 8 },
+    "approvedPlanSha256": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "developmentEvidenceSources": { "$ref": "#/definitions/pathList" },
+    "developmentEvidenceManifest": { "$ref": "#/definitions/manifest" },
+    "developmentEvidenceCapsule": { "$ref": "#/definitions/capsule" },
+    "heldOutEvidenceSources": { "$ref": "#/definitions/pathList" },
+    "heldOutEvidenceManifest": { "$ref": "#/definitions/manifest" },
+    "heldOutEvidenceCapsule": { "$ref": "#/definitions/capsule" },
+    "mechanismEvidenceSources": { "$ref": "#/definitions/pathList" },
+    "mechanismEvidenceManifest": { "$ref": "#/definitions/manifest" },
+    "mechanismEvidenceCapsule": { "$ref": "#/definitions/capsule" },
+    "mechanismEvidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/evidenceRef" }
+    },
+    "implementationManifest": { "$ref": "#/definitions/manifest" },
+    "implementationCapsule": { "$ref": "#/definitions/capsule" },
+    "runtimeAuthority": { "type": "object" },
+    "mechanismContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["families", "applications", "policyEpoch"],
+      "properties": {
+        "families": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "object" }
+        },
+        "applications": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "object" }
+        },
+        "policyEpoch": { "type": "object" }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/definitions/task" }
+    }
+  },
+  "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "pathList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "not": { "pattern": "^(?:/|\\.\\.(?:/|$))" }
+      }
+    },
+    "manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "$ref": "#/definitions/sha256" }
+        }
+      }
+    },
+    "capsule": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "bytes", "sha256", "content"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "$ref": "#/definitions/sha256" },
+          "content": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "locator"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "locator": { "type": "string", "minLength": 1 }
+      }
+    },
+    "visibleCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "prompt", "evidenceRef"],
+      "properties": {
+        "id": { "type": "string", "minLength": 8 },
+        "prompt": { "type": "string", "minLength": 16 },
+        "evidenceRef": { "$ref": "#/definitions/evidenceRef" },
+        "baselineFailureRef": { "$ref": "#/definitions/evidenceRef" }
+      }
+    },
+    "proposalBrief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "problem", "invariants"],
+      "properties": {
+        "title": { "type": "string", "minLength": 8 },
+        "problem": { "type": "string", "minLength": 24 },
+        "invariants": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 8 }
+        }
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "bottleneck",
+        "operation",
+        "expectedMovement",
+        "falsifier"
+      ],
+      "properties": {
+        "title": { "type": "string", "minLength": 12 },
+        "bottleneck": { "type": "string", "minLength": 12 },
+        "operation": { "type": "string", "minLength": 12 },
+        "expectedMovement": { "type": "string", "minLength": 12 },
+        "falsifier": { "type": "string", "minLength": 12 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "findingId",
+        "title",
+        "baselineContent",
+        "evidenceRefs",
+        "proposalBrief",
+        "hypothesis"
+      ],
+      "properties": {
+        "findingId": {
+          "type": "string",
+          "pattern": "^finding-[0-9]{3}$"
+        },
+        "title": { "type": "string", "minLength": 8 },
+        "baselineContent": { "type": "string", "minLength": 120 },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/evidenceRef" }
+        },
+        "proposalBrief": { "$ref": "#/definitions/proposalBrief" },
+        "hypothesis": { "$ref": "#/definitions/hypothesis" }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "seed",
+        "hypothesisCount",
+        "routingDecision",
+        "candidatePool",
+        "routedCapsule",
+        "shamCapsule",
+        "primaryFamilyId"
+      ],
+      "properties": {
+        "target": { "type": "object" },
+        "seed": { "type": "string", "minLength": 8 },
+        "hypothesisCount": { "type": "integer", "minimum": 1 },
+        "routingDecision": { "type": "object" },
+        "candidatePool": { "type": "object" },
+        "routedCapsule": { "type": "object" },
+        "shamCapsule": { "type": "object" },
+        "primaryFamilyId": {
+          "type": "string",
+          "pattern": "^family-[a-f0-9]{24}$"
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "target",
+        "developmentEvidencePaths",
+        "heldOutEvidencePaths",
+        "developmentCases",
+        "heldOutCases",
+        "oracle",
+        "routing"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 8 },
+        "target": { "$ref": "#/definitions/target" },
+        "developmentEvidencePaths": { "$ref": "#/definitions/pathList" },
+        "heldOutEvidencePaths": { "$ref": "#/definitions/pathList" },
+        "developmentCases": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": { "$ref": "#/definitions/visibleCase" }
+        },
+        "heldOutCases": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 10,
+          "items": { "$ref": "#/definitions/visibleCase" }
+        },
+        "oracle": { "type": "object" },
+        "routing": { "$ref": "#/definitions/routing" }
+      }
+    }
+  }
+}

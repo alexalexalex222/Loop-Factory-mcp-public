@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loop-factory.local/schemas/vnext-stage-envelope-v1.schema.json",
+  "title": "Loop Factory VNext stage artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "stage",
+    "status",
+    "createdAt",
+    "authority",
+    "inputRefs",
+    "permittedInformation",
+    "forbiddenInformation",
+    "provenance",
+    "replay",
+    "failure",
+    "payload",
+    "artifactId",
+    "artifactSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-stage-envelope-v1" },
+    "stage": {
+      "enum": [
+        "failure-normalization",
+        "internal-research",
+        "external-research",
+        "research-dossier",
+        "hypothesis",
+        "falsification",
+        "retrieval",
+        "candidate-generation",
+        "candidate-execution",
+        "objective-verification",
+        "semantic-evaluation",
+        "statistical-admission",
+        "evidence-bank-update",
+        "routing-only-deployment",
+        "monitoring",
+        "operator-action"
+      ]
+    },
+    "status": { "enum": ["OK", "ABSTAINED", "REFUSED", "BLOCKED", "INVALID"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorId", "kind", "model", "promptSha256", "toolPolicy"],
+      "properties": {
+        "actorId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+        "kind": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "model": { "type": ["string", "null"], "maxLength": 120 },
+        "promptSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "toolPolicy": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "inputRefs": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "permittedInformation": { "$ref": "#/$defs/stringSet" },
+    "forbiddenInformation": { "$ref": "#/$defs/stringSet" },
+    "provenance": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "observedAt", "sha256", "uri"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+          "kind": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "observedAt": { "type": ["string", "null"], "format": "date-time" },
+          "sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "uri": { "type": ["string", "null"], "maxLength": 2048 }
+        }
+      }
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "exportName", "version"],
+      "properties": {
+        "module": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "exportName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "failure": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+            "message": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      ]
+    },
+    "payload": { "$ref": "#/$defs/jsonObject" },
+    "artifactId": { "type": "string", "pattern": "^vnext-[A-Za-z0-9._-]+-[a-f0-9]{20}$" },
+    "artifactSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "schemaVersion", "sha256"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+        "schemaVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "stringSet": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "type": "string", "minLength": 1, "maxLength": 240 }
+    },
+    "jsonObject": { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } },
+    "jsonValue": { "anyOf": [{ "type": "null" }, { "type": "boolean" }, { "type": "number" }, { "type": "string" }, { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } }, { "$ref": "#/$defs/jsonObject" }] }
+  }
+}

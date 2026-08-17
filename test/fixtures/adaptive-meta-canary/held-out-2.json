@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "adaptive-meta-canary-held-out-v1",
+  "shardId": "held-out-2",
+  "scenarios": [
+    {
+      "id": "hidden-2-target",
+      "baselineDisposition": "COUNTED",
+      "condition": "The persisted stdout hash differs from the invocation receipt."
+    },
+    {
+      "id": "hidden-2-clean",
+      "condition": "The stdout hash rederives and every required artifact is sealed."
+    },
+    {
+      "id": "hidden-2-control",
+      "condition": "The worker exits nonzero before producing a measurement."
+    }
+  ]
+}

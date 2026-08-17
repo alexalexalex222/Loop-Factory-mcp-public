@@ -1,0 +1,226 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mechanism-program-v1",
+  "title": "Closed-world executable mechanism program",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "bindingPolicy",
+    "roles",
+    "selectors",
+    "bindings",
+    "forbiddenBindings",
+    "metrics",
+    "rules",
+    "fallback"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "mechanism-program-v1" },
+    "bindingPolicy": { "const": "closed-world" },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 80,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/role" }
+    },
+    "selectors": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "#/definitions/selector" }
+    },
+    "bindings": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/definitions/binding" }
+    },
+    "forbiddenBindings": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/definitions/forbiddenBinding" }
+    },
+    "metrics": {
+      "type": "array",
+      "maxItems": 30,
+      "items": { "$ref": "#/definitions/metric" }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 40,
+      "items": { "$ref": "#/definitions/rule" }
+    },
+    "fallback": { "$ref": "#/definitions/emit" }
+  },
+  "definitions": {
+    "role": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,79}(\\.[a-z][a-z0-9-]{0,79})*$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,79}$"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,119}$"
+    },
+    "roleOperand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "const": "role" },
+        "id": { "$ref": "#/definitions/role" }
+      }
+    },
+    "referenceOperand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["metric", "binding"] },
+        "id": { "$ref": "#/definitions/id" }
+      }
+    },
+    "literalOperand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "literal" },
+        "value": {
+          "type": ["string", "number", "boolean", "null"],
+          "maxLength": 120
+        }
+      }
+    },
+    "operand": {
+      "oneOf": [
+        { "$ref": "#/definitions/roleOperand" },
+        { "$ref": "#/definitions/referenceOperand" },
+        { "$ref": "#/definitions/literalOperand" }
+      ]
+    },
+    "compareCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator", "left", "right"],
+      "properties": {
+        "operator": {
+          "enum": [
+            "equal",
+            "not-equal",
+            "less-than",
+            "less-or-equal",
+            "greater-than",
+            "greater-or-equal"
+          ]
+        },
+        "left": { "$ref": "#/definitions/operand" },
+        "right": { "$ref": "#/definitions/operand" }
+      }
+    },
+    "notCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator", "condition"],
+      "properties": {
+        "operator": { "const": "not" },
+        "condition": { "$ref": "#/definitions/condition" }
+      }
+    },
+    "logicCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator", "conditions"],
+      "properties": {
+        "operator": { "enum": ["all", "any"] },
+        "conditions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "$ref": "#/definitions/condition" }
+        }
+      }
+    },
+    "condition": {
+      "oneOf": [
+        { "$ref": "#/definitions/compareCondition" },
+        { "$ref": "#/definitions/notCondition" },
+        { "$ref": "#/definitions/logicCondition" }
+      ]
+    },
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selectorId", "collectionRole", "match"],
+      "properties": {
+        "selectorId": { "$ref": "#/definitions/id" },
+        "collectionRole": { "$ref": "#/definitions/role" },
+        "match": { "$ref": "#/definitions/condition" }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindingId", "operator", "leftRole", "rightRole"],
+      "properties": {
+        "bindingId": { "$ref": "#/definitions/id" },
+        "operator": { "const": "equal" },
+        "leftRole": { "$ref": "#/definitions/role" },
+        "rightRole": { "$ref": "#/definitions/role" }
+      }
+    },
+    "forbiddenBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leftRole", "rightRole", "reasonCode"],
+      "properties": {
+        "leftRole": { "$ref": "#/definitions/role" },
+        "rightRole": { "$ref": "#/definitions/role" },
+        "reasonCode": { "$ref": "#/definitions/code" }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metricId", "operator", "leftRole", "rightRole"],
+      "properties": {
+        "metricId": { "$ref": "#/definitions/id" },
+        "operator": {
+          "enum": ["subtract", "relative-decrease", "relative-increase"]
+        },
+        "leftRole": { "$ref": "#/definitions/role" },
+        "rightRole": { "$ref": "#/definitions/role" }
+      }
+    },
+    "emit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "code"],
+      "properties": {
+        "decision": { "enum": ["ACCEPT", "REJECT"] },
+        "code": { "$ref": "#/definitions/code" }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "kind", "exceptionOf", "when", "emit"],
+      "properties": {
+        "ruleId": { "$ref": "#/definitions/id" },
+        "kind": { "enum": ["guard", "decision", "exception"] },
+        "exceptionOf": {
+          "oneOf": [
+            { "$ref": "#/definitions/id" },
+            { "type": "null" }
+          ]
+        },
+        "when": { "$ref": "#/definitions/condition" },
+        "emit": { "$ref": "#/definitions/emit" }
+      }
+    }
+  }
+}

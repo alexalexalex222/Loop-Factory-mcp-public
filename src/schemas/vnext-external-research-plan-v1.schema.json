@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "planId", "createdAt", "failureSha256", "retrievalSha256", "queries", "allowlist", "sources", "maximumSources", "maximumPerSourceBytes", "maximumTotalBytes", "timeoutMs", "networkEnabled", "sealedMode", "activationAuthority", "planSha256"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-external-research-plan-v1" },
+    "planId": { "$ref": "#/$defs/id" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "failureSha256": { "$ref": "#/$defs/sha" },
+    "retrievalSha256": { "$ref": "#/$defs/sha" },
+    "queries": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 500 } },
+    "allowlist": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" } },
+    "sources": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/source" } },
+    "maximumSources": { "type": "integer", "minimum": 1, "maximum": 32 },
+    "maximumPerSourceBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 },
+    "maximumTotalBytes": { "type": "integer", "minimum": 1024, "maximum": 8388608 },
+    "timeoutMs": { "type": "integer", "minimum": 250, "maximum": 60000 },
+    "networkEnabled": { "const": true },
+    "sealedMode": { "const": false },
+    "activationAuthority": { "const": false },
+    "planSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "url", "title", "reason", "authorityClass"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/id" },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "authorityClass": { "const": "primary" }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "facts", "counterexamples", "uncertainties", "unansweredQuestions"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-research-output-v1" },
+    "facts": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "sourceIds", "confidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "statement": { "$ref": "#/$defs/text" },
+          "sourceIds": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/id" } },
+          "confidence": { "enum": ["high", "medium", "low"] }
+        }
+      }
+    },
+    "counterexamples": { "$ref": "#/$defs/textArray" },
+    "uncertainties": { "$ref": "#/$defs/textArray" },
+    "unansweredQuestions": { "$ref": "#/$defs/textArray" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "textArray": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/text" } }
+  }
+}

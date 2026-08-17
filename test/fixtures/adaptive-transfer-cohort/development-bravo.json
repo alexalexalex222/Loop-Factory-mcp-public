@@ -1,0 +1,7 @@
+{
+  "finding": "finding-002",
+  "cases": [
+    { "id": "bravo-dev-gap", "observation": "bravo development target remains unresolved" },
+    { "id": "bravo-dev-control", "observation": "bravo development control remains stable" }
+  ]
+}

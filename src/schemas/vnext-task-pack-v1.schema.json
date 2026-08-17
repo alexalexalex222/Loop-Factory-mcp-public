@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "packId", "partition", "createdAt", "builderAuthority", "evaluatorAuthority", "artifactRootSha256", "priorIdentitySetSha256", "tasks", "taskIdentitySetSha256", "leakageChecks", "packSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-task-pack-v1" },
+    "packId": { "$ref": "#/$defs/id" },
+    "partition": { "enum": ["development", "validation", "final"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "builderAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["deterministic-tool", "operator", "external-custodian"] }
+      }
+    },
+    "evaluatorAuthority": { "$ref": "vnext-wave-config-v1.schema.json#/$defs/evaluatorAuthority" },
+    "artifactRootSha256": { "$ref": "#/$defs/sha" },
+    "priorIdentitySetSha256": { "$ref": "#/$defs/sha" },
+    "tasks": { "type": "array", "minItems": 2, "maxItems": 1000, "items": { "$ref": "#/$defs/task" } },
+    "taskIdentitySetSha256": { "$ref": "#/$defs/sha" },
+    "leakageChecks": { "type": "array", "minItems": 2, "maxItems": 1000, "items": { "$ref": "#/$defs/leakageCheck" } },
+    "packSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "baselineFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "taskId", "artifactId", "artifactSha256", "verifierEvidenceSha256", "baselineArtifactSha256", "evaluatorAuthoritySha256", "sourceSha256", "interfaceSha256", "oracleSha256", "interfaceCoverageSha256", "targetFailureIds", "controlPassIds", "evaluation"],
+      "properties": {
+        "status": { "const": "VERIFIED_FAILURE" },
+        "taskId": { "$ref": "#/$defs/id" },
+        "artifactId": { "$ref": "#/$defs/id" },
+        "artifactSha256": { "$ref": "#/$defs/sha" },
+        "verifierEvidenceSha256": { "$ref": "#/$defs/sha" },
+        "baselineArtifactSha256": { "$ref": "#/$defs/sha" },
+        "evaluatorAuthoritySha256": { "$ref": "#/$defs/sha" },
+        "sourceSha256": { "$ref": "#/$defs/sha" },
+        "interfaceSha256": { "$ref": "#/$defs/sha" },
+        "oracleSha256": { "$ref": "#/$defs/sha" },
+        "interfaceCoverageSha256": { "$ref": "#/$defs/sha" },
+        "targetFailureIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "controlPassIds": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "evaluation": { "$ref": "#/$defs/evaluation" }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "clusterId", "domain", "tags", "source", "incident", "interface", "oracle", "interfaceContractSha256", "publicTaskSpecSha256", "baselineFailure"],
+      "properties": {
+        "taskId": { "$ref": "#/$defs/id" },
+        "clusterId": { "$ref": "#/$defs/id" },
+        "domain": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "tags": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 120 } },
+        "source": { "$ref": "#/$defs/binding" },
+        "incident": { "$ref": "#/$defs/binding" },
+        "interface": { "$ref": "#/$defs/binding" },
+        "oracle": { "$ref": "#/$defs/binding" },
+        "interfaceContractSha256": { "$ref": "#/$defs/sha" },
+        "publicTaskSpecSha256": { "$ref": "#/$defs/sha" },
+        "baselineFailure": { "$ref": "#/$defs/baselineFailure" }
+      }
+    },
+    "leakageCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "directOracleLeak"],
+      "properties": {
+        "taskId": { "$ref": "#/$defs/id" },
+        "directOracleLeak": { "const": false }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrumentValid", "candidateExecuted", "code", "exitCode", "signal", "timedOut", "outputShapeValid", "targetQuality", "controlQuality", "decisionTargetQuality", "decisionControlQuality", "codeTargetQuality", "codeControlQuality", "results", "stdoutSha256", "stderrSha256", "sandbox"],
+      "properties": {
+        "instrumentValid": { "const": true },
+        "candidateExecuted": { "const": true },
+        "code": { "const": "EXECUTED" },
+        "exitCode": { "const": 0 },
+        "signal": { "type": "null" },
+        "timedOut": { "const": false },
+        "outputShapeValid": { "const": true },
+        "targetQuality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "controlQuality": { "const": 1 },
+        "decisionTargetQuality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "decisionControlQuality": { "const": 1 },
+        "codeTargetQuality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "codeControlQuality": { "const": 1 },
+        "results": {
+          "type": "array", "minItems": 5,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "group", "pass", "decisionPass", "codePass", "actual"],
+            "properties": { "id": { "$ref": "#/$defs/id" }, "group": { "enum": ["target", "control"] }, "pass": { "type": "boolean" }, "decisionPass": { "type": "boolean" }, "codePass": { "type": "boolean" }, "actual": { "$ref": "#/$defs/jsonValue" } }
+          }
+        },
+        "stdoutSha256": { "$ref": "#/$defs/sha" },
+        "stderrSha256": { "$ref": "#/$defs/sha" },
+        "sandbox": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "argv", "profileSha256"],
+          "properties": { "path": { "type": ["string", "null"] }, "argv": { "type": "array", "items": { "type": "string" } }, "profileSha256": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] } }
+        }
+      }
+    },
+    "jsonValue": { "anyOf": [{ "type": "null" }, { "type": "boolean" }, { "type": "number" }, { "type": "string" }, { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } }, { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } }] }
+    }
+  }

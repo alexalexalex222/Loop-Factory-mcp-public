@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "adaptive-meta-canary-held-out-v1",
+  "shardId": "held-out-4",
+  "scenarios": [
+    {
+      "id": "hidden-4-target",
+      "baselineDisposition": "COUNTED",
+      "condition": "The measurement reference exists but its artifact cannot be read back."
+    },
+    {
+      "id": "hidden-4-clean",
+      "condition": "The measurement artifact is readable and matches its recorded hash."
+    },
+    {
+      "id": "hidden-4-control",
+      "condition": "The isolated worker transcript contains a prohibited tool event."
+    }
+  ]
+}

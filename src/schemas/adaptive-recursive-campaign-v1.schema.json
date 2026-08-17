@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adaptive-recursive-campaign-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "model",
+    "reasoningEffort",
+    "authMode",
+    "retries",
+    "promotionEnabled",
+    "maximumGenerations",
+    "maximumMutationOperations",
+    "historicalTokenEstimatePerGeneration",
+    "seedParentFamily",
+    "seedObjective",
+    "context",
+    "taskGenerations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "adaptive-recursive-campaign-v1" },
+    "model": { "enum": ["gpt-5.6-luna", "gpt-5.6-sol"] },
+    "reasoningEffort": { "enum": ["high", "xhigh", "max"] },
+    "authMode": { "const": "chatgpt-oauth" },
+    "retries": { "const": 0 },
+    "promotionEnabled": { "const": false },
+    "maximumGenerations": { "type": "integer", "minimum": 1, "maximum": 50 },
+    "maximumMutationOperations": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "historicalTokenEstimatePerGeneration": { "type": "integer", "minimum": 1 },
+    "seedParentFamily": { "type": "object" },
+    "seedObjective": { "type": "object" },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minInputTokens",
+        "initialInputTokens",
+        "maxInputTokens",
+        "permanentControlFraction"
+      ],
+      "properties": {
+        "minInputTokens": { "type": "integer", "minimum": 1 },
+        "initialInputTokens": { "type": "integer", "minimum": 1 },
+        "maxInputTokens": { "type": "integer", "minimum": 1 },
+        "permanentControlFraction": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        }
+      }
+    },
+    "taskGenerations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["generation", "calibrationTasks", "confirmationTasks"],
+        "properties": {
+          "generation": { "type": "integer", "minimum": 0 },
+          "calibrationTasks": { "type": "array", "minItems": 5, "maxItems": 5 },
+          "confirmationTasks": { "type": "array", "minItems": 5, "maxItems": 5 }
+        }
+      }
+    }
+  }
+}

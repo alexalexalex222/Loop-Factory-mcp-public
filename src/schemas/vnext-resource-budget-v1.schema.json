@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policyId", "maxCalls", "maxInputTokens", "maxOutputTokens", "maxTotalTokens", "maxUsdMicros", "inputUsdMicrosPerMillionTokens", "outputUsdMicrosPerMillionTokens", "billingMode", "currency", "policySha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-resource-budget-v1" },
+    "policyId": { "$ref": "#/$defs/id" },
+    "maxCalls": { "type": "integer", "minimum": 1 },
+    "maxInputTokens": { "type": "integer", "minimum": 1 },
+    "maxOutputTokens": { "type": "integer", "minimum": 1 },
+    "maxTotalTokens": { "type": "integer", "minimum": 1 },
+    "maxUsdMicros": { "type": "integer", "minimum": 0 },
+    "inputUsdMicrosPerMillionTokens": { "type": "integer", "minimum": 0 },
+    "outputUsdMicrosPerMillionTokens": { "type": "integer", "minimum": 0 },
+    "billingMode": { "enum": ["metered", "subscription-no-metered-usd"] },
+    "currency": { "const": "USD" },
+    "policySha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

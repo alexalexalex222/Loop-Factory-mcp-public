@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "adaptive-transfer-cohort-v1",
+  "privateEvidencePolicy": "source-qualified-v2",
+  "model": "gpt-5.6-sol",
+  "fixtureOnly": false,
+  "historicalTokenEstimate": null,
+  "maxConcurrency": 2,
+  "seed": "[FROZEN_COHORT_SEED]",
+  "developmentEvidenceSources": [
+    "[TASK_ALPHA_DEVELOPMENT_PATH]",
+    "[TASK_BRAVO_DEVELOPMENT_PATH]",
+    "[TASK_CINDER_DEVELOPMENT_PATH]",
+    "[TASK_DELTA_DEVELOPMENT_PATH]",
+    "[TASK_EMBER_DEVELOPMENT_PATH]"
+  ],
+  "heldOutEvidenceSources": [
+    "[TASK_ALPHA_HELD_OUT_PATH]",
+    "[TASK_BRAVO_HELD_OUT_PATH]",
+    "[TASK_CINDER_HELD_OUT_PATH]",
+    "[TASK_DELTA_HELD_OUT_PATH]",
+    "[TASK_EMBER_HELD_OUT_PATH]"
+  ],
+  "mechanismEvidenceSources": [
+    "[PRIVATE_MECHANISM_EVIDENCE_PATH]"
+  ],
+  "mechanismEvidenceRefs": [
+    {
+      "path": "[PRIVATE_MECHANISM_EVIDENCE_PATH]",
+      "locator": "[EXACT_PRIVATE_MECHANISM_LOCATOR]"
+    }
+  ],
+  "mechanismContext": {
+    "families": [
+      "[VALID_MECHANISM_FAMILY_V1_RECORD]"
+    ],
+    "applications": [
+      "[VALID_MECHANISM_APPLICATION_V1_RECORDS]"
+    ],
+    "policyEpoch": "[VALID_META_POLICY_EPOCH_V1_RECORD]"
+  },
+  "tasks": [
+    {
+      "id": "transfer-alpha",
+      "target": {
+        "findingId": "finding-001",
+        "title": "[ALPHA_FINDING_TITLE]",
+        "baselineContent": "[COMPLETE_ALPHA_BASELINE_PROCEDURE]",
+        "evidenceRefs": [
+          {
+            "path": "[TASK_ALPHA_DEVELOPMENT_PATH]",
+            "locator": "[EXACT_ALPHA_DEVELOPMENT_LOCATOR]"
+          }
+        ],
+        "proposalBrief": {
+          "title": "[ALPHA_NON_PRESCRIPTIVE_TITLE]",
+          "problem": "[ALPHA_OBSERVED_PROBLEM_WITHOUT_HELD_OUT_ANSWER]",
+          "invariants": [
+            "[ALPHA_PROTECTED_BEHAVIOR_ONE]",
+            "[ALPHA_PROTECTED_BEHAVIOR_TWO]"
+          ]
+        },
+        "hypothesis": {
+          "title": "[ALPHA_PREDECLARED_HYPOTHESIS]",
+          "bottleneck": "[ALPHA_CAUSAL_BOTTLENECK]",
+          "operation": "[ALPHA_EXPECTED_OPERATION]",
+          "expectedMovement": "[ALPHA_EXPECTED_MOVEMENT]",
+          "falsifier": "[ALPHA_REJECTING_OBSERVATION]"
+        }
+      },
+      "developmentEvidencePaths": [
+        "[TASK_ALPHA_DEVELOPMENT_PATH]"
+      ],
+      "heldOutEvidencePaths": [
+        "[TASK_ALPHA_HELD_OUT_PATH]"
+      ],
+      "developmentCases": [
+        "[TWO_TO_TEN_ALPHA_PROPOSAL_VISIBLE_CASE_OBJECTS]"
+      ],
+      "heldOutCases": [
+        "[THREE_TO_TEN_ALPHA_HIDDEN_TARGET_AND_CONTROL_CASE_OBJECTS]"
+      ],
+      "oracle": "[ALPHA_CASE_RESULTS_V2_ORACLE]",
+      "routing": {
+        "target": "[ALPHA_ROUTING_TARGET]",
+        "seed": "[ALPHA_ROUTING_SEED]",
+        "hypothesisCount": 2,
+        "routingDecision": "[ALPHA_REPLAYABLE_ROUTING_DECISION]",
+        "candidatePool": "[ALPHA_REPLAYABLE_CANDIDATE_POOL]",
+        "routedCapsule": "[ALPHA_ROUTED_MECHANISM_CAPSULE]",
+        "shamCapsule": "[ALPHA_SCHEMA_IDENTICAL_SHAM_CAPSULE]",
+        "primaryFamilyId": "[SHARED_PRIMARY_FAMILY_ID]"
+      }
+    },
+    {
+      "id": "transfer-bravo",
+      "target": "[BRAVO_TARGET_MATCHING_ALPHA_SHAPE]",
+      "developmentEvidencePaths": ["[TASK_BRAVO_DEVELOPMENT_PATH]"],
+      "heldOutEvidencePaths": ["[TASK_BRAVO_HELD_OUT_PATH]"],
+      "developmentCases": ["[BRAVO_DEVELOPMENT_CASES]"],
+      "heldOutCases": ["[BRAVO_HELD_OUT_CASES]"],
+      "oracle": "[BRAVO_CASE_RESULTS_V2_ORACLE]",
+      "routing": "[BRAVO_ROUTING_RECORDS_FOR_SHARED_PRIMARY_FAMILY]"
+    },
+    {
+      "id": "transfer-cinder",
+      "target": "[CINDER_TARGET_MATCHING_ALPHA_SHAPE]",
+      "developmentEvidencePaths": ["[TASK_CINDER_DEVELOPMENT_PATH]"],
+      "heldOutEvidencePaths": ["[TASK_CINDER_HELD_OUT_PATH]"],
+      "developmentCases": ["[CINDER_DEVELOPMENT_CASES]"],
+      "heldOutCases": ["[CINDER_HELD_OUT_CASES]"],
+      "oracle": "[CINDER_CASE_RESULTS_V2_ORACLE]",
+      "routing": "[CINDER_ROUTING_RECORDS_FOR_SHARED_PRIMARY_FAMILY]"
+    },
+    {
+      "id": "transfer-delta",
+      "target": "[DELTA_TARGET_MATCHING_ALPHA_SHAPE]",
+      "developmentEvidencePaths": ["[TASK_DELTA_DEVELOPMENT_PATH]"],
+      "heldOutEvidencePaths": ["[TASK_DELTA_HELD_OUT_PATH]"],
+      "developmentCases": ["[DELTA_DEVELOPMENT_CASES]"],
+      "heldOutCases": ["[DELTA_HELD_OUT_CASES]"],
+      "oracle": "[DELTA_CASE_RESULTS_V2_ORACLE]",
+      "routing": "[DELTA_ROUTING_RECORDS_FOR_SHARED_PRIMARY_FAMILY]"
+    },
+    {
+      "id": "transfer-ember",
+      "target": "[EMBER_TARGET_MATCHING_ALPHA_SHAPE]",
+      "developmentEvidencePaths": ["[TASK_EMBER_DEVELOPMENT_PATH]"],
+      "heldOutEvidencePaths": ["[TASK_EMBER_HELD_OUT_PATH]"],
+      "developmentCases": ["[EMBER_DEVELOPMENT_CASES]"],
+      "heldOutCases": ["[EMBER_HELD_OUT_CASES]"],
+      "oracle": "[EMBER_CASE_RESULTS_V2_ORACLE]",
+      "routing": "[EMBER_ROUTING_RECORDS_FOR_SHARED_PRIMARY_FAMILY]"
+    }
+  ]
+}

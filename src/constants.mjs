@@ -114,17 +114,21 @@ export const NEVER_STOP_ON = [
 // (see src/models.mjs). These constants are the DEFAULT policy data only — the
 // active policy for a run lives on that run's state. The agent is still told to
 // web-search current SOTA before committing to a long campaign.
-export const DEFAULT_PRIMARY_MODEL = 'claude-opus-4-8';
+export const DEFAULT_PRIMARY_MODEL = 'gpt-5.6-sol';
 
 // Named current-frontier routes (advisory only — the active banlist mode is the hard gate).
-export const KNOWN_FRONTIER_EXAMPLES = ['claude-opus-4-8', 'gpt-5.5', 'glm-5.2', 'gemini-3-pro'];
+export const KNOWN_FRONTIER_EXAMPLES = [
+  'gpt-5.6-sol',
+  'claude-fable-5',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna'
+];
 
-// Default builder / in-loop gating routes (Opus 4.8 / GLM 5.2). Codex/GPT remains
-// a supported HOST surface but is NOT a trusted in-loop builder under the default
-// policy (it keeps re-architecting the spec). Operator-chosen modelPolicy.builderRoutes
-// can widen or re-target this list at init. This does not narrow the general
-// frontier set used for hypothesis test workers under the default banlist.
-export const BUILDER_GATING_ROUTES = ['claude-opus-4-8', 'glm-5.2'];
+// Default builder / in-loop gating routes. Fable 5 is the default independent
+// builder/judge; GPT-5.6 Sol is also trusted because the final production run
+// demonstrated measured, reverified improvement through that exact route.
+// Operators can still replace this list per run through modelPolicy.
+export const BUILDER_GATING_ROUTES = ['claude-fable-5', 'gpt-5.6-sol'];
 
 export const DEFAULTS = {
   failurePatience: 12, // consecutive no-improvement full tests before a RISK ADVISORY (spec: 10–15); advisory never stops the run
@@ -199,7 +203,7 @@ export const BLOCK = {
   // Reserved / documented: not currently emitted by any tool path. Kept so
   // callers and docs share one vocabulary if a lane op is added later.
   NO_ACTIVE_LANE: 'NO_ACTIVE_LANE',               // reserved — a supervisor lane op with no active lane
-  BUILDER_ROUTE: 'BUILDER_ROUTE',                 // a build / in-loop gating step routed to a non-builder (e.g. codex/gpt) worker
+  BUILDER_ROUTE: 'BUILDER_ROUTE',                 // a build / in-loop gating step routed to a host alias or evaluator-only model
   EXEC_DISABLED: 'EXEC_DISABLED',                 // live worker execution requested but SUPER_LOOP_ALLOW_EXEC is not set
   EXEC_FAILED: 'EXEC_FAILED',                     // a launched worker failed/timed out/was not allowlisted → invalid batch (does not count)
   ROUTE_UNSPAWNABLE: 'ROUTE_UNSPAWNABLE',         // a registered route has no executor binary (opencode not on PATH) and was not recorded manually with provenance

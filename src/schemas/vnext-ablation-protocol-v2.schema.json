@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "protocolId", "createdAt", "parentFamilyId",
+    "parentFamilySha256", "modelPolicy", "evaluatorProof",
+    "consumedEvaluatorProofs", "implementationSha256", "packs",
+    "identityLedger", "phases", "selectionRule", "inferencePolicy", "exposure",
+    "authority", "protocolSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-ablation-protocol-v2" },
+    "protocolId": { "$ref": "#/$defs/id" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "parentFamilyId": { "$ref": "#/$defs/id" },
+    "parentFamilySha256": { "$ref": "#/$defs/sha" },
+    "modelPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoningEffort", "authMode"],
+      "properties": {
+        "model": { "const": "gpt-5.6-sol" },
+        "reasoningEffort": { "const": "high" },
+        "authMode": { "const": "chatgpt-oauth" }
+      }
+    },
+    "evaluatorProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "proofHome", "proofId", "planSha256", "resultSha256",
+        "evidenceSha256", "implementationSha256", "productionEvidence",
+        "activationAuthority"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "loop-factory-vnext-evaluator-proof-binding-v1" },
+        "proofHome": { "type": "string", "minLength": 1 },
+        "proofId": { "$ref": "#/$defs/id" },
+        "planSha256": { "$ref": "#/$defs/sha" },
+        "resultSha256": { "$ref": "#/$defs/sha" },
+        "evidenceSha256": { "$ref": "#/$defs/sha" },
+        "implementationSha256": { "$ref": "#/$defs/sha" },
+        "productionEvidence": { "const": true },
+        "activationAuthority": { "const": false }
+      }
+    },
+    "consumedEvaluatorProofs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion", "proofHome", "proofId", "planSha256",
+          "planFileSha256", "launchSha256", "launchFileSha256",
+          "failureEvidencePath", "failureEvidenceSha256", "status",
+          "maximumCalls", "retriesAuthorized"
+        ],
+        "properties": {
+          "schemaVersion": { "const": "loop-factory-vnext-consumed-evaluator-proof-v1" },
+          "proofHome": { "type": "string", "minLength": 1 },
+          "proofId": { "$ref": "#/$defs/id" },
+          "planSha256": { "$ref": "#/$defs/sha" },
+          "planFileSha256": { "$ref": "#/$defs/sha" },
+          "launchSha256": { "$ref": "#/$defs/sha" },
+          "launchFileSha256": { "$ref": "#/$defs/sha" },
+          "failureEvidencePath": { "type": "string", "minLength": 1 },
+          "failureEvidenceSha256": { "$ref": "#/$defs/sha" },
+          "status": { "const": "CONSUMED_FAILURE_NO_RETRY" },
+          "maximumCalls": { "const": 1 },
+          "retriesAuthorized": { "const": false }
+        }
+      }
+    },
+    "implementationSha256": { "$ref": "#/$defs/sha" },
+    "packs": { "type": "array", "minItems": 5, "maxItems": 5, "items": {} },
+    "identityLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "algorithm", "identityCount", "identityDigests",
+        "ledgerSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "vnext-internal-identity-digest-ledger-v1" },
+        "algorithm": { "const": "sha256" },
+        "identityCount": { "type": "integer", "minimum": 1 },
+        "identityDigests": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha" }
+        },
+        "ledgerSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phaseId", "packRole", "mode", "arms", "memoryPolicy",
+          "plansShareMemorySnapshot", "continuationGate", "packSha256",
+          "taskIdentitySetSha256", "maximumCalls", "promotionEnabled"
+        ],
+        "properties": {
+          "phaseId": { "$ref": "#/$defs/id" },
+          "packRole": { "enum": ["generation", "retrieval", "generator", "validation", "transfer"] },
+          "mode": { "type": "string", "minLength": 1 },
+          "arms": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+          "memoryPolicy": { "type": "string", "minLength": 1 },
+          "plansShareMemorySnapshot": { "const": true },
+          "continuationGate": { "type": "string", "minLength": 1 },
+          "packSha256": { "$ref": "#/$defs/sha" },
+          "taskIdentitySetSha256": { "$ref": "#/$defs/sha" },
+          "maximumCalls": { "type": "integer", "minimum": 1 },
+          "promotionEnabled": { "const": false }
+        }
+      }
+    },
+    "selectionRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "developmentAuthority", "eligibleGeneratorArms",
+        "requiredBeforeSelection", "order", "abstainWhenNoEligibleArm",
+        "selectedCandidateCount"
+      ],
+      "properties": {
+        "developmentAuthority": { "const": "selection-only-no-generalized-claim" },
+        "eligibleGeneratorArms": { "const": ["B5a", "B5b", "B5c"] },
+        "requiredBeforeSelection": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": { "type": "string" } },
+        "order": { "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": { "type": "string" } },
+        "abstainWhenNoEligibleArm": { "const": true },
+        "selectedCandidateCount": { "const": 1 }
+      }
+    },
+    "inferencePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "developmentResultsAreNotFinalClaims", "finalValidationCandidateCount",
+        "validationAlpha", "transferRequiresExactFrozenCandidate",
+        "transferMayRegenerateCandidate", "generalizedClaimRequiresValidationAndTransfer",
+        "finalCustodianConfirmationStillRequired", "taskClusterIsStatisticalUnit",
+        "noRepeatedFinalOpening"
+      ],
+      "properties": {
+        "developmentResultsAreNotFinalClaims": { "const": true },
+        "finalValidationCandidateCount": { "const": 1 },
+        "validationAlpha": { "const": 0.05 },
+        "transferRequiresExactFrozenCandidate": { "const": true },
+        "transferMayRegenerateCandidate": { "const": false },
+        "generalizedClaimRequiresValidationAndTransfer": { "const": true },
+        "finalCustodianConfirmationStillRequired": { "const": true },
+        "taskClusterIsStatisticalUnit": { "const": true },
+        "noRepeatedFinalOpening": { "const": true }
+      }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "liveEvaluatorCalls", "internalMaximumCalls",
+        "externalCustodianMaximumCalls", "retriesPerCall", "hardUsdCeiling",
+        "billingMode", "stagedApprovalRequired"
+      ],
+      "properties": {
+        "liveEvaluatorCalls": { "type": "integer", "minimum": 1 },
+        "internalMaximumCalls": { "type": "integer", "minimum": 1 },
+        "externalCustodianMaximumCalls": { "const": 120 },
+        "retriesPerCall": { "const": 0 },
+        "hardUsdCeiling": { "const": 0 },
+        "billingMode": { "const": "subscription-no-metered-usd" },
+        "stagedApprovalRequired": { "const": true }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementationAgentMayAccessInternalPacks",
+        "implementationAgentMayAccessFinalCustodianPack", "activationAuthority",
+        "promotionAuthorized"
+      ],
+      "properties": {
+        "implementationAgentMayAccessInternalPacks": { "const": true },
+        "implementationAgentMayAccessFinalCustodianPack": { "const": false },
+        "activationAuthority": { "const": false },
+        "promotionAuthorized": { "const": false }
+      }
+    },
+    "protocolSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

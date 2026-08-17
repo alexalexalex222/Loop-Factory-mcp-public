@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "verdict", "summary", "falsifiers", "confounds", "requiredControls", "contradictions", "smallerEdit", "distinct", "evidenceIds"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-falsification-output-v1" },
+    "verdict": { "enum": ["REJECT", "REVISE", "TEST"] },
+    "summary": { "$ref": "#/$defs/text" },
+    "falsifiers": { "$ref": "#/$defs/textArray" },
+    "confounds": { "$ref": "#/$defs/textArray" },
+    "requiredControls": { "$ref": "#/$defs/textArray" },
+    "contradictions": { "$ref": "#/$defs/textArray" },
+    "smallerEdit": { "$ref": "#/$defs/text" },
+    "distinct": { "type": "boolean" },
+    "evidenceIds": { "type": "array", "maxItems": 128, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" } }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "textArray": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/text" } }
+  }
+}

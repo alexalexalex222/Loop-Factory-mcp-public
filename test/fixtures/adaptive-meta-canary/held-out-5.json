@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "adaptive-meta-canary-held-out-v1",
+  "shardId": "held-out-5",
+  "scenarios": [
+    {
+      "id": "hidden-5-target",
+      "baselineDisposition": "COUNTED",
+      "condition": "A caller-provided token total reaches the score row before CLI usage is rederived."
+    },
+    {
+      "id": "hidden-5-clean",
+      "condition": "CLI token usage rederives exactly from the raw worker transcript."
+    },
+    {
+      "id": "hidden-5-control",
+      "condition": "The procedure receives malformed nonempty JSONL transport."
+    }
+  ]
+}

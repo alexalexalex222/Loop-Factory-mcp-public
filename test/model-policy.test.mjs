@@ -27,25 +27,27 @@ test('defaultModelPolicy schema matches the v1 contract', () => {
 });
 
 test('normalizeModelPolicy fills missing fields from defaults', () => {
-  const p = normalizeModelPolicy({ primary: 'gpt-5.5', banlist: { mode: 'off' } }, { source: 'operator-init' });
-  assert.equal(p.primary, 'gpt-5.5');
+  const p = normalizeModelPolicy({ primary: 'gpt-5.6-terra', banlist: { mode: 'off' } }, { source: 'operator-init' });
+  assert.equal(p.primary, 'gpt-5.6-terra');
+  assert.equal(p.judgeRoute, 'claude-fable-5');
   assert.equal(p.banlist.mode, 'off');
   assert.equal(p.source, 'operator-init');
   assert.ok(p.builderRoutes.length >= 1);
   assert.equal(p.version, 1);
 });
 
-test('gpt-5.6-sol preset selects GPT-5.6 Sol for primary/test work without widening builder or judge trust', () => {
+test('gpt-5.6-sol preset uses current GPT-5.6 and Fable 5 routes', () => {
   const p = modelPolicyPreset('gpt-5.6-sol');
   assert.deepEqual(p, GPT56_POLICY);
   assert.equal(p.source, 'preset:gpt-5.6-sol');
   assert.equal(p.primary, 'gpt-5.6-sol');
   assert.equal(p.testRoutes[0], 'gpt-5.6-sol');
   assert.ok(p.testRoutes.includes('gpt-5.6-sol'));
+  assert.ok(p.testRoutes.includes('claude-fable-5'));
   assert.deepEqual(p.builderRoutes, ROUTES.builders);
   assert.equal(p.judgeRoute, ROUTES.judge);
   assert.equal(classifyRoute('gpt-5.6-sol', p).ok, true);
-  assert.equal(isBuilderGatingRoute('gpt-5.6-sol', p), false);
+  assert.equal(isBuilderGatingRoute('gpt-5.6-sol', p), true);
   assert.equal(modelPolicyPreset('gpt-5.6').primary, 'gpt-5.6-sol', 'family alias canonicalizes to Sol');
   assert.equal(modelPolicyPreset('unknown'), null);
 });
@@ -72,10 +74,10 @@ test('extraAllow punches a hole; extraDeny always applies', () => {
   });
   assert.equal(classifyRoute('claude-haiku-4-5', allowHaiku).ok, true);
 
-  const denyOpus = normalizeModelPolicy({
-    banlist: { mode: 'off', extraAllow: [], extraDeny: ['claude-opus'] }
+  const denyPrimary = normalizeModelPolicy({
+    banlist: { mode: 'off', extraAllow: [], extraDeny: ['gpt-5.6-sol'] }
   });
-  assert.equal(classifyRoute(ROUTES.primary, denyOpus).ok, false, 'extraDeny applies even under mode off');
+  assert.equal(classifyRoute(ROUTES.primary, denyPrimary).ok, false, 'extraDeny applies even under mode off');
 });
 
 test('empty route is always rejected (all modes)', () => {
@@ -85,15 +87,16 @@ test('empty route is always rejected (all modes)', () => {
   }
 });
 
-test('isBuilderGatingRoute respects policy; gpt-5.5 is not a default builder', () => {
+test('isBuilderGatingRoute trusts current Fable 5 and GPT-5.6 Sol defaults only', () => {
   assert.equal(isBuilderGatingRoute(ROUTES.primary, DEFAULT_POLICY), true);
+  assert.equal(isBuilderGatingRoute(ROUTES.builders[0], DEFAULT_POLICY), true);
   assert.equal(isBuilderGatingRoute(ROUTES.builders[1], DEFAULT_POLICY), true);
   assert.equal(isBuilderGatingRoute(ROUTES.nonBuilder, DEFAULT_POLICY), false);
   const bad = rejectedBuilderRoutes([ROUTES.nonBuilder], DEFAULT_POLICY);
   assert.equal(bad.length, 1);
 });
 
-test('judge fallback uses policy.primary, never a hard-coded Opus constant alone', () => {
+test('judge fallback stays on the active builder policy, never a stale hard-coded route', () => {
   const custom = normalizeModelPolicy({
     primary: 'glm-5.2',
     builderRoutes: ['glm-5.2'],
@@ -102,7 +105,7 @@ test('judge fallback uses policy.primary, never a hard-coded Opus constant alone
   });
   assert.equal(custom.judgeRoute, 'glm-5.2');
   assert.equal(isBuilderGatingRoute(custom.judgeRoute, custom), true);
-  // gpt judge still refused under this policy
+  // A route outside the explicit builder policy remains refused.
   assert.equal(isBuilderGatingRoute('gpt-5.5', custom), false);
 });
 
@@ -110,8 +113,9 @@ test('parseModelChoiceText: defaults / any model / primary name', () => {
   assert.equal(parseModelChoiceText('defaults').policy.banlist.mode, 'default');
   assert.equal(parseModelChoiceText('').policy.source, 'defaults');
   assert.equal(parseModelChoiceText('any model').policy.banlist.mode, 'off');
-  const p = parseModelChoiceText('primary: gpt-5.5');
-  assert.equal(p.policy.primary, 'gpt-5.5');
+  const p = parseModelChoiceText('primary: gpt-5.6-terra');
+  assert.equal(p.policy.primary, 'gpt-5.6-terra');
+  assert.equal(p.policy.judgeRoute, 'claude-fable-5');
   assert.equal(p.source, 'operator-init');
   const preset = parseModelChoiceText('use the gpt-5.6 sol preset');
   assert.equal(preset.source, 'preset:gpt-5.6-sol');
@@ -237,7 +241,7 @@ test('engine init refuses an unknown model preset instead of silently falling ba
 });
 
 test('rejectedRoutes under default still bans the historical set', () => {
-  const bad = rejectedRoutes(['claude-haiku-4-5', 'gpt-5.5-mini', 'gpt-4o'], DEFAULT_POLICY);
+  const bad = rejectedRoutes(['claude-haiku-4-5', 'gpt-5.6-mini', 'gpt-4o'], DEFAULT_POLICY);
   assert.equal(bad.length, 3);
 });
 

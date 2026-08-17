@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "adaptive-transfer-study-v1",
+  "model": "gpt-5.6-sol",
+  "fixtureOnly": false,
+  "historicalTokenEstimate": null,
+  "seed": "[FROZEN_STUDY_SEED]",
+  "qualificationStopRule": "first-five-or-impossible-v1",
+  "candidates": [
+    {
+      "id": "candidate-alpha",
+      "qualificationConfigPath": "[ALPHA_QUALIFICATION_ONLY_META_CANARY_CONFIG]",
+      "confirmationConfigPath": "[ALPHA_FRESH_CONFIRMATION_META_CANARY_CONFIG]"
+    },
+    {
+      "id": "candidate-bravo",
+      "qualificationConfigPath": "[BRAVO_QUALIFICATION_ONLY_META_CANARY_CONFIG]",
+      "confirmationConfigPath": "[BRAVO_FRESH_CONFIRMATION_META_CANARY_CONFIG]"
+    },
+    {
+      "id": "candidate-cinder",
+      "qualificationConfigPath": "[CINDER_QUALIFICATION_ONLY_META_CANARY_CONFIG]",
+      "confirmationConfigPath": "[CINDER_FRESH_CONFIRMATION_META_CANARY_CONFIG]"
+    },
+    {
+      "id": "candidate-delta",
+      "qualificationConfigPath": "[DELTA_QUALIFICATION_ONLY_META_CANARY_CONFIG]",
+      "confirmationConfigPath": "[DELTA_FRESH_CONFIRMATION_META_CANARY_CONFIG]"
+    },
+    {
+      "id": "candidate-ember",
+      "qualificationConfigPath": "[EMBER_QUALIFICATION_ONLY_META_CANARY_CONFIG]",
+      "confirmationConfigPath": "[EMBER_FRESH_CONFIRMATION_META_CANARY_CONFIG]"
+    }
+  ]
+}

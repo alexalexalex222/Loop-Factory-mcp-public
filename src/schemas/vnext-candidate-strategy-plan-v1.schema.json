@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "strategy", "plannerId", "plannerVersion", "decisionTime", "inputSha256", "context", "policy", "activationAuthority", "planSha256"],
+  "properties": {
+    "schemaVersion": { "const": "vnext-candidate-strategy-plan-v1" },
+    "strategy": { "enum": ["native", "reflective-pareto", "bounded-skill", "bank-recombination", "code-level-experimental"] },
+    "plannerId": { "$ref": "#/$defs/id" },
+    "plannerVersion": { "const": "v1" },
+    "decisionTime": { "type": "string", "format": "date-time" },
+    "inputSha256": { "$ref": "#/$defs/sha" },
+    "context": {},
+    "policy": {},
+    "activationAuthority": { "const": false },
+    "planSha256": { "$ref": "#/$defs/sha" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "strategy": { "const": "native" } } },
+      "then": { "properties": { "plannerId": { "const": "native-evidence-edit-v1" }, "context": { "$ref": "#/$defs/nativeContext" }, "policy": { "$ref": "#/$defs/nativePolicy" } } }
+    },
+    {
+      "if": { "properties": { "strategy": { "const": "reflective-pareto" } } },
+      "then": { "properties": { "plannerId": { "const": "reflective-pareto-v1" }, "context": { "$ref": "#/$defs/reflectiveContext" }, "policy": { "$ref": "#/$defs/reflectivePolicy" } } }
+    },
+    {
+      "if": { "properties": { "strategy": { "const": "bounded-skill" } } },
+      "then": { "properties": { "plannerId": { "const": "bounded-skill-v1" }, "context": { "$ref": "#/$defs/skillContext" }, "policy": { "$ref": "#/$defs/skillPolicy" } } }
+    },
+    {
+      "if": { "properties": { "strategy": { "const": "bank-recombination" } } },
+      "then": { "properties": { "plannerId": { "const": "bank-recombination-v1" }, "context": { "$ref": "#/$defs/bankContext" }, "policy": { "$ref": "#/$defs/bankPolicy" } } }
+    },
+    {
+      "if": { "properties": { "strategy": { "const": "code-level-experimental" } } },
+      "then": { "properties": { "plannerId": { "const": "guarded-code-level-v1" }, "context": { "$ref": "#/$defs/codeContext" }, "policy": { "$ref": "#/$defs/codePolicy" } } }
+    }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "idSet": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "stringSet": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 500 } },
+    "nativeContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["selectedEvidenceIds", "allowedTargets"],
+      "properties": { "selectedEvidenceIds": { "$ref": "#/$defs/idSet" }, "allowedTargets": { "$ref": "#/$defs/stringSet" } }
+    },
+    "nativePolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["directEvidenceEdit", "maximumPrimaryChanges"],
+      "properties": { "directEvidenceEdit": { "const": true }, "maximumPrimaryChanges": { "type": "integer", "minimum": 1, "maximum": 3 } }
+    },
+    "trajectory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["trajectoryId", "outcome", "quality", "tokenCost", "regressions", "summary", "evidenceIds", "availableAt"],
+      "properties": {
+        "trajectoryId": { "$ref": "#/$defs/id" }, "outcome": { "enum": ["success", "failure", "tradeoff"] },
+        "quality": { "type": "number" }, "tokenCost": { "type": "number", "minimum": 0 },
+        "regressions": { "type": "integer", "minimum": 0 }, "summary": { "$ref": "#/$defs/text" },
+        "evidenceIds": { "$ref": "#/$defs/idSet" }, "availableAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "reflectiveContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["trajectories", "paretoFrontierIds", "failureTrajectoryIds", "archiveSha256"],
+      "properties": {
+        "trajectories": { "type": "array", "minItems": 2, "maxItems": 64, "items": { "$ref": "#/$defs/trajectory" } },
+        "paretoFrontierIds": { "$ref": "#/$defs/idSet" }, "failureTrajectoryIds": { "$ref": "#/$defs/idSet" },
+        "archiveSha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "reflectivePolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["preserveParetoFrontier", "requireFrontierEvidence", "requireFailureEvidence", "maximumPrimaryChanges"],
+      "properties": {
+        "preserveParetoFrontier": { "const": true }, "requireFrontierEvidence": { "const": true },
+        "requireFailureEvidence": { "const": true }, "maximumPrimaryChanges": { "const": 1 }
+      }
+    },
+    "skillItem": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target", "sha256", "value"],
+      "properties": { "target": { "type": "string", "minLength": 1, "maxLength": 500 }, "sha256": { "$ref": "#/$defs/sha" }, "value": { "$ref": "#/$defs/text" } }
+    },
+    "skill": {
+      "type": "object", "additionalProperties": false,
+      "required": ["skillId", "version", "items"],
+      "properties": { "skillId": { "$ref": "#/$defs/id" }, "version": { "$ref": "#/$defs/id" }, "items": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/skillItem" } } }
+    },
+    "reflection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reflectionId", "evidenceId", "statement", "availableAt", "kind"],
+      "properties": { "reflectionId": { "$ref": "#/$defs/id" }, "evidenceId": { "$ref": "#/$defs/id" }, "statement": { "$ref": "#/$defs/text" }, "availableAt": { "type": "string", "format": "date-time" }, "kind": { "enum": ["success", "failure"] } }
+    },
+    "skillContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["skill", "successReflections", "failureReflections"],
+      "properties": { "skill": { "$ref": "#/$defs/skill" }, "successReflections": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/reflection" } }, "failureReflections": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/reflection" } } }
+    },
+    "skillPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maximumChangedItems", "maximumChangedBytes", "reflectOnSuccessAndFailureSeparately", "allowedOperations"],
+      "properties": { "maximumChangedItems": { "type": "integer", "minimum": 1, "maximum": 3 }, "maximumChangedBytes": { "type": "integer", "minimum": 1, "maximum": 24000 }, "reflectOnSuccessAndFailureSeparately": { "const": true }, "allowedOperations": { "const": ["add", "delete", "replace"] } }
+    },
+    "donor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mechanismId", "familyId", "component", "operationKind", "content", "compatibilityTags", "incompatibleWith", "evidenceIds", "lifecycle", "qualityDelta", "regressions", "sha256"],
+      "properties": { "mechanismId": { "$ref": "#/$defs/id" }, "familyId": { "$ref": "#/$defs/id" }, "component": { "type": "string", "minLength": 1, "maxLength": 120 }, "operationKind": { "type": "string", "minLength": 1, "maxLength": 120 }, "content": { "$ref": "#/$defs/text" }, "compatibilityTags": { "$ref": "#/$defs/idSet" }, "incompatibleWith": { "$ref": "#/$defs/idSet" }, "evidenceIds": { "$ref": "#/$defs/idSet" }, "lifecycle": { "enum": ["replicated", "validated"] }, "qualityDelta": { "type": "number", "exclusiveMinimum": 0 }, "regressions": { "const": 0 }, "sha256": { "$ref": "#/$defs/sha" } }
+    },
+    "bankContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["targetTags", "donors", "donorSelectionSha256", "rejectedMechanismIds"],
+      "properties": { "targetTags": { "$ref": "#/$defs/idSet" }, "donors": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/donor" } }, "donorSelectionSha256": { "$ref": "#/$defs/sha" }, "rejectedMechanismIds": { "$ref": "#/$defs/idSet" } }
+    },
+    "bankPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requireRecombineOperation", "requireEveryDonorEvidence", "requireDistinctFamilies", "maximumPrimaryChanges"],
+      "properties": { "requireRecombineOperation": { "const": true }, "requireEveryDonorEvidence": { "const": true }, "requireDistinctFamilies": { "const": true }, "maximumPrimaryChanges": { "const": 1 } }
+    },
+    "codeContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceTargets", "requiredTests"],
+      "properties": { "sourceTargets": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "type": "object", "additionalProperties": false, "required": ["target", "sourceSha256"], "properties": { "target": { "type": "string", "minLength": 1, "maxLength": 500 }, "sourceSha256": { "$ref": "#/$defs/sha" } } } }, "requiredTests": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "object", "additionalProperties": false, "required": ["testId", "executable", "executableSha256", "args", "timeoutMs"], "properties": { "testId": { "$ref": "#/$defs/id" }, "executable": { "type": "string", "pattern": "^/", "maxLength": 500 }, "executableSha256": { "$ref": "#/$defs/sha" }, "args": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 1000 } }, "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 1800000 } } } } }
+    },
+    "codePolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["disposableWorktree", "maximumFiles", "maximumPatchBytes", "allowedOperations", "networkDuringExecution", "activationAuthority"],
+      "properties": { "disposableWorktree": { "const": true }, "maximumFiles": { "type": "integer", "minimum": 1, "maximum": 3 }, "maximumPatchBytes": { "type": "integer", "minimum": 1, "maximum": 65536 }, "allowedOperations": { "const": ["replace"] }, "networkDuringExecution": { "const": false }, "activationAuthority": { "const": false } }
+    }
+  }
+}

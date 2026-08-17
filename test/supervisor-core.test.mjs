@@ -11,6 +11,7 @@ import {
 } from '../src/supervisor.mjs';
 import { loadLoop } from '../src/loops.mjs';
 import { DEFAULT_QUALITY_ORACLE, buildMeasuredContent } from '../src/measure.mjs';
+import { createEngine } from '../src/engine.mjs';
 import { freshEngine, BASELINE_BODY, BASELINE_BODY_V2 } from './helpers.mjs';
 
 const okPacket = (route, out) => ({ route, artifacts: [{ role: 'runlog', content: out }], finalOutput: out });
@@ -444,6 +445,89 @@ test('branch retirement pivots to the next target instead of stopping the campai
   assert.doesNotMatch(r.stoppedBy, /complete/i);
 });
 
+test('a cold parent restart resumes the persisted in-flight target with the same child run id', () => {
+  const { engine, store } = freshEngine();
+  const config = {
+    runId: 'c-parent-resume-active',
+    task: 'improve',
+    noImprovePolicy: 1,
+    targets: [
+      { kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, benchmark, routes: ['gpt-5.6-sol'] },
+      { kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY_V2, benchmark, routes: ['gpt-5.6-sol'] }
+    ]
+  };
+  let baselineCalls = 0;
+  const worker = (contract) => {
+    if (contract.kind === 'baseline') baselineCalls++;
+    return mockWorker('noimprove')(contract);
+  };
+  assert.throws(() => runSupervisedCampaign(engine, config, {
+    worker,
+    maxBatches: 10,
+    onSchedulerCheckpoint: ({ status }) => {
+      if (status === 'TARGET_STARTED') throw new Error('simulated parent crash');
+    }
+  }), /simulated parent crash/);
+  assert.equal(baselineCalls, 0, 'checkpoint is durable before the first worker call');
+
+  const coldEngine = createEngine(store, { operatorAuthority: 'operator' });
+  const resumed = runSupervisedCampaign(coldEngine, config, {
+    worker,
+    maxBatches: 10
+  });
+  assert.equal(resumed.status, 'OK', resumed.message);
+  assert.equal(baselineCalls, 2);
+  assert.ok(resumed.transcript.some((entry) => (
+    entry.step === 'campaign_scheduler_resumed'
+    && entry.activeTarget === 'improve'
+  )));
+  assert.equal(resumed.scheduler.status, 'QUEUE_DRAINED');
+  assert.equal(coldEngine.campaign_status({ runId: config.runId }).scheduler.status, 'QUEUE_DRAINED');
+});
+
+test('a checkpointed completed target is not repeated after a cold parent restart', () => {
+  const { engine, store } = freshEngine();
+  const config = {
+    runId: 'c-parent-resume-complete',
+    task: 'improve',
+    noImprovePolicy: 1,
+    targets: [
+      { kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, benchmark, routes: ['gpt-5.6-sol'] },
+      { kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY_V2, benchmark, routes: ['gpt-5.6-sol'] }
+    ]
+  };
+  let baselineCalls = 0;
+  let crashed = false;
+  const worker = (contract) => {
+    if (contract.kind === 'baseline') baselineCalls++;
+    return mockWorker('noimprove')(contract);
+  };
+  assert.throws(() => runSupervisedCampaign(engine, config, {
+    worker,
+    maxBatches: 10,
+    onSchedulerCheckpoint: ({ status }) => {
+      if (status === 'TARGET_COMPLETED' && !crashed) {
+        crashed = true;
+        throw new Error('simulated post-target crash');
+      }
+    }
+  }), /simulated post-target crash/);
+  assert.equal(baselineCalls, 1);
+
+  const coldEngine = createEngine(store, { operatorAuthority: 'operator' });
+  const resumed = runSupervisedCampaign(coldEngine, config, {
+    worker,
+    maxBatches: 10
+  });
+  assert.equal(resumed.status, 'OK', resumed.message);
+  assert.equal(baselineCalls, 2, 'only the remaining target runs after restart');
+  assert.ok(resumed.transcript.some((entry) => (
+    entry.step === 'campaign_scheduler_resumed'
+    && entry.activeTarget === null
+    && entry.queuedTargets === 1
+  )));
+});
+
 test('the supervisor never self-completes; stop is the operator / safety cap', () => {
   const { engine } = freshEngine();
   const r = runSupervisedCampaign(engine, {
@@ -481,8 +565,8 @@ test('judge mode: an independent judge scores real outputs; a win QUEUES to the 
   };
   const r = runSupervisedCampaign(engine, {
     runId: 'c-judge', task: 'improve copy',
-    targets: [{ kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, routes: ['claude-opus-4-8', 'glm-5.2', 'claude-opus-4-8'],
-      benchmark: { mode: 'judge', rubric: 'clearer, more correct', judgeRoute: 'claude-opus-4-8', threshold: 0.6 } }]
+    targets: [{ kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, routes: ['gpt-5.6-sol', 'claude-fable-5', 'gpt-5.6-terra'],
+      benchmark: { mode: 'judge', rubric: 'clearer, more correct', judgeRoute: 'claude-fable-5', threshold: 0.6 } }]
   }, { worker: judgeWorker, maxBatches: 10 });
   assert.equal(r.status, 'OK');
   assert.ok(r.transcript.some((t) => t.step === 'judge_verdict' && t.winner === 'challenger'));
@@ -497,10 +581,10 @@ test('judge mode refuses a non-builder judge route (judge must match active mode
     : okPacket(contract.route, 'output');
   const r = runSupervisedCampaign(engine, {
     runId: 'c-jbad', task: 'x',
-    targets: [{ kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, routes: ['claude-opus-4-8', 'glm-5.2', 'claude-opus-4-8'],
-      benchmark: { mode: 'judge', rubric: 'r', judgeRoute: 'gpt-5.5', threshold: 0.6 } }]
+    targets: [{ kind: 'improve', loop: 'loop-de-loop', baselineContent: BASELINE_BODY, routes: ['gpt-5.6-sol', 'claude-fable-5', 'gpt-5.6-terra'],
+      benchmark: { mode: 'judge', rubric: 'r', judgeRoute: 'gpt-5.6-terra', threshold: 0.6 } }]
   }, { worker: judgeWorker, maxBatches: 3 });
-  assert.ok(r.transcript.some((t) => t.step === 'judge_error' && t.reason === 'JUDGE_ROUTE'), 'gpt-5.5 is a test worker, not a trusted judge under default modelPolicy');
+  assert.ok(r.transcript.some((t) => t.step === 'judge_error' && t.reason === 'JUDGE_ROUTE'), 'Terra is a test worker, not a trusted judge under default modelPolicy');
   assert.ok(!r.transcript.some((t) => t.step === 'subjective_win_queued'));
 });
 

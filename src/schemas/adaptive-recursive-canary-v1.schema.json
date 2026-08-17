@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "adaptive-recursive-canary-v1",
+  "title": "Four-arm disjoint recursive mechanism canary configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "model",
+    "reasoningEffort",
+    "authMode",
+    "retries",
+    "promotionEnabled",
+    "historicalTokenEstimate",
+    "parentFamily",
+    "candidateFamily",
+    "evolutionRecord",
+    "tasks"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "adaptive-recursive-canary-v1" },
+    "model": { "enum": ["gpt-5.6-luna", "gpt-5.6-sol"] },
+    "reasoningEffort": { "enum": ["high", "xhigh", "max"] },
+    "authMode": { "const": "chatgpt-oauth" },
+    "retries": { "const": 0 },
+    "promotionEnabled": { "const": false },
+    "historicalTokenEstimate": { "type": "integer", "minimum": 1 },
+    "parentFamily": { "$ref": "mechanism-family-v1.schema.json" },
+    "candidateFamily": { "$ref": "mechanism-family-v1.schema.json" },
+    "evolutionRecord": { "$ref": "mechanism-evolution-v1.schema.json" },
+    "tasks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "source", "incident", "interface", "oracle", "interfaceContract"],
+        "properties": {
+          "id": { "$ref": "#/definitions/safeId" },
+          "source": { "$ref": "#/definitions/artifact" },
+          "incident": { "$ref": "#/definitions/artifact" },
+          "interface": { "$ref": "#/definitions/artifact" },
+          "oracle": { "$ref": "#/definitions/artifact" },
+          "interfaceContract": { "$ref": "executable-interface-contract-v2.schema.json" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "sha256": { "$ref": "#/definitions/sha256" }
+      }
+    }
+  }
+}

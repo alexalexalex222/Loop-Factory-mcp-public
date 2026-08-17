@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "studyId", "runId", "role", "createdAt", "proofHome",
+    "source", "prerequisite", "custody", "protocol", "protocolBinding", "target",
+    "targetPack", "artifacts", "inner", "route", "runtimeAuthority",
+    "implementationManifest", "implementationSha256", "authority", "exposure",
+    "approval", "planSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-vnext-frozen-candidate-study-plan-v1" },
+    "studyId": { "$ref": "#/$defs/id" },
+    "runId": { "$ref": "#/$defs/id" },
+    "role": { "enum": ["transfer", "final"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "proofHome": { "type": "string", "minLength": 1 },
+    "source": { "$ref": "#/$defs/openObject" },
+    "prerequisite": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/openObject" }
+      ]
+    },
+    "custody": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/openObject" }
+      ]
+    },
+    "protocol": { "$ref": "#/$defs/openObject" },
+    "protocolBinding": { "$ref": "#/$defs/openObject" },
+    "target": { "$ref": "#/$defs/openObject" },
+    "targetPack": { "$ref": "#/$defs/openObject" },
+    "artifacts": { "$ref": "#/$defs/openObject" },
+    "inner": { "$ref": "#/$defs/openObject" },
+    "route": { "$ref": "#/$defs/openObject" },
+    "runtimeAuthority": { "$ref": "#/$defs/openObject" },
+    "implementationManifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/openObject" }
+    },
+    "implementationSha256": { "$ref": "#/$defs/sha" },
+    "authority": { "$ref": "#/$defs/openObject" },
+    "exposure": { "$ref": "#/$defs/openObject" },
+    "approval": { "$ref": "#/$defs/openObject" },
+    "planSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "openObject": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

@@ -9,15 +9,17 @@
 // anyone who does not turn it on keeps the no-execution posture unchanged.
 //
 // Safety properties (all enforced here):
-//   - native executables use direct execFileSync semantics. On Windows only, an
-//     already allowlisted .cmd/.bat shim uses the narrow adapter in process-launch.mjs.
+//   - every native executable runs through a fixed process-tree guardian. On
+//     Windows only, an already allowlisted .cmd/.bat shim first uses the narrow
+//     adapter in process-launch.mjs. Neither path accepts a shell string.
 //   - arguments are fixed ARRAYS the MCP builds; the prompt is delivered on STDIN and
 //     never placed on argv, so untrusted text cannot become a flag or a command.
 //   - a fixed binary ALLOWLIST: a route maps to one of {claude, codex, glm}; a route
 //     that maps to nothing is refused and nothing runs.
 //   - PATH resolution by filesystem stat (reused from host.mjs); a missing binary is
 //     refused, not guessed.
-//   - hard timeout + kill, bounded output buffer.
+//   - hard timeout + process-tree cleanup, bounded output buffer.
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -27,6 +29,25 @@ import { buildProcessLaunch, executeProcessSync } from './process-launch.mjs';
 import { sha256 } from './util.mjs';
 
 export const STRICT_CODEX_REASONING_EFFORT = 'high';
+const EXECUTABLE_EVIDENCE_CACHE = new Map();
+const GUARDED_EXEC_PATH = fileURLToPath(
+  new URL('../scripts/vnext-guarded-exec.mjs', import.meta.url)
+);
+
+function executableEvidence(path) {
+  const stat = statSync(path);
+  const cacheKey = `${path}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  const cached = EXECUTABLE_EVIDENCE_CACHE.get(cacheKey);
+  if (cached) return cached;
+  const evidence = {
+    basename: basename(path),
+    sha256: sha256(readFileSync(path)),
+    bytes: stat.size
+  };
+  EXECUTABLE_EVIDENCE_CACHE.clear();
+  EXECUTABLE_EVIDENCE_CACHE.set(cacheKey, evidence);
+  return evidence;
+}
 
 // Resolve worker binaries robustly even when the MCP server was launched with a
 // minimal PATH (the common case: a GUI/launchd-spawned host hands the stdio server
@@ -116,8 +137,8 @@ export function resolveWorkerBinary(model, env = process.env) {
   if (bin === 'codex' && env.SUPER_LOOP_CODEX_BIN) {
     const candidate = String(env.SUPER_LOOP_CODEX_BIN).trim();
     const allowedBasenames = process.platform === 'win32'
-      ? new Set(['codex', 'codex.exe', 'codex.cmd', 'codex.bat'])
-      : new Set(['codex']);
+      ? new Set(['codex', 'codex.exe', 'codex.cmd', 'codex.bat', 'codex.real'])
+      : new Set(['codex', 'codex.real']);
     if (!isAbsolute(candidate) || !allowedBasenames.has(basename(candidate).toLowerCase())) {
       return { bin, binPath: null, reason: 'BINARY_OVERRIDE_INVALID' };
     }
@@ -169,8 +190,28 @@ export const STRICT_CODEX_DISABLED_FEATURES = Object.freeze([
   'workspace_dependencies'
 ]);
 
+export const STRICT_CODEX_RESEARCH_ENABLED_FEATURES = Object.freeze([
+  'browser_use',
+  'browser_use_external'
+]);
+
+export const STRICT_CODEX_RESEARCH_DISABLED_FEATURES = Object.freeze(
+  STRICT_CODEX_DISABLED_FEATURES.filter((feature) => (
+    !STRICT_CODEX_RESEARCH_ENABLED_FEATURES.includes(feature)
+  ))
+);
+
 const STRICT_SCHEMA_BY_KIND = Object.freeze({
   mine: 'mine-output.schema.json',
+  'mechanism-mutation': 'mechanism-mutation-output.schema.json',
+  'vnext-candidate': 'vnext-candidate-output-v1.schema.json',
+  'vnext-external-research-discovery': 'vnext-external-research-discovery-output-v1.schema.json',
+  'vnext-evaluation': 'vnext-evaluator-output-v1.schema.json',
+  'vnext-falsification': 'vnext-falsification-output-v1.schema.json',
+  'vnext-feedback': 'vnext-task-feedback-output-v1.schema.json',
+  'vnext-hypothesis': 'vnext-hypothesis-output-v1.schema.json',
+  'vnext-reranker': 'vnext-reranker-output-v1.schema.json',
+  'vnext-research': 'vnext-research-output-v1.schema.json',
   proposal: 'proposal-output.schema.json',
   evaluation: 'evaluation-output.schema.json',
   baseline: 'baseline-output.schema.json',
@@ -187,10 +228,16 @@ export function schemaPathForContract(contract = {}) {
 export function buildArgs(bin, slug, model, {
   strictIsolation = false,
   schemaPath = null,
-  workspaceRoot = null
+  workspaceRoot = null,
+  toolPolicy = 'none',
+  reasoningEffort = STRICT_CODEX_REASONING_EFFORT
 } = {}) {
   switch (bin) {
-    case 'claude': return ['-p', '--output-format', 'json'];
+    case 'claude': return [
+      '-p',
+      '--output-format', 'json',
+      '--model', String(model || '')
+    ];
     // `codex exec` refuses to run outside a trusted/git directory unless told to skip
     // that check; the supervisor's run dir is not a git repo, so the flag is required.
     case 'codex': {
@@ -205,9 +252,18 @@ export function buildArgs(bin, slug, model, {
         '-c', 'suppress_unstable_features_warning=true'
       ];
       if (strictIsolation) {
-        args.push('-c', `model_reasoning_effort="${STRICT_CODEX_REASONING_EFFORT}"`);
+        const researchOnly = toolPolicy === 'research-web-read-only';
+        const disabledFeatures = researchOnly
+          ? STRICT_CODEX_RESEARCH_DISABLED_FEATURES
+          : STRICT_CODEX_DISABLED_FEATURES;
+        args.push('-c', `model_reasoning_effort="${reasoningEffort}"`);
         args.push('--ignore-user-config');
-        for (const feature of STRICT_CODEX_DISABLED_FEATURES) args.push('--disable', feature);
+        for (const feature of disabledFeatures) args.push('--disable', feature);
+        if (researchOnly) {
+          for (const feature of STRICT_CODEX_RESEARCH_ENABLED_FEATURES) {
+            args.push('--enable', feature);
+          }
+        }
         if (schemaPath) args.push('--output-schema', schemaPath);
         if (workspaceRoot) args.push('-C', workspaceRoot);
         args.push('--color', 'never');
@@ -383,7 +439,13 @@ const CONTEXT_DIAGNOSTIC_PATTERNS = Object.freeze([
   })
 ]);
 
-export function inspectWorkerIsolation(stdout) {
+function researchToolCallAllowed(call) {
+  if (['web_search', 'web_search_request', 'web_fetch'].includes(call.type)) return true;
+  return ['mcp_tool_call', 'tool_use', 'tool_result'].includes(call.type)
+    && /(?:browser|web)(?:[._:-]|$)/i.test(String(call.name || ''));
+}
+
+export function inspectWorkerIsolation(stdout, { toolPolicy = 'none' } = {}) {
   const events = [];
   const contextDiagnostics = [];
   const seenDiagnostics = new Set();
@@ -423,13 +485,19 @@ export function inspectWorkerIsolation(stdout) {
       try { visit(JSON.parse(line)); } catch { malformedLines++; }
     }
   }
+  const disallowedEvents = toolPolicy === 'research-web-read-only'
+    ? events.filter((event) => !researchToolCallAllowed(event))
+    : events;
   const reasons = [];
-  if (events.length) reasons.push('WORKER_TOOL_CALL');
+  if (disallowedEvents.length) reasons.push('WORKER_TOOL_CALL');
   if (malformedLines) reasons.push('WORKER_TRANSCRIPT_UNPARSEABLE');
   reasons.push(...new Set(contextDiagnostics.map((item) => item.code)));
   return {
-    status: events.length === 0 && malformedLines === 0 && contextDiagnostics.length === 0 ? 'PASS' : 'FAIL',
+    status: disallowedEvents.length === 0
+      && malformedLines === 0
+      && contextDiagnostics.length === 0 ? 'PASS' : 'FAIL',
     toolCalls: events,
+    disallowedToolCalls: disallowedEvents,
     contextDiagnostics,
     malformedLines,
     reasons
@@ -458,6 +526,10 @@ export function buildExecutorPrompt(contract = {}) {
         `--- end ${item.path} ---`
       ].join('\n')).join('\n\n')
     : 'NONE';
+  const mechanismCapsuleText = contract.mechanismCapsule
+    && typeof contract.mechanismCapsule === 'object'
+    ? JSON.stringify(contract.mechanismCapsule, null, 2)
+    : 'NONE';
   const hypothesisText = hypothesis ? JSON.stringify(hypothesis, null, 2) : 'NONE';
   const procedureText = typeof contract.procedureContent === 'string'
     ? contract.procedureContent
@@ -467,8 +539,11 @@ export function buildExecutorPrompt(contract = {}) {
     : (contract.requirements || []).filter((item) => /FROZEN CASES/i.test(String(item))).join('\n') || 'NONE';
   const caseResultShape = '{"caseId":"case id","disposition":"ACCEPTED or REJECTED only","code":"observed supervisor code","evidencePaths":["repository-relative evidence path"]}';
   const structuredOutput = contract.outputSchemaMode === true;
+  const treatmentBoundProposal = kind === 'proposal'
+    && typeof contract.proposalTreatmentInstruction === 'string'
+    && contract.proposalTreatmentInstruction.trim();
   const requiredSchema = kind === 'proposal'
-    ? `${structuredOutput ? '' : '<IMPROVEMENT>\n'}{"findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","revisedContent":"complete revised procedure","changeSummary":"specific hypothesis-linked change"}${structuredOutput ? '' : '\n</IMPROVEMENT>'}`
+    ? `${structuredOutput ? '' : '<IMPROVEMENT>\n'}{"findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","revisedContent":"complete revised procedure","changeSummary":"${treatmentBoundProposal ? 'specific assigned-treatment change' : 'specific hypothesis-linked change'}"}${structuredOutput ? '' : '\n</IMPROVEMENT>'}`
     : (kind === 'evaluation'
         ? `${structuredOutput ? '' : '<EVALUATION>\n'}{"arm":"${contract.evaluationArm || ''}","findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","procedureSha256":"${contract.procedureSha256 || ''}","caseResults":[${caseResultShape}]}${structuredOutput ? '' : '\n</EVALUATION>'}`
         : (kind === 'baseline'
@@ -479,7 +554,9 @@ export function buildExecutorPrompt(contract = {}) {
                     ? '{"candidates":[{"loop":"loop-de-loop","title":"substantial finding","baselineContent":"complete baseline procedure","evidenceRefs":[{"path":"sealed/path","locator":"exact locator"}],"hypotheses":[{"title":"hypothesis one","bottleneck":"specific mechanism","operation":"specific change","expectedMovement":"predeclared movement","falsifier":"rejecting observation"},{"title":"hypothesis two","bottleneck":"specific mechanism","operation":"specific change","expectedMovement":"predeclared movement","falsifier":"rejecting observation"}]}]}'
                     : '<CANDIDATES>[...]</CANDIDATES>'))));
   const phaseInstruction = kind === 'proposal'
-    ? 'Revise the locked baseline only according to the assigned hypothesis. Do not evaluate cases in this proposal phase.'
+    ? (treatmentBoundProposal
+        ? contract.proposalTreatmentInstruction.trim()
+        : 'Revise the locked baseline only according to the assigned hypothesis. Do not evaluate cases in this proposal phase.')
     : (kind === 'evaluation'
         ? 'Apply the active procedure exactly as written to every frozen case. Do not revise the procedure or add proposal fields.'
         : (kind === 'baseline'
@@ -502,6 +579,9 @@ export function buildExecutorPrompt(contract = {}) {
     '',
     'SEALED EVIDENCE CAPSULE',
     capsuleText,
+    '',
+    'ASSIGNED IMPROVEMENT MECHANISM',
+    mechanismCapsuleText,
     '',
     'HYPOTHESIS',
     hypothesisText,
@@ -571,6 +651,22 @@ export function normalizeStructuredWorkerOutput(contract = {}, text = '') {
     return `<IMPROVEMENT>${JSON.stringify(payload)}</IMPROVEMENT>`;
   }
   return null;
+}
+
+export function normalizeSupervisorBoundProposalOutput(contract = {}, text = '') {
+  const payload = parseStructuredObject(text);
+  if (!payload
+      || typeof payload.revisedContent !== 'string'
+      || !payload.revisedContent.trim()
+      || typeof payload.changeSummary !== 'string'
+      || !payload.changeSummary.trim()) return null;
+  return `<IMPROVEMENT>${JSON.stringify({
+    findingId: contract.target?.findingId,
+    hypothesisId: contract.hypothesis?.id,
+    baselineSha256: contract.target?.baselineSha256,
+    revisedContent: payload.revisedContent,
+    changeSummary: payload.changeSummary
+  })}</IMPROVEMENT>`;
 }
 
 // Adapter: turn the real executor into a supervisor worker(contract) → packet. The
@@ -680,12 +776,14 @@ export function runWorker({
         model,
         bin,
         reason: 'BINARY_OVERRIDE_INVALID',
-        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing allowlisted Codex executable or Windows shim'
+        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing codex or codex.real executable, or an allowlisted Windows Codex shim'
       };
     }
     return { ok: false, model, bin, reason: 'BINARY_MISSING', message: `allowlisted binary "${bin}" not found on PATH (cannot execute route ${model})` };
   }
-  const strictIsolation = bin === 'codex' && executionContract?.toolPolicy === 'none';
+  const toolPolicy = executionContract?.toolPolicy ?? null;
+  const strictIsolation = bin === 'codex'
+    && ['none', 'research-web-read-only'].includes(toolPolicy);
   const schemaPath = strictIsolation ? schemaPathForContract(executionContract) : null;
   const workspaceRoot = strictIsolation
     ? mkdtempSync(join(tmpdir(), 'loop-factory-worker-'))
@@ -693,7 +791,10 @@ export function runWorker({
   const args = buildArgs(bin, execSlugForRoute(model), model, {
     strictIsolation,
     schemaPath,
-    workspaceRoot
+    workspaceRoot,
+    toolPolicy,
+    reasoningEffort: executionContract?.reasoningEffort
+      || STRICT_CODEX_REASONING_EFFORT
   });
   let launch;
   try {
@@ -707,45 +808,113 @@ export function runWorker({
   // codex's wrapper alias unsets OPENAI_BASE_URL; replicate that for the child so a
   // stray base-url env can't redirect the worker to the wrong endpoint.
   const childEnv = { ...env };
-  if (bin === 'codex') delete childEnv.OPENAI_BASE_URL;
+  const requireChatGptOAuth = bin === 'codex'
+    && env.SUPER_LOOP_REQUIRE_CHATGPT_OAUTH === '1';
+  if (bin === 'codex') {
+    delete childEnv.OPENAI_BASE_URL;
+    if (requireChatGptOAuth) {
+      delete childEnv.OPENAI_API_KEY;
+      delete childEnv.CODEX_ACCESS_TOKEN;
+    }
+  }
   // Operator-only authority and plan-lock values belong to the supervisor process,
   // never to a spawned worker. A worker cannot be allowed to inherit the credentials
   // that distinguish operator decisions from model proposals.
   delete childEnv.SUPER_LOOP_OPERATOR_AUTHORITY;
   delete childEnv.SUPER_LOOP_REAL_TEST_APPROVAL;
+  delete childEnv.SUPER_LOOP_REQUIRE_CHATGPT_OAUTH;
+  delete childEnv.SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256;
+  delete childEnv.SUPER_LOOP_CODEX_EXECUTABLE_SHA256;
+  delete childEnv.SUPER_LOOP_CODEX_BIN;
+  const executable = executableEvidence(binPath);
+  const processGuardian = executableEvidence(GUARDED_EXEC_PATH);
+  if (requireChatGptOAuth) {
+    const authoritySha256 = String(
+      env.SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256 || ''
+    );
+    const expectedExecutableSha256 = String(
+      env.SUPER_LOOP_CODEX_EXECUTABLE_SHA256 || ''
+    );
+    if (!/^[a-f0-9]{64}$/.test(authoritySha256)
+        || expectedExecutableSha256 !== executable.sha256) {
+      return {
+        ok: false,
+        model,
+        bin,
+        binPath,
+        reason: 'OAUTH_AUTHORITY_MISMATCH',
+        message: 'ChatGPT OAuth execution requires the sealed authority and executable hashes before launch'
+      };
+    }
+  }
   const receiptBase = {
     requestedModel: String(model || ''),
+    reasoningEffort: strictIsolation
+      ? String(executionContract?.reasoningEffort || STRICT_CODEX_REASONING_EFFORT)
+      : null,
     binaryFamily: bin,
     argv: [...args],
-    modelSelectionAuthority: bin === 'codex' ? 'explicit-model-flag' : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary'),
+    promptSha256: sha256(String(prompt == null ? '' : prompt)),
+    modelSelectionAuthority: (bin === 'codex' || bin === 'claude')
+      ? 'explicit-model-flag'
+      : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary'),
+    executableBasename: executable.basename,
+    executableSha256: executable.sha256,
+    executableBytes: executable.bytes,
+    authMode: requireChatGptOAuth ? 'chatgpt-oauth' : null,
+    oauthAuthoritySha256: requireChatGptOAuth
+      ? String(env.SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256)
+      : null,
     strictIsolation,
-    disabledFeatures: strictIsolation ? [...STRICT_CODEX_DISABLED_FEATURES] : [],
+    toolPolicy,
+    disabledFeatures: strictIsolation
+      ? [...(toolPolicy === 'research-web-read-only'
+          ? STRICT_CODEX_RESEARCH_DISABLED_FEATURES
+          : STRICT_CODEX_DISABLED_FEATURES)]
+      : [],
+    enabledFeatures: strictIsolation && toolPolicy === 'research-web-read-only'
+      ? [...STRICT_CODEX_RESEARCH_ENABLED_FEATURES]
+      : [],
     workspaceRoot,
     outputSchemaSha256: schemaPath ? sha256(readFileSync(schemaPath)) : null,
     processAdapter: launch.adapter,
     launchedFile: launch.file,
     launchedArgv: [...launch.args],
+    processGuardianSha256: processGuardian.sha256,
     timeoutCleanup: launch.requiresTreeTermination
       ? 'windows-taskkill-process-tree-before-return'
-      : 'direct-child-signal'
+      : 'guarded-process-tree-before-return'
   };
   const startNs = process.hrtime.bigint();
   try {
-    const stdout = executeProcessSync(launch, {
-      input: String(prompt == null ? '' : prompt), // prompt on STDIN, never argv → no injection
+    const executionOptions = {
+      input: String(prompt == null ? '' : prompt), // prompt on STDIN, never argv -> no injection
       cwd: workspaceRoot || undefined,
       env: childEnv,
-      timeoutMs,
       maxBuffer: 64 * 1024 * 1024,
       encoding: 'utf8'
-    });
+    };
+    const stdout = launch.requiresTreeTermination
+      ? executeProcessSync(launch, { ...executionOptions, timeoutMs })
+      : execFileSync(process.execPath, [
+          GUARDED_EXEC_PATH,
+          '--parent-pid', String(process.pid),
+          '--timeout-ms', String(timeoutMs),
+          '--',
+          launch.file,
+          ...launch.args
+        ], {
+          ...executionOptions,
+          timeout: timeoutMs + 15_000,
+          killSignal: 'SIGTERM'
+        });
     const durationMs = Number((process.hrtime.bigint() - startNs) / 1000000n);
     const stdoutText = String(stdout);
     const resultText = extractResult(bin, stdoutText);
     const reportedModel = parseReportedModel(bin, stdoutText);
     const tokenUsage = parseTokenUsage(stdoutText);
     const tokenUsageDetails = parseTokenUsageDetails(stdoutText);
-    const isolation = inspectWorkerIsolation(stdoutText);
+    const isolation = inspectWorkerIsolation(stdoutText, { toolPolicy });
     return {
       ok: true, model, bin, binPath, stdout: stdoutText, resultText,
       exitCode: 0, timedOut: false, tokenUsage, tokenUsageDetails, durationMs, isolation,
@@ -777,7 +946,7 @@ export function runWorker({
     const reportedModel = parseReportedModel(bin, stdoutText);
     const tokenUsage = parseTokenUsage(stdoutText);
     const tokenUsageDetails = parseTokenUsageDetails(stdoutText);
-    const isolation = inspectWorkerIsolation(stdoutText);
+    const isolation = inspectWorkerIsolation(stdoutText, { toolPolicy });
     const reason = timedOut
       ? 'TIMEOUT'
       : (cleanupFailed ? 'TIMEOUT_CLEANUP_FAILED' : (outputLimit ? 'OUTPUT_LIMIT' : 'EXEC_FAILED'));

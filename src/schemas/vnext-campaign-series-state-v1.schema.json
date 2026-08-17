@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop-factory-campaign-series-state-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "seriesId", "runId", "planSha256", "status", "revision", "createdAt", "updatedAt", "queue", "currentWave", "completedWaves", "taskIdentities", "totalAuthorizedCalls", "totalAuthorizedInputTokens", "totalAuthorizedOutputTokens", "totalAuthorizedTokens", "totalAuthorizedUsdMicros", "operatorStop", "events", "stateSha256"],
+  "properties": {
+    "schemaVersion": { "const": "loop-factory-campaign-series-state-v1" }, "kind": { "const": "vnext-campaign-series" }, "seriesId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" }, "planSha256": { "$ref": "#/$defs/sha" },
+    "status": { "enum": ["IDLE_NO_NEW_WORK", "READY", "RUNNING", "WAVE_DRAINED", "OPERATOR_STOP", "BLOCKED"] }, "revision": { "type": "integer", "minimum": 1 }, "createdAt": { "$ref": "#/$defs/dateTime" }, "updatedAt": { "$ref": "#/$defs/dateTime" },
+    "queue": { "type": "array", "items": { "$ref": "#/$defs/wave" } },
+    "currentWave": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["phase", "descriptor", "dispatchedAt"], "properties": { "phase": { "const": "DISPATCHED" }, "descriptor": { "$ref": "#/$defs/wave" }, "dispatchedAt": { "$ref": "#/$defs/dateTime" } } }] },
+    "completedWaves": { "type": "array", "items": { "$ref": "#/$defs/wave" } },
+    "taskIdentities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+    "totalAuthorizedCalls": { "$ref": "#/$defs/nonnegative" }, "totalAuthorizedInputTokens": { "$ref": "#/$defs/nonnegative" }, "totalAuthorizedOutputTokens": { "$ref": "#/$defs/nonnegative" }, "totalAuthorizedTokens": { "$ref": "#/$defs/nonnegative" }, "totalAuthorizedUsdMicros": { "$ref": "#/$defs/nonnegative" },
+    "operatorStop": { "type": "boolean" },
+    "events": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event" } },
+    "stateSha256": { "$ref": "#/$defs/sha" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" }, "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "nullableSha": { "anyOf": [{ "$ref": "#/$defs/sha" }, { "type": "null" }] }, "dateTime": { "type": "string", "format": "date-time" }, "nonnegative": { "type": "integer", "minimum": 0 },
+    "usage": { "type": "object", "additionalProperties": false, "required": ["policyId", "policySha256", "ledgerSha256", "calls", "inputTokens", "outputTokens", "usdMicros"], "properties": { "policyId": { "$ref": "#/$defs/id" }, "policySha256": { "$ref": "#/$defs/sha" }, "ledgerSha256": { "$ref": "#/$defs/sha" }, "calls": { "$ref": "#/$defs/nonnegative" }, "inputTokens": { "$ref": "#/$defs/nonnegative" }, "outputTokens": { "$ref": "#/$defs/nonnegative" }, "usdMicros": { "$ref": "#/$defs/nonnegative" } } },
+    "outcome": { "type": "object", "additionalProperties": false, "required": ["disposition", "causalPass", "activationEligible", "promotionAuthorized"], "properties": { "disposition": { "type": ["string", "null"], "maxLength": 120 }, "causalPass": { "type": "boolean" }, "activationEligible": { "type": "boolean" }, "promotionAuthorized": { "const": false } } },
+    "wave": {
+      "type": "object", "additionalProperties": false,
+      "required": ["waveId", "position", "taskPackId", "taskPackSha256", "taskIdentitySetSha256", "configId", "configSha256", "maximumCalls", "budgetPolicies", "budgetPolicySetSha256", "alpha", "sealedAt", "sealAuthority", "waveSha256"],
+      "properties": { "waveId": { "$ref": "#/$defs/id" }, "position": { "$ref": "#/$defs/nonnegative" }, "taskPackId": { "$ref": "#/$defs/id" }, "taskPackSha256": { "$ref": "#/$defs/sha" }, "taskIdentitySetSha256": { "$ref": "#/$defs/sha" }, "configId": { "$ref": "#/$defs/id" }, "configSha256": { "$ref": "#/$defs/sha" }, "maximumCalls": { "type": "integer", "minimum": 1 }, "budgetPolicies": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "vnext-resource-budget-v1.schema.json" } }, "budgetPolicySetSha256": { "$ref": "#/$defs/sha" }, "alpha": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }, "sealedAt": { "$ref": "#/$defs/dateTime" }, "sealAuthority": { "$ref": "#/$defs/id" }, "waveSha256": { "$ref": "#/$defs/sha" }, "status": { "enum": ["VERIFIED", "INVALID", "AMBIGUOUS_DISPATCH"] }, "evidenceSha256": { "$ref": "#/$defs/nullableSha" }, "budgetUsageSha256": { "$ref": "#/$defs/nullableSha" }, "budgetUsage": { "type": "array", "items": { "$ref": "#/$defs/usage" } }, "outcome": { "$ref": "#/$defs/outcome" } }
+    },
+    "event": { "type": "object", "additionalProperties": false, "required": ["index", "type", "at", "detailSha256"], "properties": { "index": { "$ref": "#/$defs/nonnegative" }, "type": { "enum": ["SERIES_INITIALIZED", "WAVE_ENQUEUED", "WAVE_DISPATCHED", "WAVE_VERIFIED", "WAVE_RECOVERED", "WAVE_INVALID", "AMBIGUOUS_WAVE_DISPATCH", "IDLE_NO_NEW_WORK", "OPERATOR_STOP"] }, "at": { "$ref": "#/$defs/dateTime" }, "detailSha256": { "$ref": "#/$defs/sha" } } }
+  }
+}
