@@ -18,6 +18,7 @@ import {
   basename,
   isAbsolute,
   join,
+  posix as pathPosix,
   relative,
   resolve,
   sep
@@ -65,7 +66,12 @@ import {
   writeCanaryArtifact
 } from './canary-runner.mjs';
 import { verifyPersistedProposalRun } from './run-verifier.mjs';
-import { isSafeId, nowIso, round, sha256 } from './util.mjs';
+import {
+  isSafeId,
+  nowIso,
+  round,
+  sha256
+} from './util.mjs';
 
 export const ADAPTIVE_EXECUTABLE_CANARY_SCHEMA_VERSION =
   'adaptive-executable-canary-v1';
@@ -526,36 +532,36 @@ export function captureExecutableEvaluatorAuthority({
   };
 }
 
-export function validateExecutableEvaluatorAuthority(record) {
+export function validateExecutableEvaluatorAuthorityRecord(record) {
   const authority = object(record);
   const errors = [];
   if (authority.schemaVersion !== EXECUTABLE_EVALUATOR_AUTHORITY_SCHEMA_VERSION) {
     errors.push('evaluator authority schema is invalid');
   }
-  if (authority.platform !== 'darwin' || authority.architecture !== process.arch) {
-    errors.push('evaluator authority platform or architecture changed');
+  if (authority.platform !== 'darwin'
+      || !/^[A-Za-z0-9_-]{2,32}$/.test(String(authority.architecture || ''))) {
+    errors.push('evaluator authority origin platform or architecture is invalid');
   }
-  if (authority.node?.path !== process.execPath
-      || authority.node?.version !== process.version
-      || !existsSync(String(authority.node?.path || ''))
-      || fileSha256(authority.node.path) !== authority.node.sha256) {
-    errors.push('evaluator Node binary changed');
+  if (!pathPosix.isAbsolute(String(authority.node?.path || ''))
+      || authority.node?.basename !== pathPosix.basename(String(authority.node?.path || ''))
+      || !SHA256_RE.test(String(authority.node?.sha256 || ''))
+      || executablePermissionFlag(authority.node?.version) == null) {
+    errors.push('evaluator Node authority is invalid');
   }
   if (authority.sandbox?.path !== SANDBOX_EXEC_PATH
+      || authority.sandbox?.basename !== basename(SANDBOX_EXEC_PATH)
+      || !SHA256_RE.test(String(authority.sandbox?.sha256 || ''))
       || authority.sandbox?.profile !== EXECUTABLE_SANDBOX_PROFILE
-      || authority.sandbox?.profileSha256 !== sha256(EXECUTABLE_SANDBOX_PROFILE)
-      || !existsSync(String(authority.sandbox?.path || ''))
-      || fileSha256(authority.sandbox.path) !== authority.sandbox.sha256) {
-    errors.push('sandbox executable or profile changed');
+      || authority.sandbox?.profileSha256 !== sha256(EXECUTABLE_SANDBOX_PROFILE)) {
+    errors.push('sandbox executable or profile authority is invalid');
   }
-  if (authority.bootstrap?.path !== SANDBOX_BOOTSTRAP_PATH
-      || !existsSync(String(authority.bootstrap?.path || ''))
-      || fileSha256(authority.bootstrap.path) !== authority.bootstrap.sha256) {
-    errors.push('sandbox bootstrap changed');
+  if (!pathPosix.isAbsolute(String(authority.bootstrap?.path || ''))
+      || !SHA256_RE.test(String(authority.bootstrap?.sha256 || ''))) {
+    errors.push('sandbox bootstrap authority is invalid');
   }
   if (authority.permissions?.nodeFlag
-      !== executablePermissionFlag(process.version)) {
-    errors.push('Node permission flag changed or is unsupported');
+      !== executablePermissionFlag(authority.node?.version)) {
+    errors.push('Node permission flag is invalid for the sealed runtime');
   }
   if (authority.permissions?.filesystem !== 'candidate-and-bootstrap-read-only'
       || authority.permissions?.childProcesses !== 'denied'
@@ -586,6 +592,43 @@ export function validateExecutableEvaluatorAuthority(record) {
   }
   return {
     status: errors.length ? 'BLOCKED' : 'OK',
+    code: errors.length ? 'EXECUTABLE_EVALUATOR_AUTHORITY_INVALID' : undefined,
+    errors,
+    record: errors.length ? null : authority
+  };
+}
+
+export function validateExecutableEvaluatorAuthority(record) {
+  const authority = object(record);
+  const sealed = validateExecutableEvaluatorAuthorityRecord(authority);
+  const errors = [...sealed.errors];
+  if (authority.platform !== process.platform
+      || authority.architecture !== process.arch) {
+    errors.push('evaluator authority platform or architecture changed');
+  }
+  if (authority.node?.path !== process.execPath
+      || authority.node?.version !== process.version
+      || !existsSync(String(authority.node?.path || ''))
+      || fileSha256(authority.node.path) !== authority.node.sha256) {
+    errors.push('evaluator Node binary changed');
+  }
+  if (authority.sandbox?.path !== SANDBOX_EXEC_PATH
+      || !existsSync(String(authority.sandbox?.path || ''))
+      || fileSha256(authority.sandbox.path) !== authority.sandbox.sha256) {
+    errors.push('sandbox executable changed');
+  }
+  if (authority.bootstrap?.path !== SANDBOX_BOOTSTRAP_PATH
+      || !existsSync(String(authority.bootstrap?.path || ''))
+      || fileSha256(authority.bootstrap.path) !== authority.bootstrap.sha256) {
+    errors.push('sandbox bootstrap changed');
+  }
+  if (authority.permissions?.nodeFlag
+      !== executablePermissionFlag(process.version)) {
+    errors.push('Node permission flag changed or is unsupported');
+  }
+  return {
+    status: errors.length ? 'BLOCKED' : 'OK',
+    code: errors.length ? 'EXECUTABLE_EVALUATOR_AUTHORITY_HOST_MISMATCH' : undefined,
     errors,
     record: errors.length ? null : authority
   };

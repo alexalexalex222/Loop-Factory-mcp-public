@@ -14,6 +14,8 @@ import {
   runAdaptiveRecursiveCampaign,
   verifyAdaptiveRecursiveCampaignRun
 } from '../src/adaptive-recursive-campaign.mjs';
+
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
 import { createMechanismFamilyRecord } from '../src/adaptive-records.mjs';
 import { createCodexOAuthAuthorityRecord } from '../src/codex-oauth-authority.mjs';
 import {
@@ -606,7 +608,7 @@ test('recursive campaign plan freezes finite exposure and no-promotion autonomy'
   assert.equal(built.plan.statisticalAuthority.minimumAttainableTaskSignP, 0.03125);
 });
 
-test('recursive campaign records one invalid mutation without retrying or launching a child', async () => {
+executableEvaluatorTest('recursive campaign records one invalid mutation without retrying or launching a child', async () => {
   const artifactRoot = mkdtempSync(join(tmpdir(), 'recursive-campaign-artifacts-'));
   const config = await prepared(artifactRoot);
   const store = createStore(mkdtempSync(join(tmpdir(), 'recursive-campaign-home-')));

@@ -19,9 +19,12 @@ export const RUN_LEASE_HEARTBEAT_CONTROL_SCHEMA =
   'loop-factory-run-lease-heartbeat-control-v1';
 export const RUN_LEASE_HEARTBEAT_STOP_SCHEMA =
   'loop-factory-run-lease-heartbeat-stop-v1';
+export const RUN_LEASE_HEARTBEAT_STOP_REQUEST_SCHEMA =
+  'loop-factory-run-lease-heartbeat-stop-request-v1';
 
 const ACTIVE_FILE = 'SUPERVISOR_HEARTBEAT.json';
 const CONTROL_FILE = 'SUPERVISOR_HEARTBEAT.control.json';
+const STOP_REQUEST_FILE = 'SUPERVISOR_HEARTBEAT.stop-request.json';
 const STOPPED_FILE = 'SUPERVISOR_HEARTBEAT.stopped.json';
 const WORKER_PATH = fileURLToPath(
   new URL('../scripts/run-lease-heartbeat.mjs', import.meta.url)
@@ -40,6 +43,7 @@ function paths(homeDir, runId) {
     run,
     active: resolve(run, ACTIVE_FILE),
     control: resolve(run, CONTROL_FILE),
+    stopRequest: resolve(run, STOP_REQUEST_FILE),
     stopped: resolve(run, STOPPED_FILE)
   };
 }
@@ -211,6 +215,30 @@ function stopPayload(record) {
   return payload;
 }
 
+function stopRequestPayload(record) {
+  const { requestSha256, ...payload } = record;
+  return payload;
+}
+
+function validateHeartbeatStopRequest(record, { binding, controlSha256 }) {
+  const keys = [
+    'schemaVersion', 'runId', 'authoritySha256', 'controlSha256',
+    'requestedAt', 'requestSha256'
+  ];
+  return record && typeof record === 'object' && !Array.isArray(record)
+      && Object.keys(record).length === keys.length
+      && keys.every((key) => Object.hasOwn(record, key))
+      && record.schemaVersion === RUN_LEASE_HEARTBEAT_STOP_REQUEST_SCHEMA
+      && record.runId === binding.runId
+      && record.authoritySha256 === binding.authoritySha256
+      && record.controlSha256 === controlSha256
+      && Number.isFinite(Date.parse(record.requestedAt))
+      && record.requestSha256
+        === sha256(canonicalVNextJson(stopRequestPayload(record)))
+    ? { status: 'OK', request: record }
+    : { status: 'REFUSED', code: 'RUN_LEASE_HEARTBEAT_STOP_REQUEST_INVALID' };
+}
+
 function validateHeartbeatStop(record, { binding, controlSha256, heartbeatPid }) {
   const keys = [
     'schemaVersion', 'runId', 'authoritySha256', 'controlSha256',
@@ -244,6 +272,7 @@ export function startRunLeaseHeartbeat({
     }
     const pathSet = paths(homeDir, binding.runId);
     mkdirSync(pathSet.run, { recursive: true });
+    if (existsSync(pathSet.stopRequest)) rmSync(pathSet.stopRequest, { force: true });
     if (existsSync(pathSet.stopped)) rmSync(pathSet.stopped, { force: true });
     const controlCore = {
       schemaVersion: RUN_LEASE_HEARTBEAT_CONTROL_SCHEMA,
@@ -267,14 +296,14 @@ export function startRunLeaseHeartbeat({
     });
     child.once('error', () => {});
     child.unref();
-    const deadline = Date.now() + 2_000;
+    const deadline = Date.now() + 10_000;
     let checked = { status: 'REFUSED' };
     while (Date.now() < deadline) {
       checked = verifyRunLeaseHeartbeat({ homeDir, runId: binding.runId, binding });
-      if (checked.status === 'OK') break;
+      if (checked.status === 'OK' && checked.heartbeat.heartbeatPid === child.pid) break;
       sleepSync(10);
     }
-    if (checked.status !== 'OK') {
+    if (checked.status !== 'OK' || checked.heartbeat.heartbeatPid !== child.pid) {
       try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
       return { status: 'REFUSED', code: 'RUN_LEASE_HEARTBEAT_START_FAILED' };
     }
@@ -286,8 +315,26 @@ export function startRunLeaseHeartbeat({
       timeoutMs,
       initialHeartbeatSha256: checked.heartbeatSha256,
       stop() {
-        try { process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
-        const deadline = Date.now() + 1_000;
+        const requestCore = {
+          schemaVersion: RUN_LEASE_HEARTBEAT_STOP_REQUEST_SCHEMA,
+          runId: binding.runId,
+          authoritySha256: binding.authoritySha256,
+          controlSha256: control.controlSha256,
+          requestedAt: new Date().toISOString()
+        };
+        const request = {
+          ...requestCore,
+          requestSha256: sha256(canonicalVNextJson(requestCore))
+        };
+        try {
+          atomicWrite(pathSet.stopRequest, `${canonicalVNextJson(request)}\n`);
+        } catch {
+          return { status: 'REFUSED', code: 'RUN_LEASE_HEARTBEAT_STOP_REQUEST_FAILED' };
+        }
+        if (process.platform !== 'win32') {
+          try { process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
+        }
+        const deadline = Date.now() + 2_000;
         let stopped = null;
         while (Date.now() < deadline) {
           try { stopped = JSON.parse(readFileSync(pathSet.stopped, 'utf8')); } catch { stopped = null; }
@@ -354,10 +401,12 @@ export function runLeaseHeartbeatWorker({
   };
   let stopping = false;
   let timer = null;
+  let stopTimer = null;
   const stop = () => {
     if (stopping) return;
     stopping = true;
     if (timer != null) clearInterval(timer);
+    if (stopTimer != null) clearInterval(stopTimer);
     const stoppedAt = clock();
     const core = {
       schemaVersion: RUN_LEASE_HEARTBEAT_STOP_SCHEMA,
@@ -374,9 +423,19 @@ export function runLeaseHeartbeatWorker({
     atomicWrite(pathSet.stopped, `${canonicalVNextJson(receipt)}\n`);
     process.exit(0);
   };
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
+  if (process.platform !== 'win32') {
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  }
   if (!beat()) return { status: 'REFUSED', code: 'RUN_LEASE_HEARTBEAT_INITIAL_FAILED' };
+  stopTimer = setInterval(() => {
+    let request = null;
+    try { request = JSON.parse(readFileSync(pathSet.stopRequest, 'utf8')); } catch { /* no request */ }
+    if (validateHeartbeatStopRequest(request, {
+      binding: control.binding,
+      controlSha256
+    }).status === 'OK') stop();
+  }, Math.min(control.intervalMs, 100));
   timer = setInterval(() => {
     if (!beat()) {
       clearInterval(timer);

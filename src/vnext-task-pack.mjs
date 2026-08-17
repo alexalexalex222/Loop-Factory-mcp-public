@@ -6,6 +6,7 @@ import {
   captureExecutableEvaluatorAuthority,
   evaluateExecutableCandidate,
   validateExecutableEvaluatorAuthority,
+  validateExecutableEvaluatorAuthorityRecord,
   validateExecutableInterfaceCoverage
 } from './adaptive-executable-canary.mjs';
 import { sandboxRecord } from './adaptive-recursive-runner.mjs';
@@ -275,9 +276,6 @@ export function buildVNextTaskPack({
   maximumFileBytes = 1024 * 1024
 } = {}) {
   try {
-    const evaluatorAuthority = evaluatorAuthorityRecord
-      ? validateExecutableEvaluatorAuthority(evaluatorAuthorityRecord)
-      : captureExecutableEvaluatorAuthority();
     if (!isSafeId(packId)
         || !PARTITIONS.has(partition)
         || !Number.isFinite(Date.parse(createdAt))
@@ -288,10 +286,19 @@ export function buildVNextTaskPack({
         || !Array.isArray(tasks)
         || tasks.length < 2
         || tasks.length > 1000
-        || evaluatorAuthority.status !== 'OK'
         || !Array.isArray(priorIdentities)
         || !priorIdentities.every((value) => typeof value === 'string')) {
       return { status: 'REFUSED', code: 'TASK_PACK_REQUEST_INVALID' };
+    }
+    const evaluatorAuthority = evaluatorAuthorityRecord
+      ? validateExecutableEvaluatorAuthority(evaluatorAuthorityRecord)
+      : captureExecutableEvaluatorAuthority();
+    if (evaluatorAuthority.status !== 'OK') {
+      return {
+        status: 'REFUSED',
+        code: evaluatorAuthority.code || 'TASK_PACK_EVALUATOR_AUTHORITY_INVALID',
+        message: evaluatorAuthority.message || evaluatorAuthority.errors?.join('; ')
+      };
     }
     const root = realpathSync(resolve(artifactRoot));
     const prior = new Set(priorIdentities);
@@ -477,7 +484,7 @@ export function validateVNextTaskPack(pack) {
       || !exactKeys(pack.builderAuthority, ['id', 'kind'])
       || !isSafeId(pack.builderAuthority.id)
       || !BUILDER_KINDS.has(pack.builderAuthority.kind)
-      || validateExecutableEvaluatorAuthority(pack.evaluatorAuthority).status !== 'OK'
+      || validateExecutableEvaluatorAuthorityRecord(pack.evaluatorAuthority).status !== 'OK'
       || (pack.partition === 'final' && pack.builderAuthority?.kind !== 'external-custodian')
       || !SHA256.test(pack.artifactRootSha256)
       || !SHA256.test(pack.priorIdentitySetSha256)

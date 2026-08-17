@@ -113,7 +113,7 @@ function withinRoot(root, path, label) {
       || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw new Error(`${label} must be repository-relative`);
   }
-  return { absolute, relative: rel };
+  return { absolute, relative: rel.split(sep).join('/') };
 }
 
 function normalizedManifest(config, field) {

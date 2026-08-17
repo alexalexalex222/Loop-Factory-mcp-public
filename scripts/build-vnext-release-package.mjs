@@ -110,6 +110,9 @@ const EXPECTED_PLATFORM_EXCLUSIONS = Object.freeze([
   'SIGKILL residue is swept from the external auth root without entering proof state',
   'Windows command shims refuse percent expansion in model argv',
   'a timed-out Windows command shim kills its complete descendant process tree',
+  'portable task packs refuse baseline replay on unsupported evaluator hosts',
+  'executable evaluator refuses unsupported hosts before sandbox access',
+  'task-pack build reports an unsupported evaluator host directly',
   'recursive campaign executes one full causal generation and banks verifier-owned memory',
   'campaign-wide alpha keeps an ordinary child pass in development-only memory',
   'a disjoint second generation can cite the first measured learning receipt',
@@ -412,7 +415,7 @@ function contextBoundaryArtifact({ generatedAt, sourceTreeSha256, testSummary })
       ['candidate-mutation-scope', 'test/vnext-candidate-generators.test.mjs', 'candidate edits are exact-locator and parent-hash bound'],
       ['candidate-strategy-separation', 'test/vnext-candidate-generators.test.mjs', 'Pareto, bounded-skill, recombination, and code strategies enforce distinct semantics'],
       ['code-worktree-isolation', 'test/vnext-code-worktree.test.mjs', 'detached worktree, exact argv, patch replay, required tests, and network denial are bound'],
-      ['task-pack-custody', 'test/vnext-task-pack.test.mjs', 'final packs require an external custodian and reject oracle leakage'],
+      ['task-pack-custody', 'test/vnext-task-pack.test.mjs', 'final packs reject non-custodian builders and require executable custodian proof'],
       ['operator-no-promotion', 'test/vnext-operator-actions.test.mjs', 'operator actions can restrict but cannot approve or promote'],
       ['lease-cas', 'test/run-lease.test.mjs', 'stale mutex owners cannot remove a successor lock'],
       ['task-cluster-inference', 'test/adaptive-recursive-statistics.test.mjs', 'replicates do not inflate the statistical sample']

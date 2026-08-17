@@ -24,6 +24,7 @@ import {
   runAdaptiveExecutableCanary,
   validateAdaptiveExecutableCanaryConfig,
   validateExecutableEvaluatorAuthority,
+  validateExecutableEvaluatorAuthorityRecord,
   validateExecutableInterfaceCoverage,
   verifyAdaptiveExecutableCanaryRun
 } from '../src/adaptive-executable-canary.mjs';
@@ -808,6 +809,49 @@ test('executable evaluator selects the permission flag supported by its Node run
   assert.equal(executablePermissionFlag('v23.5.0'), '--permission');
   assert.equal(executablePermissionFlag('v24.0.0'), '--permission');
   assert.equal(executablePermissionFlag('not-a-version'), null);
+});
+
+test('sealed evaluator authority is portable but execution remains host-bound', () => {
+  const profile = '(version 1)(allow default)(deny network*)';
+  const payload = {
+    schemaVersion: 'executable-evaluator-authority-v1',
+    platform: 'darwin',
+    architecture: 'arm64',
+    node: {
+      path: '/opt/loop-factory/node', basename: 'node', version: 'v24.0.0',
+      sha256: 'a'.repeat(64)
+    },
+    sandbox: {
+      path: '/usr/bin/sandbox-exec', basename: 'sandbox-exec',
+      sha256: 'b'.repeat(64), profile, profileSha256: sha256(profile)
+    },
+    bootstrap: {
+      path: '/opt/loop-factory/executable-canary-sandbox.mjs',
+      sha256: 'c'.repeat(64)
+    },
+    limits: {
+      timeoutMs: 15000, maxBytes: 65536, maxBufferBytes: 1048576, heapMb: 128
+    },
+    permissions: {
+      nodeFlag: '--permission',
+      filesystem: 'candidate-and-bootstrap-read-only',
+      childProcesses: 'denied', workers: 'denied', network: 'denied'
+    }
+  };
+  const authority = {
+    ...payload,
+    authoritySha256: sha256(canonicalAdaptiveJson(payload))
+  };
+  assert.equal(validateExecutableEvaluatorAuthorityRecord(authority).status, 'OK');
+  assert.equal(validateExecutableEvaluatorAuthority(authority).status, 'BLOCKED');
+});
+
+test('executable evaluator refuses unsupported hosts before sandbox access', {
+  skip: process.platform === 'darwin'
+}, () => {
+  const captured = captureExecutableEvaluatorAuthority();
+  assert.equal(captured.status, 'BLOCKED');
+  assert.equal(captured.code, 'EXECUTABLE_SANDBOX_UNSUPPORTED');
 });
 
 test('executable evaluator runs correct code and blocks filesystem access', {

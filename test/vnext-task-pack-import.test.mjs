@@ -12,6 +12,8 @@ import {
   verifyVNextTaskPackImport
 } from '../src/vnext-task-pack-import.mjs';
 
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
+
 function legacyFixture() {
   const root = mkdtempSync(join(tmpdir(), 'vnext-task-import-'));
   mkdirSync(join(root, 'tasks'));
@@ -99,7 +101,7 @@ function legacyFixture() {
   return { root, sourceConfigBytes: JSON.stringify(config) };
 }
 
-test('legacy executable tasks become a baseline-failure-bound portable VNext pack', () => {
+executableEvaluatorTest('legacy executable tasks become a baseline-failure-bound portable VNext pack', () => {
   const fixture = legacyFixture();
   const imported = importVNextTaskPackFromExecutableCanary({
     artifactRoot: fixture.root,

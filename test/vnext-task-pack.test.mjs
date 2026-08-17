@@ -12,6 +12,8 @@ import {
 } from '../src/vnext-task-pack.mjs';
 import { canonicalVNextJson } from '../src/vnext-contracts.mjs';
 
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'vnext-task-pack-'));
   mkdirSync(join(root, 'tasks'));
@@ -82,7 +84,7 @@ function fixture() {
   return { root, tasks };
 }
 
-test('task packs bind source, oracle, incident, baseline failure, and disjoint identity', () => {
+executableEvaluatorTest('task packs bind source, oracle, incident, baseline failure, and disjoint identity', () => {
   const { root, tasks } = fixture();
   const built = buildVNextTaskPack({
     artifactRoot: root,
@@ -108,16 +110,38 @@ test('task packs bind source, oracle, incident, baseline failure, and disjoint i
   }).code, 'TASK_PACK_NOT_DISJOINT');
 });
 
-test('final packs require an external custodian', () => {
+test('final packs reject non-custodian builders before evaluator launch', () => {
   const { root, tasks } = fixture();
-  assert.equal(buildVNextTaskPack({
+  const built = buildVNextTaskPack({
     artifactRoot: root,
     packId: 'final-pack',
     partition: 'final',
     createdAt: '2026-08-05T00:00:00.000Z',
     builderAuthority: { id: 'builder-1', kind: 'deterministic-tool' },
     tasks
-  }).status, 'REFUSED');
+  });
+  assert.equal(built.status, 'REFUSED');
+  assert.equal(built.code, 'TASK_PACK_REQUEST_INVALID');
+});
+
+test('task-pack build reports an unsupported evaluator host directly', {
+  skip: process.platform === 'darwin'
+}, () => {
+  const { root, tasks } = fixture();
+  const built = buildVNextTaskPack({
+    artifactRoot: root,
+    packId: 'unsupported-host-pack',
+    partition: 'development',
+    createdAt: '2026-08-05T00:00:00.000Z',
+    builderAuthority: { id: 'builder-1', kind: 'deterministic-tool' },
+    tasks
+  });
+  assert.equal(built.status, 'REFUSED');
+  assert.equal(built.code, 'EXECUTABLE_SANDBOX_UNSUPPORTED');
+});
+
+executableEvaluatorTest('external custodians can build final packs', () => {
+  const { root, tasks } = fixture();
   assert.equal(buildVNextTaskPack({
     artifactRoot: root,
     packId: 'final-pack',
@@ -128,7 +152,7 @@ test('final packs require an external custodian', () => {
   }).status, 'OK');
 });
 
-test('task packs refuse oracle leakage, tampering, and symlinks', () => {
+executableEvaluatorTest('task packs refuse oracle leakage, tampering, and symlinks', () => {
   const leaked = fixture();
   const oracle = readFileSync(join(leaked.root, 'tasks/oracle-1.txt'), 'utf8');
   writeFileSync(join(leaked.root, 'tasks/source-1.txt'), `public ${oracle}`);

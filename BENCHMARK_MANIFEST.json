@@ -1,32 +1,35 @@
 {
   "schemaVersion": "loop-factory-vnext-benchmark-manifest-v1",
-  "generatedAt": "2026-08-17T09:56:05.566Z",
+  "generatedAt": "2026-08-17T12:04:05.000Z",
   "status": "BLOCKED_PENDING_LIVE_ABLATIONS_AND_EXTERNAL_CUSTODIAN",
   "repository": {
-    "startingCommit": "46c921645909f1fbe30de57cf5197a8bb3129fb2",
+    "startingCommit": "fc556c7ab2ffe7e7c9d535e8e46735e77e7de0b4",
     "branch": "vnext-public-integration-20260816",
     "dirty": true,
-    "gitStatusSha256": "e3521b9d7ef18530502e1f6fc53474f1ddacf6237e401417e2a90ddd9497c29d",
-    "sourceTreeSha256": "90c516a5b4862aa9a8da263b160b3f07dd3abea7875d094b78f92ce183110c58",
+    "gitStatusSha256": "e5295da3c27bf0b475e6022f016d70289f275d51e3c175e37d4dc8e0d9730976",
+    "sourceTreeSha256": "b7470bcdc2f6761b43f72446d46b09124ce326e500c35e9d7912684e946ea8e4",
     "implementationFileCount": 501
   },
   "evidence": {
     "fullSuite": {
-      "path": "proof/public-integration-verification-20260817/npm-test-node24-final-r4.log",
-      "sha256": "4ea391dbfa50db576baa6947f2a90a230890c0bc5595e8f760c969fcfa1c7eac",
-      "tests": 950,
-      "pass": 947,
+      "path": "proof/public-integration-verification-20260817/npm-test-node24-portability-r5.log",
+      "sha256": "5c6b3096efabe262c54f4ead8f893aeabb0c8f1e65c81db098c0f71690564a29",
+      "tests": 956,
+      "pass": 950,
       "fail": 0,
       "cancelled": 0,
-      "skipped": 3,
+      "skipped": 6,
       "platformExclusions": [
+        "executable evaluator refuses unsupported hosts before sandbox access",
+        "portable task packs refuse baseline replay on unsupported evaluator hosts",
         "Windows command shims refuse percent expansion in model argv",
         "a timed-out Windows command shim kills its complete descendant process tree",
-        "code candidate execution refuses unsupported platforms before filesystem access"
+        "code candidate execution refuses unsupported platforms before filesystem access",
+        "task-pack build reports an unsupported evaluator host directly"
       ],
       "todo": 0
     },
-    "contextBoundaryArtifactSha256": "572ef72f1c9c1ec2e244045b883c06a067a217df21359170260f77c085dc205e",
+    "contextBoundaryArtifactSha256": "e69109092dcf7e2f20338528bbc77a59eb61c84feafe0fceaec3d00ffc645cae",
     "ablationMatrixSha256": "371bc7d6ac489c54d8aaa20604e51e6dddf7fa76a6eb3b503a8ac1e31cd557af",
     "retrievalArtifactSha256": "b12ffe5444f5a630637978013fa4722ee28263d022eb5ff8077f6653f9696436",
     "retrievalAuthority": "fixture-only",
@@ -103,5 +106,5 @@
     "costGateRequired": true,
     "finalRuleMutableAfterObservation": false
   },
-  "manifestSha256": "951595fda13f6e87fbf96e87a5fe574c0e2068663bd6f3245316401d0a3559e9"
+  "manifestSha256": "d33c2fd1ff0d2e933b38b2d42e8785a5286f77da1916ebc4468aeab1b2bcc804"
 }

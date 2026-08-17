@@ -120,7 +120,7 @@ test('canonical npm test scope excludes generated proof capsules', () => {
 function localImportClosure(roots) {
   const seen = new Set();
   const visit = (file) => {
-    const normalized = normalize(file);
+    const normalized = normalize(file).replaceAll('\\', '/');
     if (seen.has(normalized) || !existsSync(join(PACKAGE_ROOT, normalized))) return;
     seen.add(normalized);
     if (!normalized.endsWith('.mjs')) return;
@@ -128,7 +128,7 @@ function localImportClosure(roots) {
     for (const match of source.matchAll(/(?:from\s+|import\s*)['"](\.\.?\/[^'"]+)['"]/g)) {
       let absolute = resolve(PACKAGE_ROOT, dirname(normalized), match[1]);
       if (!extname(absolute)) absolute += '.mjs';
-      const child = relative(PACKAGE_ROOT, absolute);
+      const child = relative(PACKAGE_ROOT, absolute).replaceAll('\\', '/');
       if (!child.startsWith('..')) visit(child);
     }
   };

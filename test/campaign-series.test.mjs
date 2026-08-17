@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sha256 } from '../src/util.mjs';
 import { canonicalVNextJson } from '../src/vnext-contracts.mjs';
-import { buildVNextTaskPack } from '../src/vnext-task-pack.mjs';
+import {
+  buildVNextTaskPack,
+  loadVNextTaskPackMaterials,
+  validateVNextTaskPack
+} from '../src/vnext-task-pack.mjs';
 import {
   createResourceBudgetLedger,
   createResourceBudgetPolicy,
@@ -51,7 +55,130 @@ function createPowerLossStore(home) {
   return null;
 }
 
-function fixture() {
+function portableEvaluatorAuthority() {
+  const profile = '(version 1)(allow default)(deny network*)';
+  const payload = {
+    schemaVersion: 'executable-evaluator-authority-v1',
+    platform: 'darwin',
+    architecture: 'arm64',
+    node: {
+      path: '/opt/loop-factory/node',
+      basename: 'node',
+      version: 'v24.0.0',
+      sha256: 'a'.repeat(64)
+    },
+    sandbox: {
+      path: '/usr/bin/sandbox-exec',
+      basename: 'sandbox-exec',
+      sha256: 'b'.repeat(64),
+      profile,
+      profileSha256: sha256(profile)
+    },
+    bootstrap: {
+      path: '/opt/loop-factory/executable-canary-sandbox.mjs',
+      sha256: 'c'.repeat(64)
+    },
+    limits: {
+      timeoutMs: 15_000,
+      maxBytes: 64 * 1024,
+      maxBufferBytes: 1024 * 1024,
+      heapMb: 128
+    },
+    permissions: {
+      nodeFlag: '--permission',
+      filesystem: 'candidate-and-bootstrap-read-only',
+      childProcesses: 'denied',
+      workers: 'denied',
+      network: 'denied'
+    }
+  };
+  return {
+    ...payload,
+    authoritySha256: sha256(canonicalVNextJson(payload))
+  };
+}
+
+function portableTaskPack(tasks) {
+  const evaluatorAuthority = portableEvaluatorAuthority();
+  const normalized = tasks.map((task, index) => {
+    const number = index + 1;
+    const evaluation = {
+      instrumentValid: true,
+      candidateExecuted: true,
+      outputShapeValid: true,
+      results: [
+        { id: `target-${number}-1`, group: 'target', pass: false },
+        { id: `control-${number}-1`, group: 'control', pass: true },
+        { id: `control-${number}-2`, group: 'control', pass: true }
+      ]
+    };
+    const interfaceCoverageSha256 = sha256(`coverage-${task.taskId}`);
+    const proof = {
+      taskId: task.taskId,
+      sourceSha256: task.source.sha256,
+      interfaceSha256: task.interfaceContractSha256,
+      oracleSha256: task.oracle.sha256,
+      evaluatorAuthoritySha256: evaluatorAuthority.authoritySha256,
+      interfaceCoverageSha256,
+      evaluation
+    };
+    return {
+      ...task,
+      baselineFailure: {
+        status: 'VERIFIED_FAILURE',
+        taskId: task.taskId,
+        artifactId: `baseline-${task.taskId}`,
+        artifactSha256: task.source.sha256,
+        verifierEvidenceSha256: sha256(canonicalVNextJson(proof)),
+        baselineArtifactSha256: task.source.sha256,
+        evaluatorAuthoritySha256: evaluatorAuthority.authoritySha256,
+        sourceSha256: task.source.sha256,
+        interfaceSha256: task.interfaceContractSha256,
+        oracleSha256: task.oracle.sha256,
+        interfaceCoverageSha256,
+        targetFailureIds: [`target-${number}-1`],
+        controlPassIds: [`control-${number}-1`, `control-${number}-2`],
+        evaluation
+      }
+    };
+  }).sort((left, right) => left.taskId.localeCompare(right.taskId));
+  const identities = normalized.flatMap((task) => [
+    `task:${task.taskId}`,
+    `cluster:${task.clusterId}`,
+    `source-path:${task.source.path}`,
+    `source-sha:${task.source.sha256}`,
+    `incident-path:${task.incident.path}`,
+    `incident-sha:${task.incident.sha256}`,
+    `interface-path:${task.interface.path}`,
+    `interface-sha:${task.interface.sha256}`,
+    `oracle-path:${task.oracle.path}`,
+    `oracle-sha:${task.oracle.sha256}`
+  ]).sort();
+  const base = {
+    schemaVersion: 'loop-factory-vnext-task-pack-v1',
+    packId: 'pack-1',
+    partition: 'development',
+    createdAt: '2026-08-05T00:00:00.000Z',
+    builderAuthority: { id: 'builder-1', kind: 'deterministic-tool' },
+    evaluatorAuthority,
+    artifactRootSha256: sha256(canonicalVNextJson(normalized.map((task) => ({
+      source: task.source,
+      incident: task.incident,
+      interface: task.interface,
+      oracle: task.oracle
+    })))),
+    priorIdentitySetSha256: sha256(canonicalVNextJson([])),
+    tasks: normalized,
+    taskIdentitySetSha256: sha256(canonicalVNextJson(identities)),
+    leakageChecks: normalized.map((task) => ({
+      taskId: task.taskId,
+      directOracleLeak: false
+    }))
+  };
+  return { ...base, packSha256: sha256(canonicalVNextJson(base)) };
+}
+
+function fixture({ replayable = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'campaign-series-'));
   mkdirSync(join(root, 'tasks'));
   const tasks = [1, 2].map((n) => {
@@ -111,14 +238,19 @@ function fixture() {
       }
     };
   });
-  const pack = buildVNextTaskPack({
-    artifactRoot: root,
-    packId: 'pack-1',
-    partition: 'development',
-    createdAt: '2026-08-05T00:00:00.000Z',
-    builderAuthority: { id: 'builder-1', kind: 'deterministic-tool' },
-    tasks
-  }).pack;
+  const built = replayable
+    ? buildVNextTaskPack({
+        artifactRoot: root,
+        packId: 'pack-1',
+        partition: 'development',
+        createdAt: '2026-08-05T00:00:00.000Z',
+        builderAuthority: { id: 'builder-1', kind: 'deterministic-tool' },
+        tasks
+      })
+    : { status: 'OK', pack: portableTaskPack(tasks) };
+  assert.equal(built.status, 'OK', built.message);
+  const pack = built.pack;
+  assert.equal(validateVNextTaskPack(pack).status, 'OK');
   const policy = createResourceBudgetPolicy({
     policyId: 'series-budget', maxCalls: 10, maxInputTokens: 1000,
     maxOutputTokens: 1000, maxTotalTokens: 2000, maxUsdMicros: 0,
@@ -152,6 +284,18 @@ function enqueue(data, state = data.state, waveId = 'wave-1') {
     sealedAt: '2026-08-05T00:00:01.000Z', sealAuthority: 'series-builder'
   });
 }
+
+test('portable task packs refuse baseline replay on unsupported evaluator hosts', {
+  skip: process.platform === 'darwin'
+}, () => {
+  const data = fixture();
+  const replay = loadVNextTaskPackMaterials({
+    artifactRoot: data.root,
+    pack: data.pack
+  });
+  assert.equal(replay.status, 'REFUSED');
+  assert.equal(replay.code, 'TASK_PACK_BASELINE_REPLAY_INVALID');
+});
 
 test('a finite sealed wave runs once and then idles without inference', () => {
   const data = fixture();
@@ -534,8 +678,10 @@ test('async cold recovery finalizes verified evidence without another inference 
   assert.equal(runs, 0);
 });
 
-test('campaign series checkpoints and wave inputs replay after a cold restart', () => {
-  const data = fixture();
+test('campaign series checkpoints and wave inputs replay after a cold restart', {
+  skip: process.platform !== 'darwin'
+}, () => {
+  const data = fixture({ replayable: true });
   const home = mkdtempSync(join(tmpdir(), 'campaign-series-store-'));
   const store = createStore(home);
   const initialized = initializeCampaignSeriesStore({
@@ -598,8 +744,10 @@ test('campaign series checkpoints and wave inputs replay after a cold restart', 
   );
 });
 
-test('campaign wave material bytes are immutable and replay-verified', () => {
-  const data = fixture();
+test('campaign wave material bytes are immutable and replay-verified', {
+  skip: process.platform !== 'darwin'
+}, () => {
+  const data = fixture({ replayable: true });
   const home = mkdtempSync(join(tmpdir(), 'campaign-series-materials-'));
   const store = createStore(home);
   assert.equal(initializeCampaignSeriesStore({

@@ -17,6 +17,8 @@ import { canonicalMechanismProgramJson } from '../src/mechanism-compiler.mjs';
 import { createExternalResearchPolicy } from '../src/vnext-external-research.mjs';
 import { createVNextAblationProfile } from '../src/vnext-ablation-profile.mjs';
 
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
+
 const PROGRAM = {
   schemaVersion: 'mechanism-program-v1', bindingPolicy: 'closed-world',
   roles: ['baseline.quality', 'candidate.quality'], selectors: [], bindings: [],
@@ -176,7 +178,7 @@ function configInput() {
   };
 }
 
-test('wave config closes every model role, split, authority, and resource input', () => {
+executableEvaluatorTest('wave config closes every model role, split, authority, and resource input', () => {
   const built = createVNextWaveConfig(configInput());
   assert.equal(built.status, 'OK');
   assert.equal(validateVNextWaveConfig(built.config).status, 'OK');
@@ -186,7 +188,7 @@ test('wave config closes every model role, split, authority, and resource input'
   assert.equal(validateVNextWaveConfig(tampered).status, 'REFUSED');
 });
 
-test('wave preflight rejects preparation inputs that could only fail after launch', () => {
+executableEvaluatorTest('wave preflight rejects preparation inputs that could only fail after launch', () => {
   const sparseFailure = configInput();
   sparseFailure.preparation.failure = { failureId: 'failure-1' };
   assert.equal(createVNextWaveConfig(sparseFailure).status, 'REFUSED');
@@ -204,7 +206,7 @@ test('wave preflight rejects preparation inputs that could only fail after launc
   assert.equal(createVNextWaveConfig(invalidPace).status, 'REFUSED');
 });
 
-test('external research adds exactly one frozen preparation call and no caller content', () => {
+executableEvaluatorTest('external research adds exactly one frozen preparation call and no caller content', () => {
   const input = configInput();
   input.preparation.externalResearchEnabled = true;
   input.preparation.externalSources = [];

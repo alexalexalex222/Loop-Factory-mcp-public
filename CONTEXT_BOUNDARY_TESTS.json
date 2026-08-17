@@ -1,21 +1,24 @@
 {
   "schemaVersion": "loop-factory-vnext-context-boundary-tests-v1",
-  "generatedAt": "2026-08-17T09:56:05.566Z",
-  "sourceTreeSha256": "90c516a5b4862aa9a8da263b160b3f07dd3abea7875d094b78f92ce183110c58",
+  "generatedAt": "2026-08-17T12:04:05.000Z",
+  "sourceTreeSha256": "b7470bcdc2f6761b43f72446d46b09124ce326e500c35e9d7912684e946ea8e4",
   "authority": {
     "kind": "local-test-replay",
     "testLog": {
-      "path": "proof/public-integration-verification-20260817/npm-test-node24-final-r4.log",
-      "sha256": "4ea391dbfa50db576baa6947f2a90a230890c0bc5595e8f760c969fcfa1c7eac",
-      "tests": 950,
-      "pass": 947,
+      "path": "proof/public-integration-verification-20260817/npm-test-node24-portability-r5.log",
+      "sha256": "5c6b3096efabe262c54f4ead8f893aeabb0c8f1e65c81db098c0f71690564a29",
+      "tests": 956,
+      "pass": 950,
       "fail": 0,
       "cancelled": 0,
-      "skipped": 3,
+      "skipped": 6,
       "platformExclusions": [
+        "executable evaluator refuses unsupported hosts before sandbox access",
+        "portable task packs refuse baseline replay on unsupported evaluator hosts",
         "Windows command shims refuse percent expansion in model argv",
         "a timed-out Windows command shim kills its complete descendant process tree",
-        "code candidate execution refuses unsupported platforms before filesystem access"
+        "code candidate execution refuses unsupported platforms before filesystem access",
+        "task-pack build reports an unsupported evaluator host directly"
       ],
       "todo": 0
     }
@@ -99,7 +102,7 @@
     {
       "id": "task-pack-custody",
       "file": "test/vnext-task-pack.test.mjs",
-      "assertion": "final packs require an external custodian and reject oracle leakage",
+      "assertion": "final packs reject non-custodian builders and require executable custodian proof",
       "result": "PASS"
     },
     {
@@ -121,5 +124,5 @@
       "result": "PASS"
     }
   ],
-  "artifactSha256": "572ef72f1c9c1ec2e244045b883c06a067a217df21359170260f77c085dc205e"
+  "artifactSha256": "e69109092dcf7e2f20338528bbc77a59eb61c84feafe0fceaec3d00ffc645cae"
 }

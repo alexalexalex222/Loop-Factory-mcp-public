@@ -64,6 +64,20 @@ function assertGone(pid) {
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 }
 
+async function assertGoneEventually(pid, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (error?.code === 'ESRCH') return;
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assertGone(pid);
+}
+
 test('SIGTERM tears down every tracked child process group', {
   skip: process.platform === 'win32'
 }, async () => {
@@ -94,7 +108,7 @@ test('SIGTERM tears down every tracked child process group', {
   process.kill(helper.pid, 'SIGTERM');
   const exit = await waitForExit(helper);
   assert.equal(exit.code, 143);
-  assertGone(childPid);
+  await assertGoneEventually(childPid);
 });
 
 test('guarded synchronous executor kills its detached command on termination', {
@@ -122,7 +136,7 @@ sleep 30
   const childPid = Number(readFileSync(pidPath, 'utf8'));
   process.kill(guard.pid, 'SIGTERM');
   await waitForExit(guard);
-  assertGone(childPid);
+  await assertGoneEventually(childPid);
 });
 
 test('guarded synchronous executor kills its command when the owning parent is SIGKILLed', {

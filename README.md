@@ -350,6 +350,9 @@ path, benchmark, limits, and model policy once, then persists the campaign.
 - Paid VNext dispatch barriers require file-and-directory power-loss durability.
   They are supported on macOS and Linux; Windows refuses before state mutation
   until a native directory-flush adapter is implemented and verified.
+- Sealed task-pack records can be inspected and scheduled portably, but creating
+  or replaying their executable baseline evidence requires the macOS
+  `sandbox-exec` evaluator. Linux and Windows refuse that execution boundary.
 - The disabled-by-default code-candidate executor is macOS-only and refuses on
   Linux and Windows until an equally strong native sandbox is implemented.
 - Loop Factory records a winner only after operator approval. It does not

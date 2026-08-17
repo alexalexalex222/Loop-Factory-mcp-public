@@ -23,6 +23,8 @@ import {
 import { appendVNextWaveEvent, loadVNextWaveJournal, VNEXT_WAVE_EVENT } from '../src/vnext-wave-journal.mjs';
 import { configInput } from './vnext-wave-config.test.mjs';
 
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
+
 function fixture() {
   const artifactRoot = mkdtempSync(join(tmpdir(), 'vnext-wave-artifacts-'));
   mkdirSync(join(artifactRoot, 'tasks'));
@@ -104,16 +106,39 @@ function fixture() {
 }
 
 function closedProofFixtures() {
-  const data = fixture();
   const createdAt = '2026-08-05T00:00:00.000Z';
+  const preparationBudget = createResourceBudgetPolicy({
+    policyId: 'wave-1-preparation-budget',
+    maxCalls: 7,
+    maxInputTokens: 700,
+    maxOutputTokens: 350,
+    maxTotalTokens: 1050,
+    maxUsdMicros: 0,
+    inputUsdMicrosPerMillionTokens: 0,
+    outputUsdMicrosPerMillionTokens: 0,
+    billingMode: 'subscription-no-metered-usd',
+    currency: 'USD'
+  }).policy;
+  const experimentBudget = createResourceBudgetPolicy({
+    policyId: 'wave-1-experiment-budget',
+    maxCalls: 120,
+    maxInputTokens: 12000,
+    maxOutputTokens: 6000,
+    maxTotalTokens: 18000,
+    maxUsdMicros: 0,
+    inputUsdMicrosPerMillionTokens: 0,
+    outputUsdMicrosPerMillionTokens: 0,
+    billingMode: 'subscription-no-metered-usd',
+    currency: 'USD'
+  }).policy;
   const budgetLedgers = [
     createResourceBudgetLedger({
-      policy: data.preparationBudget,
+      policy: preparationBudget,
       runId: 'preparation-run',
       createdAt
     }).ledger,
     createResourceBudgetLedger({
-      policy: data.experimentBudget,
+      policy: experimentBudget,
       runId: 'experiment-run',
       createdAt
     }).ledger
@@ -227,7 +252,7 @@ test('closed wave proof validators reject hash-resealed extension fields', () =>
   }).status, 'REFUSED');
 });
 
-test('wave planning binds ten task bytes and exact worst-case child exposures without inference', () => {
+executableEvaluatorTest('wave planning binds ten task bytes and exact worst-case child exposures without inference', () => {
   const data = fixture();
   const home = mkdtempSync(join(tmpdir(), 'vnext-wave-home-'));
   const store = createStore(home);
@@ -263,7 +288,7 @@ test('wave planning binds ten task bytes and exact worst-case child exposures wi
     .some((row) => row.target === 'mechanism-program/fallback'));
 });
 
-test('an ambiguous preparation dispatch is never retried', async () => {
+executableEvaluatorTest('an ambiguous preparation dispatch is never retried', async () => {
   const data = fixture();
   const store = createStore(mkdtempSync(join(tmpdir(), 'vnext-wave-ambiguous-')));
   const state = createCampaignSeriesState({ plan: data.plan, runId: 'series-run' }).state;

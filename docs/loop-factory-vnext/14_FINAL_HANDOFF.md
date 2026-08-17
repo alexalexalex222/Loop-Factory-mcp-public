@@ -49,6 +49,11 @@ feature before touching a worktree. Provider CLI installation, authentication,
 and backend availability are separate from core portability and are not claimed
 by fixture-only CI.
 
+VNext task-pack records and their sealed authority hashes can relocate across
+operating systems. Creating or independently replaying the executable baseline
+still uses the same macOS `sandbox-exec` evaluator and therefore refuses on
+Linux and Windows before candidate execution.
+
 Paid VNext dispatch uses a stronger file-and-directory power-loss barrier. That
 barrier is available on macOS and Linux. Windows refuses before creating a
 power-loss store until a native directory-flush adapter is implemented and

@@ -91,6 +91,7 @@ test('capture removes API credentials and invokes only read-only Codex metadata 
     binaryPath: '/opt/codex/codex.real',
     requestedModel: 'gpt-5.6-sol',
     reasoningEffort: 'high',
+    platform: 'linux',
     env: {
       PATH: '/usr/bin',
       OPENAI_API_KEY: 'must-not-pass',

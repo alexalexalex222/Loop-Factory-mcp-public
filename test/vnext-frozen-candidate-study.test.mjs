@@ -76,6 +76,7 @@ import {
 import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
 const NOW = '2026-08-05T16:00:00.000Z';
 const PROGRAM = {
   schemaVersion: 'mechanism-program-v1',
@@ -624,7 +625,7 @@ function fixture() {
   return sharedFixture;
 }
 
-test('protocol ledger and frozen transfer plan bind one exact candidate without generation calls', async () => {
+executableEvaluatorTest('protocol ledger and frozen transfer plan bind one exact candidate without generation calls', async () => {
   const data = await fixture();
   assert.equal(data.protocol.identityLedger.identityCount, 500);
   assert.equal(data.protocol.exposure.liveEvaluatorCalls, 1);
@@ -735,7 +736,7 @@ test('protocol ledger and frozen transfer plan bind one exact candidate without 
   assert.equal(createStore(home).exists('transfer-run'), false);
 });
 
-test('protocol r6 keeps semantic judging outside deterministic causal phases', async () => {
+executableEvaluatorTest('protocol r6 keeps semantic judging outside deterministic causal phases', async () => {
   const data = await fixture();
   const supportedArtifact = {
     text: 'Checkout errors began at 14:05 UTC and no stored payment data was lost.'
@@ -889,7 +890,7 @@ test('protocol r6 keeps semantic judging outside deterministic causal phases', a
   assert.equal(validateVNextAblationProtocol(wrongRole).status, 'REFUSED');
 });
 
-test('external final pack must be disjoint and bind a successful exact transfer prerequisite', async () => {
+executableEvaluatorTest('external final pack must be disjoint and bind a successful exact transfer prerequisite', async () => {
   const data = await fixture();
   const finalPack = writePack(data.root, 'final', 200, data.evaluator, {
     partition: 'final',
@@ -963,7 +964,7 @@ test('external final pack must be disjoint and bind a successful exact transfer 
   assert.equal(missingPrerequisite.code, 'FROZEN_CANDIDATE_PREREQUISITE_INVALID');
 });
 
-test('custodian manifest contains executable authority but no final task or oracle bytes', async () => {
+executableEvaluatorTest('custodian manifest contains executable authority but no final task or oracle bytes', async () => {
   const data = await fixture();
   const transfer = data.packs.find((row) => row.descriptor.role === 'transfer');
   const transferHome = mkdtempSync(join(tmpdir(), 'vnext-custodian-transfer-'));
@@ -1000,7 +1001,7 @@ test('custodian manifest contains executable authority but no final task or orac
   assert.equal(validateVNextCustodianPackageManifest(tampered).status, 'REFUSED');
 });
 
-test('custodian capsule verifies and plans from sealed evidence after relocation', async () => {
+executableEvaluatorTest('custodian capsule verifies and plans from sealed evidence after relocation', async () => {
   const data = await fixture();
   const transfer = data.packs.find((row) => row.descriptor.role === 'transfer');
   const transferHome = mkdtempSync(join(tmpdir(), 'vnext-custodian-relocated-transfer-'));

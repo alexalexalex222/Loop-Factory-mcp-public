@@ -24,6 +24,9 @@
   intended for macOS, Linux, and Windows.
 - Paid VNext dispatch requires file-and-directory power-loss durability. macOS
   and Linux implement that contract; Windows refuses before state mutation.
+- Task-pack structure and sealed evaluator authority records are portable. The
+  executable baseline creation and replay step remains macOS-only and must pass
+  a fresh live evaluator-authority check before execution.
 - The disabled code-candidate executor requires macOS `sandbox-exec`. Linux and
   Windows refuse before worktree access.
 

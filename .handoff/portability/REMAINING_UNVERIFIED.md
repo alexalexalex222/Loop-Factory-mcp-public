@@ -14,7 +14,8 @@
 - Authenticated Claude, Codex, OpenCode, and other provider CLI behavior on each
   operating system.
 - Windows power-loss durability for paid dispatch; it currently refuses safely.
-- Linux or Windows execution of the macOS-only code-candidate sandbox.
+- Linux or Windows execution of the macOS-only task-baseline and code-candidate
+  sandboxes.
 - Counterbalanced semantic-judge qualification and matched live VNext ablations.
 - Exact-candidate transfer and external-custodian final evaluation.
 - A reachable, calibrated multi-generation recursive admission rule. The current

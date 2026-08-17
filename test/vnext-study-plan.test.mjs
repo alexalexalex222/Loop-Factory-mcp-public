@@ -34,6 +34,8 @@ import {
 } from '../src/vnext-matched-phase.mjs';
 import { resolveVNextWaveImplementation } from '../src/vnext-wave-runner.mjs';
 
+const executableEvaluatorTest = process.platform === 'darwin' ? test : test.skip;
+
 function createPowerLossStore(home) {
   if (process.platform !== 'win32') {
     return createStore(home, { durability: STORE_DURABILITY.POWER_LOSS });
@@ -360,7 +362,7 @@ function protocolFor(inputValue) {
   return { ...core, protocolSha256: sha256(canonicalVNextJson(core)) };
 }
 
-test('a B0 study plan persists one approval-locked 122-call wave without inference', async () => {
+executableEvaluatorTest('a B0 study plan persists one approval-locked 122-call wave without inference', async () => {
   const built = createVNextStudyWave(input('B0'));
   assert.equal(built.status, 'OK', built.message);
   assert.equal(built.build.preparationBudget.maxCalls, 2);
@@ -393,7 +395,7 @@ test('a B0 study plan persists one approval-locked 122-call wave without inferen
   assert.equal(blocked.code, 'VNEXT_CAMPAIGN_PROTOCOL_REQUIRED');
 });
 
-test('the final authorization boundary consumes only the exact replayed study disclosure', () => {
+executableEvaluatorTest('the final authorization boundary consumes only the exact replayed study disclosure', () => {
   const built = createVNextStudyWave(input('B0'));
   assert.equal(built.status, 'OK', built.message);
   const store = createPowerLossStore(
@@ -432,7 +434,7 @@ test('the final authorization boundary consumes only the exact replayed study di
     persisted.disclosure.disclosureSha256);
 });
 
-test('B2 and B3 expose their exact stage-dependent call counts', () => {
+executableEvaluatorTest('B2 and B3 expose their exact stage-dependent call counts', () => {
   const b2 = createVNextStudyWave(input('B2'));
   const b3 = createVNextStudyWave(input('B3'));
   assert.equal(b2.status, 'OK', b2.message);
@@ -443,13 +445,13 @@ test('B2 and B3 expose their exact stage-dependent call counts', () => {
   assert.equal(b3.build.rootBudget.maxCalls, 126);
 });
 
-test('B4 cannot masquerade as hybrid retrieval with an empty verifier-owned bank', () => {
+executableEvaluatorTest('B4 cannot masquerade as hybrid retrieval with an empty verifier-owned bank', () => {
   const built = createVNextStudyWave(input('B4'));
   assert.equal(built.status, 'REFUSED');
   assert.equal(built.code, 'VNEXT_STUDY_EVIDENCE_INSUFFICIENT');
 });
 
-test('P0 arms freeze as one matched phase before any child worker launches', () => {
+executableEvaluatorTest('P0 arms freeze as one matched phase before any child worker launches', () => {
   const base = input('B0');
   const protocol = protocolFor(base);
   const store = createStore(mkdtempSync(join(tmpdir(), 'vnext-matched-phase-home-')));

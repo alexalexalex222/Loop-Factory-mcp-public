@@ -93,7 +93,10 @@ test('codex execution selects the requested model explicitly and returns a hashe
     assert.equal(res.invocation.reportedModelMatchesRequest, null);
     assert.equal(res.invocation.modelSelectionAuthority, 'explicit-model-flag');
     assert.equal(res.invocation.modelIdentityAuthority, 'explicit-model-flag');
-    assert.equal(res.invocation.executableBasename, 'codex');
+    assert.equal(
+      res.invocation.executableBasename,
+      process.platform === 'win32' ? 'codex.cmd' : 'codex'
+    );
     assert.equal(res.invocation.executableSha256, sha256(readFileSync(bin)));
     assert.equal(res.invocation.executableBytes, readFileSync(bin).length);
     assert.equal(res.invocation.authMode, null);

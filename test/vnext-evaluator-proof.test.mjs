@@ -56,6 +56,10 @@ function input() {
   };
 }
 
+function writeExclusiveFixture(path, contents, options) {
+  writeFileSync(path, contents, { ...options, flag: 'wx' });
+}
+
 test('evaluator proof planning freezes one call and never launches a worker', async () => {
   const built = createVNextEvaluatorProofPlan(input());
   assert.equal(built.status, 'OK', built.message);
@@ -195,6 +199,22 @@ test('ambiguous evaluator failure writes a one-shot launch barrier', async () =>
   assert.equal(calls, 0);
   assert.equal(existsSync(join(loaded.directory, 'launch.json')), false);
 
+  if (process.platform === 'win32') {
+    const unsupported = await runVNextEvaluatorProof({
+      plan: loaded.plan,
+      directory: loaded.directory,
+      approvedPlanSha256: loaded.plan.planSha256,
+      evaluatorRunner: async () => {
+        calls += 1;
+        return { status: 'OK' };
+      },
+      clock: () => '2026-08-05T00:59:30.000Z'
+    });
+    assert.equal(unsupported.code, 'EVALUATOR_PROOF_LAUNCH_DURABILITY_FAILED');
+    assert.equal(calls, 0);
+    assert.equal(existsSync(join(loaded.directory, 'launch.json')), false);
+  }
+
   const failed = await runVNextEvaluatorProof({
     plan: loaded.plan,
     directory: loaded.directory,
@@ -206,6 +226,9 @@ test('ambiguous evaluator failure writes a one-shot launch barrier', async () =>
         code: 'SIMULATED_AMBIGUOUS_EVALUATOR_FAILURE'
       };
     },
+    ...(process.platform === 'win32'
+      ? { durableWriter: writeExclusiveFixture }
+      : {}),
     clock: () => '2026-08-05T01:00:00.000Z'
   });
   assert.equal(failed.code, 'SIMULATED_AMBIGUOUS_EVALUATOR_FAILURE');

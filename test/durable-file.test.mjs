@@ -2,12 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   durableAtomicWriteFileSync,
   durableRenameSync,
   durableWriteExclusiveFileSync
 } from '../src/durable-file.mjs';
+
+const PROOF_ROOT = resolve('/proof');
+const proofPath = (name) => join(PROOF_ROOT, name);
 
 function recordingIo({
   failFsyncAt = null,
@@ -62,22 +65,23 @@ function recordingIo({
 
 test('durable atomic write flushes bytes before rename and directory after rename', () => {
   const { io, operations } = recordingIo();
-  durableAtomicWriteFileSync('/proof/launch.json', 'launch', {}, io);
+  durableAtomicWriteFileSync(proofPath('launch.json'), 'launch', {}, io);
   assert.deepEqual(operations.map(([operation]) => operation), [
     'open', 'write', 'fsync', 'close', 'fullfsync', 'rename',
     'open', 'fsync', 'close', 'fullfsync'
   ]);
-  assert.match(operations[0][1], /^\/proof\/\.launch\.json\..+\.tmp$/);
+  assert.equal(dirname(operations[0][1]), PROOF_ROOT);
+  assert.match(basename(operations[0][1]), /^\.launch\.json\..+\.tmp$/);
   assert.equal(operations[4][1], operations[0][1]);
-  assert.deepEqual(operations[5].slice(1), [operations[0][1], '/proof/launch.json']);
-  assert.deepEqual(operations[6].slice(1, 3), ['/proof', 'r']);
-  assert.equal(operations[9][1], '/proof');
+  assert.deepEqual(operations[5].slice(1), [operations[0][1], proofPath('launch.json')]);
+  assert.deepEqual(operations[6].slice(1, 3), [PROOF_ROOT, 'r']);
+  assert.equal(operations[9][1], PROOF_ROOT);
 });
 
 test('durable atomic write refuses to rename when the file flush fails', () => {
   const { io, operations } = recordingIo({ failFsyncAt: 1 });
   assert.throws(
-    () => durableAtomicWriteFileSync('/proof/dispatch.json', 'dispatch', {}, io),
+    () => durableAtomicWriteFileSync(proofPath('dispatch.json'), 'dispatch', {}, io),
     { code: 'EIO' }
   );
   assert.equal(operations.some(([operation]) => operation === 'rename'), false);
@@ -87,7 +91,7 @@ test('durable atomic write refuses to rename when the file flush fails', () => {
 test('durable atomic write refuses to rename when Darwin full flush fails', () => {
   const { io, operations } = recordingIo({ failFullFsyncAt: 1 });
   assert.throws(
-    () => durableAtomicWriteFileSync('/proof/dispatch.json', 'dispatch', {}, io),
+    () => durableAtomicWriteFileSync(proofPath('dispatch.json'), 'dispatch', {}, io),
     { code: 'EIO' }
   );
   assert.equal(operations.some(([operation]) => operation === 'rename'), false);
@@ -98,7 +102,7 @@ test('Darwin durable writes fail closed without a full flush adapter', () => {
   const { io, operations } = recordingIo();
   delete io.fullFsyncPathSync;
   assert.throws(
-    () => durableAtomicWriteFileSync('/proof/dispatch.json', 'dispatch', {}, io),
+    () => durableAtomicWriteFileSync(proofPath('dispatch.json'), 'dispatch', {}, io),
     { code: 'DURABLE_DARWIN_FULLFSYNC_UNAVAILABLE' }
   );
   assert.equal(operations.some(([operation]) => operation === 'rename'), false);
@@ -108,7 +112,7 @@ test('Darwin durable writes fail closed without a full flush adapter', () => {
 test('durable atomic write does not return after an unflushed rename', () => {
   const { io, operations } = recordingIo({ failFsyncAt: 2 });
   assert.throws(
-    () => durableAtomicWriteFileSync('/proof/dispatch.json', 'dispatch', {}, io),
+    () => durableAtomicWriteFileSync(proofPath('dispatch.json'), 'dispatch', {}, io),
     { code: 'EIO' }
   );
   assert.equal(operations.some(([operation]) => operation === 'rename'), true);
@@ -117,27 +121,27 @@ test('durable atomic write does not return after an unflushed rename', () => {
 
 test('durable exclusive creation and rename both flush their directory boundary', () => {
   const exclusive = recordingIo();
-  durableWriteExclusiveFileSync('/proof/launch.json', 'launch', {}, exclusive.io);
+  durableWriteExclusiveFileSync(proofPath('launch.json'), 'launch', {}, exclusive.io);
   assert.deepEqual(exclusive.operations.map(([operation]) => operation), [
     'open', 'write', 'fsync', 'close', 'fullfsync',
     'open', 'fsync', 'close', 'fullfsync'
   ]);
 
   const moved = recordingIo();
-  durableRenameSync('/proof/pending.json', '/proof/consumed.json', moved.io);
+  durableRenameSync(proofPath('pending.json'), proofPath('consumed.json'), moved.io);
   assert.deepEqual(moved.operations.map(([operation]) => operation), [
     'rename', 'open', 'fsync', 'close', 'fullfsync',
     'open', 'fsync', 'close', 'fullfsync'
   ]);
-  assert.deepEqual(moved.operations[1].slice(1, 3), ['/proof/consumed.json', 'r+']);
-  assert.deepEqual(moved.operations[5].slice(1, 3), ['/proof', 'r']);
+  assert.deepEqual(moved.operations[1].slice(1, 3), [proofPath('consumed.json'), 'r+']);
+  assert.deepEqual(moved.operations[5].slice(1, 3), [PROOF_ROOT, 'r']);
 });
 
 test('Linux uses fsync and Windows power-loss durability fails closed', () => {
   const linux = recordingIo({ platform: 'linux' });
-  durableAtomicWriteFileSync('/proof/linux.json', 'linux', {}, linux.io);
+  durableAtomicWriteFileSync(proofPath('linux.json'), 'linux', {}, linux.io);
   assert.equal(linux.operations.some(([operation]) => operation === 'fullfsync'), false);
-  assert.deepEqual(linux.operations.at(-3).slice(1, 3), ['/proof', 'r']);
+  assert.deepEqual(linux.operations.at(-3).slice(1, 3), [PROOF_ROOT, 'r']);
 
   const windows = recordingIo({ platform: 'win32' });
   assert.throws(
@@ -150,7 +154,7 @@ test('Linux uses fsync and Windows power-loss durability fails closed', () => {
 test('unsupported platforms fail before touching a dispatch barrier', () => {
   const unsupported = recordingIo({ platform: 'freebsd' });
   assert.throws(
-    () => durableAtomicWriteFileSync('/proof/dispatch.json', 'dispatch', {}, unsupported.io),
+    () => durableAtomicWriteFileSync(proofPath('dispatch.json'), 'dispatch', {}, unsupported.io),
     { code: 'DURABLE_PLATFORM_UNSUPPORTED' }
   );
   assert.deepEqual(unsupported.operations, []);
