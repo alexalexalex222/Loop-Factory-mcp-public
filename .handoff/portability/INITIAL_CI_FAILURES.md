@@ -48,3 +48,8 @@ Those last assertions were corrected without widening either execution boundary.
 
 Run `32029397722` passed all five declared jobs on commit
 `0c9b7b3d69e99f1c2a87234a2626966939cb1572`.
+
+The evidence-only run `32031016215` then exposed a Node 22 Linux assertion that
+treated a terminated zombie process as still executable because `kill(pid, 0)`
+remains true until reaping. The final assertion now accepts only `ESRCH` or a
+Linux `Z`/`X` process state and still fails on every live state.

@@ -60,22 +60,33 @@ function waitForExit(child, timeoutMs = 12_000) {
   });
 }
 
-function assertGone(pid) {
-  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+function processIsGone(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error?.code === 'ESRCH') return true;
+    throw error;
+  }
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+      return state === 'Z' || state === 'X';
+    } catch (error) {
+      if (error?.code === 'ENOENT') return true;
+      throw error;
+    }
+  }
+  return false;
 }
 
 async function assertGoneEventually(pid, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch (error) {
-      if (error?.code === 'ESRCH') return;
-      throw error;
-    }
+    if (processIsGone(pid)) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  assertGone(pid);
+  assert.equal(processIsGone(pid), true, `process ${pid} remained executable`);
 }
 
 test('SIGTERM tears down every tracked child process group', {
