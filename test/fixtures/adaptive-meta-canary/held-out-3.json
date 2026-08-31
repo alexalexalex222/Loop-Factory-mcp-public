@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "adaptive-meta-canary-held-out-v1",
+  "shardId": "held-out-3",
+  "scenarios": [
+    {
+      "id": "hidden-3-target",
+      "baselineDisposition": "COUNTED",
+      "condition": "The normalized result hash is stored before its raw result binding is checked."
+    },
+    {
+      "id": "hidden-3-clean",
+      "condition": "Raw and normalized result hashes both match their persisted artifacts."
+    },
+    {
+      "id": "hidden-3-control",
+      "condition": "The output schema hash differs from the sealed proposal schema."
+    }
+  ]
+}

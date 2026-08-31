@@ -1,0 +1,139 @@
+{
+  "schemaVersion": "adaptive-meta-canary-v2",
+  "privateEvidencePolicy": "source-qualified-v2",
+  "evaluationProcedureNormalization": "development-identifiers-v1",
+  "executionMode": "full",
+  "model": "gpt-5.6-sol",
+  "fixtureOnly": false,
+  "historicalTokenEstimate": null,
+  "proposalRoutes": [
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol"
+  ],
+  "evaluationRoutes": [
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-sol"
+  ],
+  "evidenceSources": [
+    "[PROPOSAL_VISIBLE_DEVELOPMENT_EVIDENCE_PATH]"
+  ],
+  "heldOutEvidenceSources": [
+    "[EVALUATOR_ONLY_SHARD_1_EVIDENCE_PATH]",
+    "[EVALUATOR_ONLY_SHARD_2_EVIDENCE_PATH]",
+    "[EVALUATOR_ONLY_SHARD_3_EVIDENCE_PATH]",
+    "[EVALUATOR_ONLY_SHARD_4_EVIDENCE_PATH]",
+    "[EVALUATOR_ONLY_SHARD_5_EVIDENCE_PATH]"
+  ],
+  "mechanismEvidenceSources": [
+    "[PRIVATE_REPOSITORY_RELATIVE_MECHANISM_EVIDENCE_PATH]"
+  ],
+  "mechanismEvidenceRefs": [
+    {
+      "path": "[PRIVATE_REPOSITORY_RELATIVE_MECHANISM_EVIDENCE_PATH]",
+      "locator": "[EXACT_MECHANISM_EVIDENCE_LOCATOR]"
+    }
+  ],
+  "target": {
+    "findingId": "finding-000",
+    "title": "[SUBSTANTIAL_FINDING_TITLE]",
+    "baselineContent": "[COMPLETE_BASELINE_PROCEDURE]",
+    "evidenceRefs": [
+      {
+        "path": "[PROPOSAL_VISIBLE_DEVELOPMENT_EVIDENCE_PATH]",
+        "locator": "[EXACT_DEVELOPMENT_LOCATOR]"
+      }
+    ],
+    "proposalBrief": {
+      "title": "[NON_PRESCRIPTIVE_PROBLEM_TITLE]",
+      "problem": "[OBSERVED_PROBLEM_WITHOUT_THE_INTERVENTION_OR_EXPECTED_CODE]",
+      "invariants": [
+        "[BEHAVIOR_THAT_MUST_NOT_REGRESS]",
+        "[SECOND_BEHAVIOR_THAT_MUST_NOT_REGRESS]"
+      ]
+    },
+    "hypothesis": {
+      "title": "[SUBSTANTIVE_HYPOTHESIS]",
+      "bottleneck": "[SPECIFIC_CAUSAL_BOTTLENECK]",
+      "operation": "[SPECIFIC_OPERATION]",
+      "expectedMovement": "[PREDECLARED_MOVEMENT]",
+      "falsifier": "[REJECTING_OBSERVATION]"
+    }
+  },
+  "benchmark": {
+    "name": "[FROZEN_BENCHMARK_NAME]",
+    "developmentCases": [
+      {
+        "id": "[DEVELOPMENT_CASE_ID]",
+        "prompt": "[PROPOSAL_VISIBLE_DEVELOPMENT_PROMPT]",
+        "evidenceRef": {
+          "path": "[PROPOSAL_VISIBLE_DEVELOPMENT_EVIDENCE_PATH]",
+          "locator": "[EXACT_DEVELOPMENT_CASE_LOCATOR]"
+        }
+      }
+    ],
+    "evaluationShards": [
+      {
+        "id": "held-out-1",
+        "evidencePaths": ["[EVALUATOR_ONLY_SHARD_1_EVIDENCE_PATH]"],
+        "cases": ["[THREE_TO_TEN_UNIQUE_CASE_OBJECTS_WITH_EVIDENCE_REF_AND_TARGET_BASELINE_FAILURE_REF]"],
+        "oracle": "[CASE_RESULTS_V2_ORACLE_WITH_TARGET_AND_CONTROL_GROUPS]"
+      },
+      {
+        "id": "held-out-2",
+        "evidencePaths": ["[EVALUATOR_ONLY_SHARD_2_EVIDENCE_PATH]"],
+        "cases": ["[DISTINCT_SHARD_2_CASE_OBJECTS]"],
+        "oracle": "[DISTINCT_SHARD_2_ORACLE]"
+      },
+      {
+        "id": "held-out-3",
+        "evidencePaths": ["[EVALUATOR_ONLY_SHARD_3_EVIDENCE_PATH]"],
+        "cases": ["[DISTINCT_SHARD_3_CASE_OBJECTS]"],
+        "oracle": "[DISTINCT_SHARD_3_ORACLE]"
+      },
+      {
+        "id": "held-out-4",
+        "evidencePaths": ["[EVALUATOR_ONLY_SHARD_4_EVIDENCE_PATH]"],
+        "cases": ["[DISTINCT_SHARD_4_CASE_OBJECTS]"],
+        "oracle": "[DISTINCT_SHARD_4_ORACLE]"
+      },
+      {
+        "id": "held-out-5",
+        "evidencePaths": ["[EVALUATOR_ONLY_SHARD_5_EVIDENCE_PATH]"],
+        "cases": ["[DISTINCT_SHARD_5_CASE_OBJECTS]"],
+        "oracle": "[DISTINCT_SHARD_5_ORACLE]"
+      }
+    ]
+  },
+  "mechanismContext": {
+    "families": [
+      "[VALID_MECHANISM_FAMILY_V1_RECORD]"
+    ],
+    "applications": [
+      "[VALID_MECHANISM_APPLICATION_V1_RECORD]"
+    ],
+    "routingTarget": {
+      "taskMode": "improve",
+      "loopRole": "[LOOP_ROLE]",
+      "taskValueDimensions": [
+        "[TASK_VALUE_DIMENSION]"
+      ],
+      "resourceDimensions": [
+        "token-cost"
+      ]
+    },
+    "policyEpoch": "[VALID_META_POLICY_EPOCH_V1_RECORD]",
+    "seed": "[PERSISTED_ROUTING_SEED]",
+    "hypothesisCount": 2,
+    "routingDecision": "[REPLAYABLE_ROUTING_DECISION_V1_RECORD]",
+    "candidatePool": [
+      "[REPLAYABLE_CANDIDATE_POOL_ENTRY]"
+    ],
+    "routedCapsule": "[ROUTER_PRODUCED_MECHANISM_CAPSULE_V1]",
+    "shamCapsule": "[SCHEMA_IDENTICAL_IRRELEVANT_CAPSULE]",
+    "primaryFamilyId": "[SELECTED_FAMILY_ID]"
+  }
+}

@@ -16,8 +16,8 @@
 //   node scripts/tier-test.mjs --scaffold                       # write the two fixtures, no API
 //   node scripts/tier-test.mjs --skill <id> --fixture <dir> --tiers tier1 --dry-run   # validate wiring, no API
 //
-// A real run spends API and needs the operator's keys + the model CLI on PATH:
-//   node scripts/tier-test.mjs --skill verification-discipline --fixture /tmp/tier-test-repo --tiers tier1,tier4,tier2,tier3
+// A real run spends API and needs explicit opt-in, the operator's keys, and the model CLI on PATH:
+//   SUPER_LOOP_ALLOW_EXEC=1 node scripts/tier-test.mjs --skill verification-discipline --fixture /tmp/tier-test-repo --tiers tier1,tier4,tier2,tier3
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -163,6 +163,12 @@ const withSkillPrompt = (skill) => `${TASK}\n\nConsult and FOLLOW this skill bef
 
 // ---- spawn one agentic run (real runs only) -------------------------------------------
 function runAgent(tier, cwd, prompt, env) {
+  if (env.SUPER_LOOP_ALLOW_EXEC !== '1') {
+    return { ok: false, reason: 'EXEC_OPT_IN_REQUIRED', transcript: '', message: 'SUPER_LOOP_ALLOW_EXEC=1 is required' };
+  }
+  if (!tier.slugConfirmed) {
+    return { ok: false, reason: 'ROUTE_UNCONFIRMED', transcript: '', message: `${tier.id} route is not operator-confirmed` };
+  }
   const bin = resolveOnPath(tier.cli, env.PATH || env.Path, process.platform === 'win32');
   if (!bin) return { ok: false, reason: 'CLI_MISSING', transcript: '', message: `${tier.cli} not on PATH` };
   if (!env[tier.envKey]) return { ok: false, reason: 'KEY_MISSING', transcript: '', message: `${tier.envKey} not set` };
@@ -208,7 +214,7 @@ function tierWiring(tier, env) {
   if (!cliOnPath) reasons.push(`${tier.cli} not on PATH`);
   if (!keySet) reasons.push(`${tier.envKey} not set`);
   if (!tier.slugConfirmed) reasons.push('slug needs operator confirmation');
-  return { wired: cliOnPath && keySet, cliOnPath, keySet, reasons };
+  return { wired: cliOnPath && keySet && tier.slugConfirmed, cliOnPath, keySet, reasons };
 }
 
 function ts() { return new Date().toISOString().replace(/[:.]/g, '-'); }
@@ -240,6 +246,10 @@ function main() {
   const unknownTiers = tierIds.filter((id) => !TIER_BY_ID[id]);
   if (unknownTiers.length) { process.stderr.write(`error: unknown tier(s): ${unknownTiers.join(', ')}. Known: ${TIERS.map((t) => t.id).join(', ')}\n`); process.exit(2); }
   if (!dryRun && !tierIds.length) { process.stderr.write('error: --tiers <list> is required for a real run (or pass --dry-run)\n'); process.exit(2); }
+  if (!dryRun && env.SUPER_LOOP_ALLOW_EXEC !== '1') {
+    process.stderr.write('error: explicit opt-in required; rerun the same command with SUPER_LOOP_ALLOW_EXEC=1\n');
+    process.exit(2);
+  }
 
   const { engine, store, homeDir } = buildServer(home ? { home } : {});
   const skill = fetchSkill(engine, store, skillId, `${skillId} verification testing`);

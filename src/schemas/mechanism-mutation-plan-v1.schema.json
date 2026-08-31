@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mechanism-mutation-plan-v1",
+  "title": "Bounded executable mechanism mutation plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mutationPlanId",
+    "mutationPlanSha256",
+    "parent",
+    "objective",
+    "operations",
+    "reasonCodes",
+    "expectedEffectCode"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "mechanism-mutation-plan-v1" },
+    "mutationPlanId": { "type": "string", "pattern": "^mutation-[a-f0-9]{24}$" },
+    "mutationPlanSha256": { "$ref": "#/definitions/sha256" },
+    "parent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["familyId", "familySha256", "programSha256"],
+      "properties": {
+        "familyId": { "type": "string", "pattern": "^family-[a-f0-9]{24}$" },
+        "familySha256": { "$ref": "#/definitions/sha256" },
+        "programSha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "measurementId",
+        "measurementSha256",
+        "failureCaseSetSha256",
+        "successCaseSetSha256",
+        "targetMetric",
+        "direction"
+      ],
+      "properties": {
+        "measurementId": { "type": "string", "pattern": "^measurement-[a-f0-9]{24}$" },
+        "measurementSha256": { "$ref": "#/definitions/sha256" },
+        "failureCaseSetSha256": { "$ref": "#/definitions/sha256" },
+        "successCaseSetSha256": { "$ref": "#/definitions/sha256" },
+        "targetMetric": {
+          "enum": [
+            "code-rate",
+            "control-exact-rate",
+            "decision-rate",
+            "exact-case-rate",
+            "full-repair-rate",
+            "target-exact-rate",
+            "token-cost"
+          ]
+        },
+        "direction": { "enum": ["increase", "decrease"] }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "collection",
+          "expectedItemSha256",
+          "insertBeforeRuleId",
+          "value"
+        ],
+        "properties": {
+          "action": { "enum": ["add", "remove", "replace"] },
+          "collection": {
+            "enum": [
+              "bindings",
+              "fallback",
+              "forbiddenBindings",
+              "metrics",
+              "rules",
+              "selectors"
+            ]
+          },
+          "expectedItemSha256": {
+            "anyOf": [
+              { "$ref": "#/definitions/sha256" },
+              { "type": "null" }
+            ]
+          },
+          "insertBeforeRuleId": {
+            "anyOf": [
+              { "$ref": "#/definitions/safeId" },
+              { "type": "null" }
+            ]
+          },
+          "value": {
+            "anyOf": [
+              { "type": "object" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/reason" }
+    },
+    "expectedEffectCode": { "$ref": "#/definitions/reason" }
+  },
+  "definitions": {
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reason": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" }
+  }
+}

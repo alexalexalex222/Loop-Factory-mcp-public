@@ -1,0 +1,476 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mechanism-application-legacy-v1",
+  "title": "Loop Factory mechanism application (superseded contract)",
+  "description": "Retained for compatibility; mechanism-application-v1.schema.json is authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "applicationId",
+    "familyId",
+    "familySha256",
+    "source",
+    "context",
+    "routing",
+    "partition",
+    "eligibleForRouting",
+    "measurement",
+    "outcome",
+    "credit",
+    "lifecycle",
+    "provenance",
+    "applicationReceiptId",
+    "applicationSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "mechanism-application-v1"
+    },
+    "applicationId": {
+      "type": "string",
+      "pattern": "^application-[a-f0-9]{24}$"
+    },
+    "applicationReceiptId": {
+      "type": "string",
+      "pattern": "^app-receipt-[a-f0-9]{24}$"
+    },
+    "applicationSha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "familyId": {
+      "$ref": "#/definitions/familyId"
+    },
+    "familySha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "findingId",
+        "hypothesisId",
+        "testId",
+        "legacyMechanismId",
+        "legacyReceiptId",
+        "legacyReceiptSha256"
+      ],
+      "properties": {
+        "runId": {
+          "$ref": "#/definitions/safeId"
+        },
+        "findingId": {
+          "$ref": "#/definitions/nullableSafeId"
+        },
+        "hypothesisId": {
+          "$ref": "#/definitions/safeId"
+        },
+        "testId": {
+          "$ref": "#/definitions/nullableSafeId"
+        },
+        "legacyMechanismId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^mech-[a-f0-9]{24}$"
+        },
+        "legacyReceiptId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^receipt-[a-f0-9]{24}$"
+        },
+        "legacyReceiptSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetSha256",
+        "taskMode",
+        "loopRole",
+        "taskValueDimensions",
+        "resourceDimensions"
+      ],
+      "properties": {
+        "targetSha256": {
+          "$ref": "#/definitions/sha256"
+        },
+        "taskMode": {
+          "$ref": "#/definitions/nullableKind"
+        },
+        "loopRole": {
+          "$ref": "#/definitions/nullableKind"
+        },
+        "taskValueDimensions": {
+          "$ref": "#/definitions/kindList"
+        },
+        "resourceDimensions": {
+          "$ref": "#/definitions/kindList"
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routingDecisionId",
+        "routingDecisionSha256",
+        "routingPacketSha256",
+        "policyEpochId",
+        "policyEpochSha256",
+        "allocationClass",
+        "affectedExecution"
+      ],
+      "properties": {
+        "routingDecisionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^routing-[a-f0-9]{24}$"
+        },
+        "routingDecisionSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        },
+        "routingPacketSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        },
+        "policyEpochId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^policy-epoch-[a-f0-9]{24}$"
+        },
+        "policyEpochSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        },
+        "allocationClass": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "control",
+            "related",
+            "adjacent",
+            "failureDerived",
+            "wildcard"
+          ]
+        },
+        "affectedExecution": {
+          "type": "boolean"
+        }
+      }
+    },
+    "partition": {
+      "type": "string",
+      "enum": [
+        "harvest",
+        "reference",
+        "gate"
+      ]
+    },
+    "eligibleForRouting": {
+      "type": "boolean"
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline",
+        "challenger",
+        "delta",
+        "shamMovement",
+        "controlRegressions",
+        "reverified",
+        "transferChecks"
+      ],
+      "properties": {
+        "baseline": {
+          "$ref": "#/definitions/measurementArm"
+        },
+        "challenger": {
+          "$ref": "#/definitions/measurementArm"
+        },
+        "delta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "quality",
+            "tokenCost",
+            "tokenCostPct"
+          ],
+          "properties": {
+            "quality": {
+              "$ref": "#/definitions/nullableNumber"
+            },
+            "tokenCost": {
+              "$ref": "#/definitions/nullableNumber"
+            },
+            "tokenCostPct": {
+              "$ref": "#/definitions/nullableNumber"
+            }
+          }
+        },
+        "shamMovement": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "controlRegressions": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reverified": {
+          "type": "boolean"
+        },
+        "transferChecks": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "attempted",
+              "passed",
+              "evidenceSha256"
+            ],
+            "properties": {
+              "kind": {
+                "$ref": "#/definitions/kind"
+              },
+              "attempted": {
+                "type": "boolean"
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "evidenceSha256": {
+                "$ref": "#/definitions/nullableSha256"
+              }
+            }
+          }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "code",
+        "valid",
+        "observedAt",
+        "reverifiedAt"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "improvement",
+            "no_improvement",
+            "tradeoff",
+            "invalid",
+            "regression"
+          ]
+        },
+        "code": {
+          "$ref": "#/definitions/nullableKind"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reverifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "credit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confidence",
+        "authority",
+        "positiveEvidence",
+        "failureDerived"
+      ],
+      "properties": {
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "authority": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 80
+        },
+        "positiveEvidence": {
+          "type": "boolean"
+        },
+        "failureDerived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "reasonCodes"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "replicated",
+            "contradicted",
+            "quarantined"
+          ]
+        },
+        "reasonCodes": {
+          "$ref": "#/definitions/reasonCodes"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmarkSha256",
+        "evidenceSetSha256",
+        "artifactSetSha256"
+      ],
+      "properties": {
+        "benchmarkSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        },
+        "evidenceSetSha256": {
+          "$ref": "#/definitions/sha256"
+        },
+        "artifactSetSha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "safeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
+    },
+    "nullableSafeId": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/safeId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "familyId": {
+      "type": "string",
+      "pattern": "^family-[a-f0-9]{24}$"
+    },
+    "kind": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,119}$"
+    },
+    "nullableKind": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/kind"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kindList": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/kind"
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableSha256": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableNumber": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "measurementArm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quality",
+        "tokenCost",
+        "samples"
+      ],
+      "properties": {
+        "quality": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "tokenCost": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "samples": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,6 +9,7 @@ import {
   codexCandidatePaths,
   findCompatibleCodex,
   parseCodexVersion,
+  runJudgeKit,
   versionAtLeast
 } from '../scripts/judge-build-week.mjs';
 
@@ -57,10 +58,44 @@ test('operator Codex override is the only candidate when explicitly supplied', (
   }
 });
 
+test('judge kit requires caller opt-in before discovery, writes, or provider execution', () => {
+  const root = mkdtempSync(join(tmpdir(), 'loop-factory-judge-gate-'));
+  const outDir = join(root, 'evidence');
+  let workerCalled = false;
+  try {
+    assert.throws(() => runJudgeKit({
+      outDir,
+      env: {},
+      candidates: [],
+      worker: () => {
+        workerCalled = true;
+        return { ok: true };
+      }
+    }), /SUPER_LOOP_ALLOW_EXEC=1 npm run judge:gpt56-sol/);
+    assert.equal(workerCalled, false);
+    assert.equal(existsSync(outDir), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('package exposes the one-command live judge path and deterministic fallback', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.scripts['judge:gpt56-sol'], 'node scripts/judge-build-week.mjs');
   assert.equal(pkg.scripts.demo, 'node scripts/demo.mjs');
+});
+
+test('every local README link is included in the package boundary', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const localTargets = [...readme.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)]
+    .map((match) => match[1].split('#')[0])
+    .filter((target) => target && !/^(?:https?:|mailto:|#)/i.test(target));
+  const includesTarget = (target) => pkg.files.some((entry) => (
+    !entry.startsWith('!')
+    && (entry === target || (entry.endsWith('/') && target.startsWith(entry)))
+  ));
+  assert.deepEqual(localTargets.filter((target) => !includesTarget(target)), []);
 });
 
 test('Build Week docs expose the exact judge path, honest split, and unresolved external placeholders', () => {
@@ -68,9 +103,13 @@ test('Build Week docs expose the exact judge path, honest split, and unresolved 
   const readme = read('../README.md');
   const submission = read('../docs/BUILD_WEEK_SUBMISSION.md');
   const video = read('../docs/BUILD_WEEK_VIDEO.md');
+  assert.match(readme, /Make AI agents prove they got better/);
   assert.match(readme, /npm run judge:gpt56-sol/);
-  assert.match(readme, /What changed on July 18, 2026/);
-  assert.match(readme, /controlled\s+adversarial\s+fixtures/i);
+  assert.match(readme, /GPT-5\.6 Sol/);
+  assert.match(readme, /Fable 5/);
+  assert.match(readme, /0\.6190/);
+  assert.match(readme, /1\.0000/);
+  assert.doesNotMatch(readme, /claude-opus-4-8|gpt-5\.5|glm-5\.2/i);
   assert.match(submission, /\[PUBLIC_YOUTUBE_URL\]/);
   assert.match(submission, /\[CODEX_FEEDBACK_SESSION_ID\]/);
   assert.match(submission, /Monday, July 20, 2026 at 11:30 PM PT/);

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adaptive-context-policy-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "scopeId",
+    "epoch",
+    "previousPolicySha256",
+    "bounds",
+    "allocatedInputTokens",
+    "action",
+    "reasonCodes",
+    "evidence",
+    "compaction",
+    "permanentControlFraction",
+    "recordedAt",
+    "policyId",
+    "policySha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "adaptive-context-policy-v1" },
+    "scopeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$" },
+    "epoch": { "type": "integer", "minimum": 1 },
+    "previousPolicySha256": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      ]
+    },
+    "bounds": { "type": "object" },
+    "allocatedInputTokens": { "type": "integer", "minimum": 1 },
+    "action": { "enum": ["KEEP", "EXPAND", "NARROW"] },
+    "reasonCodes": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "evidence": { "type": "object" },
+    "compaction": { "type": "object" },
+    "permanentControlFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "policyId": { "type": "string", "pattern": "^context-policy-[a-f0-9]{24}$" },
+    "policySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

@@ -27,6 +27,22 @@ import { resolveOnPath } from './host.mjs';
 import { sha256 } from './util.mjs';
 
 export const STRICT_CODEX_REASONING_EFFORT = 'high';
+const EXECUTABLE_EVIDENCE_CACHE = new Map();
+
+function executableEvidence(path) {
+  const stat = statSync(path);
+  const cacheKey = `${path}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  const cached = EXECUTABLE_EVIDENCE_CACHE.get(cacheKey);
+  if (cached) return cached;
+  const evidence = {
+    basename: basename(path),
+    sha256: sha256(readFileSync(path)),
+    bytes: stat.size
+  };
+  EXECUTABLE_EVIDENCE_CACHE.clear();
+  EXECUTABLE_EVIDENCE_CACHE.set(cacheKey, evidence);
+  return evidence;
+}
 
 // Resolve worker binaries robustly even when the MCP server was launched with a
 // minimal PATH (the common case: a GUI/launchd-spawned host hands the stdio server
@@ -115,7 +131,7 @@ export function resolveWorkerBinary(model, env = process.env) {
   if (!bin) return { bin: null, binPath: null, reason: 'NOT_ALLOWLISTED' };
   if (bin === 'codex' && env.SUPER_LOOP_CODEX_BIN) {
     const candidate = String(env.SUPER_LOOP_CODEX_BIN).trim();
-    if (!isAbsolute(candidate) || basename(candidate) !== 'codex') {
+    if (!isAbsolute(candidate) || !['codex', 'codex.real'].includes(basename(candidate))) {
       return { bin, binPath: null, reason: 'BINARY_OVERRIDE_INVALID' };
     }
     const full = resolve(candidate);
@@ -168,6 +184,7 @@ export const STRICT_CODEX_DISABLED_FEATURES = Object.freeze([
 
 const STRICT_SCHEMA_BY_KIND = Object.freeze({
   mine: 'mine-output.schema.json',
+  'mechanism-mutation': 'mechanism-mutation-output.schema.json',
   proposal: 'proposal-output.schema.json',
   evaluation: 'evaluation-output.schema.json',
   baseline: 'baseline-output.schema.json',
@@ -184,10 +201,15 @@ export function schemaPathForContract(contract = {}) {
 export function buildArgs(bin, slug, model, {
   strictIsolation = false,
   schemaPath = null,
-  workspaceRoot = null
+  workspaceRoot = null,
+  reasoningEffort = STRICT_CODEX_REASONING_EFFORT
 } = {}) {
   switch (bin) {
-    case 'claude': return ['-p', '--output-format', 'json'];
+    case 'claude': return [
+      '-p',
+      '--output-format', 'json',
+      '--model', String(model || '')
+    ];
     // `codex exec` refuses to run outside a trusted/git directory unless told to skip
     // that check; the supervisor's run dir is not a git repo, so the flag is required.
     case 'codex': {
@@ -202,7 +224,7 @@ export function buildArgs(bin, slug, model, {
         '-c', 'suppress_unstable_features_warning=true'
       ];
       if (strictIsolation) {
-        args.push('-c', `model_reasoning_effort="${STRICT_CODEX_REASONING_EFFORT}"`);
+        args.push('-c', `model_reasoning_effort="${reasoningEffort}"`);
         args.push('--ignore-user-config');
         for (const feature of STRICT_CODEX_DISABLED_FEATURES) args.push('--disable', feature);
         if (schemaPath) args.push('--output-schema', schemaPath);
@@ -455,6 +477,10 @@ export function buildExecutorPrompt(contract = {}) {
         `--- end ${item.path} ---`
       ].join('\n')).join('\n\n')
     : 'NONE';
+  const mechanismCapsuleText = contract.mechanismCapsule
+    && typeof contract.mechanismCapsule === 'object'
+    ? JSON.stringify(contract.mechanismCapsule, null, 2)
+    : 'NONE';
   const hypothesisText = hypothesis ? JSON.stringify(hypothesis, null, 2) : 'NONE';
   const procedureText = typeof contract.procedureContent === 'string'
     ? contract.procedureContent
@@ -464,8 +490,11 @@ export function buildExecutorPrompt(contract = {}) {
     : (contract.requirements || []).filter((item) => /FROZEN CASES/i.test(String(item))).join('\n') || 'NONE';
   const caseResultShape = '{"caseId":"case id","disposition":"ACCEPTED or REJECTED only","code":"observed supervisor code","evidencePaths":["repository-relative evidence path"]}';
   const structuredOutput = contract.outputSchemaMode === true;
+  const treatmentBoundProposal = kind === 'proposal'
+    && typeof contract.proposalTreatmentInstruction === 'string'
+    && contract.proposalTreatmentInstruction.trim();
   const requiredSchema = kind === 'proposal'
-    ? `${structuredOutput ? '' : '<IMPROVEMENT>\n'}{"findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","revisedContent":"complete revised procedure","changeSummary":"specific hypothesis-linked change"}${structuredOutput ? '' : '\n</IMPROVEMENT>'}`
+    ? `${structuredOutput ? '' : '<IMPROVEMENT>\n'}{"findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","revisedContent":"complete revised procedure","changeSummary":"${treatmentBoundProposal ? 'specific assigned-treatment change' : 'specific hypothesis-linked change'}"}${structuredOutput ? '' : '\n</IMPROVEMENT>'}`
     : (kind === 'evaluation'
         ? `${structuredOutput ? '' : '<EVALUATION>\n'}{"arm":"${contract.evaluationArm || ''}","findingId":"${target && target.findingId || ''}","hypothesisId":"${hypothesis && hypothesis.id || ''}","baselineSha256":"${target && target.baselineSha256 || ''}","procedureSha256":"${contract.procedureSha256 || ''}","caseResults":[${caseResultShape}]}${structuredOutput ? '' : '\n</EVALUATION>'}`
         : (kind === 'baseline'
@@ -476,7 +505,9 @@ export function buildExecutorPrompt(contract = {}) {
                     ? '{"candidates":[{"loop":"loop-de-loop","title":"substantial finding","baselineContent":"complete baseline procedure","evidenceRefs":[{"path":"sealed/path","locator":"exact locator"}],"hypotheses":[{"title":"hypothesis one","bottleneck":"specific mechanism","operation":"specific change","expectedMovement":"predeclared movement","falsifier":"rejecting observation"},{"title":"hypothesis two","bottleneck":"specific mechanism","operation":"specific change","expectedMovement":"predeclared movement","falsifier":"rejecting observation"}]}]}'
                     : '<CANDIDATES>[...]</CANDIDATES>'))));
   const phaseInstruction = kind === 'proposal'
-    ? 'Revise the locked baseline only according to the assigned hypothesis. Do not evaluate cases in this proposal phase.'
+    ? (treatmentBoundProposal
+        ? contract.proposalTreatmentInstruction.trim()
+        : 'Revise the locked baseline only according to the assigned hypothesis. Do not evaluate cases in this proposal phase.')
     : (kind === 'evaluation'
         ? 'Apply the active procedure exactly as written to every frozen case. Do not revise the procedure or add proposal fields.'
         : (kind === 'baseline'
@@ -499,6 +530,9 @@ export function buildExecutorPrompt(contract = {}) {
     '',
     'SEALED EVIDENCE CAPSULE',
     capsuleText,
+    '',
+    'ASSIGNED IMPROVEMENT MECHANISM',
+    mechanismCapsuleText,
     '',
     'HYPOTHESIS',
     hypothesisText,
@@ -568,6 +602,22 @@ export function normalizeStructuredWorkerOutput(contract = {}, text = '') {
     return `<IMPROVEMENT>${JSON.stringify(payload)}</IMPROVEMENT>`;
   }
   return null;
+}
+
+export function normalizeSupervisorBoundProposalOutput(contract = {}, text = '') {
+  const payload = parseStructuredObject(text);
+  if (!payload
+      || typeof payload.revisedContent !== 'string'
+      || !payload.revisedContent.trim()
+      || typeof payload.changeSummary !== 'string'
+      || !payload.changeSummary.trim()) return null;
+  return `<IMPROVEMENT>${JSON.stringify({
+    findingId: contract.target?.findingId,
+    hypothesisId: contract.hypothesis?.id,
+    baselineSha256: contract.target?.baselineSha256,
+    revisedContent: payload.revisedContent,
+    changeSummary: payload.changeSummary
+  })}</IMPROVEMENT>`;
 }
 
 // Adapter: turn the real executor into a supervisor worker(contract) → packet. The
@@ -677,7 +727,7 @@ export function runWorker({
         model,
         bin,
         reason: 'BINARY_OVERRIDE_INVALID',
-        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing file named "codex"'
+        message: 'SUPER_LOOP_CODEX_BIN must be an absolute path to an existing file named "codex" or "codex.real"'
       };
     }
     return { ok: false, model, bin, reason: 'BINARY_MISSING', message: `allowlisted binary "${bin}" not found on PATH (cannot execute route ${model})` };
@@ -690,22 +740,69 @@ export function runWorker({
   const args = buildArgs(bin, execSlugForRoute(model), model, {
     strictIsolation,
     schemaPath,
-    workspaceRoot
+    workspaceRoot,
+    reasoningEffort: executionContract?.reasoningEffort
+      || STRICT_CODEX_REASONING_EFFORT
   });
   // codex's wrapper alias unsets OPENAI_BASE_URL; replicate that for the child so a
   // stray base-url env can't redirect the worker to the wrong endpoint.
   const childEnv = { ...env };
-  if (bin === 'codex') delete childEnv.OPENAI_BASE_URL;
+  const requireChatGptOAuth = bin === 'codex'
+    && env.SUPER_LOOP_REQUIRE_CHATGPT_OAUTH === '1';
+  if (bin === 'codex') {
+    delete childEnv.OPENAI_BASE_URL;
+    if (requireChatGptOAuth) {
+      delete childEnv.OPENAI_API_KEY;
+      delete childEnv.CODEX_ACCESS_TOKEN;
+    }
+  }
   // Operator-only authority and plan-lock values belong to the supervisor process,
   // never to a spawned worker. A worker cannot be allowed to inherit the credentials
   // that distinguish operator decisions from model proposals.
   delete childEnv.SUPER_LOOP_OPERATOR_AUTHORITY;
   delete childEnv.SUPER_LOOP_REAL_TEST_APPROVAL;
+  delete childEnv.SUPER_LOOP_REQUIRE_CHATGPT_OAUTH;
+  delete childEnv.SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256;
+  delete childEnv.SUPER_LOOP_CODEX_EXECUTABLE_SHA256;
+  delete childEnv.SUPER_LOOP_CODEX_BIN;
+  const executable = executableEvidence(binPath);
+  if (requireChatGptOAuth) {
+    const authoritySha256 = String(
+      env.SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256 || ''
+    );
+    const expectedExecutableSha256 = String(
+      env.SUPER_LOOP_CODEX_EXECUTABLE_SHA256 || ''
+    );
+    if (!/^[a-f0-9]{64}$/.test(authoritySha256)
+        || expectedExecutableSha256 !== executable.sha256) {
+      return {
+        ok: false,
+        model,
+        bin,
+        binPath,
+        reason: 'OAUTH_AUTHORITY_MISMATCH',
+        message: 'ChatGPT OAuth execution requires the sealed authority and executable hashes before launch'
+      };
+    }
+  }
   const receiptBase = {
     requestedModel: String(model || ''),
+    reasoningEffort: strictIsolation
+      ? String(executionContract?.reasoningEffort || STRICT_CODEX_REASONING_EFFORT)
+      : null,
     binaryFamily: bin,
     argv: [...args],
-    modelSelectionAuthority: bin === 'codex' ? 'explicit-model-flag' : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary'),
+    promptSha256: sha256(String(prompt == null ? '' : prompt)),
+    modelSelectionAuthority: (bin === 'codex' || bin === 'claude')
+      ? 'explicit-model-flag'
+      : (bin === 'opencode' ? 'explicit-model-slug' : 'route-to-allowlisted-binary'),
+    executableBasename: executable.basename,
+    executableSha256: executable.sha256,
+    executableBytes: executable.bytes,
+    authMode: requireChatGptOAuth ? 'chatgpt-oauth' : null,
+    oauthAuthoritySha256: requireChatGptOAuth
+      ? String(env.SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256)
+      : null,
     strictIsolation,
     disabledFeatures: strictIsolation ? [...STRICT_CODEX_DISABLED_FEATURES] : [],
     workspaceRoot,

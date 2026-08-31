@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mechanism-family-legacy-v1",
+  "title": "Loop Factory mechanism family (superseded contract)",
+  "description": "Retained for compatibility; mechanism-family-v1.schema.json is authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "familyId",
+    "causalFingerprint",
+    "familySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "mechanism-family-v1"
+    },
+    "familyId": {
+      "type": "string",
+      "pattern": "^family-[a-f0-9]{24}$"
+    },
+    "causalFingerprint": {
+      "$ref": "#/definitions/causalFingerprint"
+    },
+    "familySha256": {
+      "$ref": "#/definitions/sha256"
+    }
+  },
+  "definitions": {
+    "kind": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,119}$"
+    },
+    "kindList": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/kind"
+      }
+    },
+    "causalFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bottleneckKind",
+        "interventionKind",
+        "operationKind",
+        "expectedEffectKind",
+        "preconditions",
+        "applicability"
+      ],
+      "properties": {
+        "bottleneckKind": {
+          "$ref": "#/definitions/kind"
+        },
+        "interventionKind": {
+          "$ref": "#/definitions/kind"
+        },
+        "operationKind": {
+          "$ref": "#/definitions/kind"
+        },
+        "expectedEffectKind": {
+          "$ref": "#/definitions/kind"
+        },
+        "preconditions": {
+          "$ref": "#/definitions/kindList"
+        },
+        "procedureSteps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/kind"
+          }
+        },
+        "program": {
+          "$ref": "mechanism-program-v1.schema.json"
+        },
+        "applicability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "taskModes",
+            "loopRoles",
+            "taskValueDimensions",
+            "resourceDimensions"
+          ],
+          "properties": {
+            "taskModes": {
+              "$ref": "#/definitions/kindList"
+            },
+            "loopRoles": {
+              "$ref": "#/definitions/kindList"
+            },
+            "taskValueDimensions": {
+              "$ref": "#/definitions/kindList"
+            },
+            "resourceDimensions": {
+              "$ref": "#/definitions/kindList"
+            }
+          }
+        }
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

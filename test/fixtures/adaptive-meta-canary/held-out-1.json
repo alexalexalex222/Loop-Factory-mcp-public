@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "adaptive-meta-canary-held-out-v1",
+  "shardId": "held-out-1",
+  "scenarios": [
+    {
+      "id": "hidden-1-target",
+      "baselineDisposition": "COUNTED",
+      "condition": "The final result artifact is absent after stdout is accepted."
+    },
+    {
+      "id": "hidden-1-clean",
+      "condition": "All receipt and artifact bindings are present and valid."
+    },
+    {
+      "id": "hidden-1-control",
+      "condition": "The requested model route does not match the invocation receipt."
+    }
+  ]
+}

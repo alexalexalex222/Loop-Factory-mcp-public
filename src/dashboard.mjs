@@ -1122,16 +1122,29 @@ export function renderRunSelector(snapshots = []) {
   const rows = runs.length
     ? runs.map((snapshot, index) => {
         const canary = snapshot.canary && snapshot.canary.enabled ? snapshot.canary : null;
+        const recursive = snapshot.recursive && snapshot.recursive.enabled
+          ? snapshot.recursive
+          : null;
         const pendingDecisions = Number(snapshot.reviews?.pending || 0);
         const approvedDecisions = Number(snapshot.reviews?.approved || 0);
         const deniedDecisions = Number(snapshot.reviews?.sludge || 0);
-        const mode = canary ? 'Canary' : (snapshot.realTest && snapshot.realTest.enabled ? 'Strict campaign' : 'Campaign');
+        const mode = canary
+          ? 'Canary'
+          : recursive
+            ? (recursive.mode === 'campaign' ? 'Recursive campaign' : 'Recursive canary')
+            : (snapshot.realTest && snapshot.realTest.enabled ? 'Strict campaign' : 'Campaign');
         const verdict = canary
           ? canary.verdict.headline
+          : recursive
+            ? (recursive.causalPass
+                ? 'Causal improvement admitted'
+                : recursive.experimentValid ? 'Valid evidence' : snapshot.run.status)
           : (snapshot.realTest && snapshot.realTest.enabled ? snapshot.realTest.status : snapshot.run.status);
         const tone = !canary && pendingDecisions > 0
           ? 'warning'
-          : canaryTone(canary ? canary.verdict.status : snapshot.run.status);
+          : canaryTone(canary
+            ? canary.verdict.status
+            : recursive?.causalPass ? 'PASS' : snapshot.run.status);
         const model = snapshot.run.model || snapshot.policy?.primary;
         const challenger = canary?.arms.find((arm) => arm.role === 'challenger');
         const isBlockedCanary = canary?.blocked?.active === true;
@@ -1139,16 +1152,22 @@ export function renderRunSelector(snapshots = []) {
           ? (isBlockedCanary
               ? (canary.blocked.code || 'BLOCKED')
               : `${canary.proof.pairedTargetWins}/${canary.contract.replicatesPerArm} paired wins`)
+          : recursive
+            ? `${displayInteger(recursive.callsObserved)} / ${displayInteger(recursive.callsMaximum)} calls`
           : (pendingDecisions > 0 ? `${pendingDecisions} pending` : displayValue(snapshot.run.status));
         const secondaryProof = canary
           ? (isBlockedCanary
               ? (canary.blocked.failureEvidenceAvailable ? 'Failure evidence available' : 'Diagnostics unavailable')
               : displayPercent(challenger?.targetMean))
+          : recursive
+            ? `${recursive.generations.length} measured generations`
           : (pendingDecisions > 0
               ? 'Decision required'
               : `${approvedDecisions} approved / ${deniedDecisions} denied`);
         const boundaryProof = canary
           ? (canary.proof.promotionRecorded ? 'Promotion recorded' : 'Promotion disabled')
+          : recursive
+            ? (recursive.operator.stopRequested ? 'Stop requested' : 'Promotion disabled')
           : (pendingDecisions > 0 ? 'Operator action' : escapeHtml(mode));
         const search = [
           snapshot.run.id,
@@ -1390,7 +1409,171 @@ export function renderRunSelector(snapshots = []) {
 export function renderDashboard(state, options = {}) {
   const view = options.snapshot || buildConsoleSnapshot(state);
   if (view.canary && view.canary.enabled) return renderCanaryDashboard(view);
+  if (view.recursive && view.recursive.enabled) {
+    return renderRecursiveDashboard(view, options);
+  }
   return renderCampaignDashboard(view, options);
+}
+
+function renderRecursiveDashboard(view, options = {}) {
+  const recursive = view.recursive;
+  const decisionToken = typeof options.decisionToken === 'string'
+    ? options.decisionToken
+    : '';
+  const dataJson = JSON.stringify(view).replace(/</g, '\\u003c');
+  const latestChild = recursive.latestChild || null;
+  const stages = latestChild?.stages?.length ? latestChild.stages : recursive.stages;
+  const gates = latestChild?.gates?.length ? latestChild.gates : recursive.gates;
+  const tokenUsage = latestChild?.tokenUsage || recursive.tokenUsage;
+  const progress = recursive.callsMaximum > 0
+    ? Math.min(100, Math.round((recursive.callsObserved / recursive.callsMaximum) * 100))
+    : 0;
+  const disposition = recursive.experimentValid
+    ? (recursive.causalPass ? 'Causal improvement admitted' : 'Valid evidence, no admission')
+    : (view.run.status === 'RUNNING' ? 'Measurement in progress' : 'Evidence not yet valid');
+  const dispositionTone = recursive.experimentValid
+    ? (recursive.causalPass ? 'success' : 'neutral')
+    : canaryTone(view.run.status);
+  const generationRows = recursive.generations.length
+    ? recursive.generations.map((generation) => `<button class="generation-row ${generation.causalPass ? 'is-admitted' : ''}" type="button" data-generation="${generation.generation}">
+        <span class="generation-number mono">G${String(generation.generation).padStart(2, '0')}</span>
+        <span class="generation-copy">
+          <strong>${displayValue(generation.status)}</strong>
+          <small>${generation.mutationPlanId ? displayValue(generation.mutationPlanId) : 'No accepted mutation'}</small>
+        </span>
+        <span class="status-pill state-${canaryTone(generation.causalPass ? 'PASS' : generation.status)}">${generation.causalPass ? 'Admitted' : 'Measured'}</span>
+      </button>`).join('')
+    : '<div class="empty-row">No generation has reached measurement.</div>';
+  const stageRows = stages.length
+    ? stages.map((stage) => {
+        const stageProgress = stage.maximumCalls > 0 && stage.calls != null
+          ? Math.min(100, Math.round((stage.calls / stage.maximumCalls) * 100))
+          : 0;
+        const arms = (stage.arms || []).map((arm) => {
+          const exactRate = arm.cases ? arm.exact / arm.cases : null;
+          return `<div class="arm-row">
+            <span>${displayValue(arm.label)}</span>
+            <strong>${arm.exact == null ? '--' : `${arm.exact}/${arm.cases}`}</strong>
+            <span class="arm-meter"><i style="width:${exactRate == null ? 0 : Math.round(exactRate * 100)}%"></i></span>
+            <small>${displayInteger(arm.tokenCost)} tok</small>
+          </div>`;
+        }).join('');
+        return `<section class="stage-block" data-stage="${escapeHtml(stage.id)}">
+          <header>
+            <div><span class="eyebrow">${escapeHtml(stage.id)}</span><h3>${displayValue(stage.label)}</h3></div>
+            <span class="status-pill state-${canaryTone(stage.status)}">${displayValue(stage.status)}</span>
+          </header>
+          <div class="stage-progress"><i style="width:${stageProgress}%"></i></div>
+          <div class="metric-strip">
+            <span><small>Candidate lift</small><strong>${displayDelta(stage.candidateMean)}</strong></span>
+            <span><small>Lower 95%</small><strong>${displayDelta(stage.lower95)}</strong></span>
+            <span><small>Sham movement</small><strong>${displayDelta(stage.shamMean)}</strong></span>
+            <span><small>Noise ceiling</small><strong>${displayDelta(stage.noiseUpper95)}</strong></span>
+          </div>
+          ${arms ? `<div class="arm-table">${arms}</div>` : '<div class="empty-row">Arm evidence is available in the child run.</div>'}
+        </section>`;
+      }).join('')
+    : '<div class="empty-row">No replicated stage has been measured.</div>';
+  const gateRows = gates.length
+    ? gates.map((gate) => `<div class="gate-row">
+        <span class="gate-mark state-${canaryTone(gate.status)}"></span>
+        <span>${displayValue(gate.label)}</span>
+        <strong class="state-text-${canaryTone(gate.status)}">${displayValue(gate.status)}</strong>
+      </div>`).join('')
+    : '<div class="empty-row">Verifier gates are pending.</div>';
+  const decisionRows = recursive.decisions.length
+    ? recursive.decisions.map((decision) => `<article class="decision-row state-${canaryTone(decision.status === 'AUTO_ADMITTED' ? 'PASS' : 'FAIL')}">
+        <div class="decision-icon">${decision.status === 'AUTO_ADMITTED' ? 'A' : 'D'}</div>
+        <div><span class="eyebrow">Generation ${decision.generation}</span><h3>${decision.status === 'AUTO_ADMITTED' ? 'Auto-admitted' : 'Denied routing'}</h3><p>${displayValue(decision.reason)}</p></div>
+        <div class="decision-authority"><small>Authority</small><strong>${displayValue(decision.authority)}</strong><span class="mono">${shortHash(decision.evidenceSha256)}</span></div>
+      </article>`).join('')
+    : '<div class="empty-row">No admission decision has been issued.</div>';
+  const memoryRows = recursive.memory.length
+    ? recursive.memory.map((memory) => `<div class="memory-row">
+        <span class="memory-state state-${canaryTone(memory.lifecycle === 'active' ? 'PASS' : memory.lifecycle === 'failed' ? 'FAIL' : 'UNKNOWN')}">${displayValue(memory.lifecycle)}</span>
+        <div><strong>${displayValue(memory.id)}</strong><small class="mono">semantic ${shortHash(memory.semanticSha256)}</small></div>
+        <span class="mono">${shortHash(memory.artifactSha256)}</span>
+      </div>`).join('')
+    : '<div class="empty-row">No reusable mechanism memory is visible.</div>';
+  const context = recursive.context;
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Loop Factory / ${escapeHtml(view.run.id || 'recursive run')}</title>
+  <style>
+    :root{color-scheme:dark;--bg:#070908;--panel:#0d1110;--panel2:#111614;--line:#25312c;--line2:#18211d;--text:#edf4f0;--muted:#8b9d95;--green:#39d98a;--green2:#1b8d5a;--amber:#f2b84b;--red:#f06b72;--blue:#65a7ff;--focus:#b8f5d5;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);min-height:100vh}button{font:inherit}.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}.eyebrow{display:block;color:#5ed69b;font:700 10px/1.4 "SFMono-Regular",monospace;text-transform:uppercase;letter-spacing:0}.shell{min-height:100vh;display:grid;grid-template-rows:64px 1fr}.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;border-bottom:1px solid var(--line2);padding:0 24px;position:sticky;top:0;background:rgba(7,9,8,.96);z-index:10}.brand{display:flex;align-items:center;gap:12px;min-width:0}.brand-mark{width:30px;height:30px;border:1px solid var(--green2);display:grid;place-items:center;color:var(--green);border-radius:5px;font-weight:900}.brand strong{font-size:14px}.brand small{display:block;color:var(--muted);font-size:11px;margin-top:2px}.run-title{text-align:center;min-width:0}.run-title strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.run-title small{color:var(--muted);font-size:11px}.top-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px}.connection{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}.connection i{width:7px;height:7px;background:var(--green);border-radius:50%;box-shadow:0 0 0 3px rgba(57,217,138,.12)}.stop-button{border:1px solid #69383b;background:#211315;color:#ffb7bb;border-radius:5px;padding:8px 11px;cursor:pointer;font-weight:700}.stop-button:hover{border-color:var(--red)}.stop-button:disabled{opacity:.45;cursor:not-allowed}.workspace{display:grid;grid-template-columns:246px minmax(0,1fr) 310px;min-height:0}.rail{border-right:1px solid var(--line2);padding:22px 14px;min-width:0}.rail-head{padding:0 8px 14px}.rail-head h2,.side-panel h2{font-size:13px;margin:5px 0 0}.generation-list{display:grid;gap:4px}.generation-row{width:100%;display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;text-align:left;gap:8px;border:1px solid transparent;background:transparent;color:var(--text);padding:10px 8px;border-radius:5px;cursor:pointer}.generation-row:hover,.generation-row.is-admitted{background:var(--panel);border-color:var(--line)}.generation-number{color:var(--muted);font-size:11px}.generation-copy{min-width:0}.generation-copy strong,.generation-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.generation-copy strong{font-size:12px}.generation-copy small{font-size:10px;color:var(--muted);margin-top:3px}.status-pill{display:inline-flex;align-items:center;white-space:nowrap;border:1px solid var(--line);border-radius:999px;padding:4px 7px;font-size:9px;font-weight:800;text-transform:uppercase}.state-success{color:#8ff0bd;border-color:#246945;background:#10271c}.state-failure{color:#ff9da3;border-color:#6b3438;background:#251416}.state-warning{color:#ffd27c;border-color:#705525;background:#271f10}.state-neutral{color:#b8c5bf}.main{min-width:0}.run-strip{padding:24px 28px 20px;border-bottom:1px solid var(--line2)}.run-strip-top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.run-strip h1{font-size:24px;line-height:1.15;margin:5px 0 8px;letter-spacing:0}.run-strip p{margin:0;color:var(--muted);font-size:13px;max-width:700px}.proof-score{text-align:right}.proof-score strong{font-size:30px;line-height:1}.proof-score small{display:block;color:var(--muted);font-size:10px;margin-top:5px;text-transform:uppercase}.call-progress{height:4px;background:var(--line2);margin-top:20px;overflow:hidden}.call-progress i{display:block;height:100%;background:var(--green)}.call-caption{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin-top:7px}.tabs{height:46px;display:flex;align-items:end;gap:22px;padding:0 28px;border-bottom:1px solid var(--line2)}.tab{height:46px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);cursor:pointer;padding:0;font-weight:700;font-size:12px}.tab.is-active{color:var(--text);border-color:var(--green)}.tab-panel{display:none;padding:24px 28px 40px}.tab-panel.is-active{display:block}.stage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--line);border-radius:6px;overflow:hidden}.stage-block{padding:20px;background:var(--panel);min-width:0}.stage-block+ .stage-block{border-left:1px solid var(--line)}.stage-block header{display:flex;justify-content:space-between;gap:12px;align-items:start}.stage-block h3{font-size:15px;margin:4px 0 0}.stage-progress{height:3px;background:var(--line2);margin:16px 0}.stage-progress i{display:block;height:100%;background:var(--blue)}.metric-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding-bottom:16px;border-bottom:1px solid var(--line2)}.metric-strip small,.decision-authority small,.context-stat small,.token-stat small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase}.metric-strip strong{display:block;font-size:13px;margin-top:4px}.arm-table{padding-top:10px}.arm-row{display:grid;grid-template-columns:95px 48px minmax(50px,1fr) 66px;align-items:center;gap:8px;min-height:29px;font-size:10px}.arm-row strong{text-align:right}.arm-row small{text-align:right;color:var(--muted)}.arm-meter{height:3px;background:var(--line2)}.arm-meter i{display:block;height:100%;background:var(--green)}.section-head{display:flex;justify-content:space-between;align-items:end;margin:26px 0 10px}.section-head h2{font-size:15px;margin:4px 0 0}.section-head span:last-child{color:var(--muted);font-size:10px}.decision-ledger,.gate-list,.memory-list,.event-list{border-top:1px solid var(--line)}.decision-row{display:grid;grid-template-columns:34px minmax(0,1fr) 190px;gap:14px;align-items:center;padding:15px 4px;border-bottom:1px solid var(--line2);background:transparent}.decision-icon{width:28px;height:28px;border:1px solid currentColor;border-radius:4px;display:grid;place-items:center;font-weight:900}.decision-row h3{font-size:13px;margin:3px 0}.decision-row p{font-size:11px;color:var(--muted);margin:0}.decision-authority{text-align:right}.decision-authority strong,.decision-authority span{display:block;font-size:10px;margin-top:3px}.gate-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}.gate-row{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:9px;align-items:center;min-height:38px;border-bottom:1px solid var(--line2);font-size:11px}.gate-mark{width:7px;height:7px;border-radius:50%;background:currentColor}.state-text-success{color:var(--green)}.state-text-failure{color:var(--red)}.state-text-warning{color:var(--amber)}.state-text-neutral{color:var(--muted)}.memory-row{display:grid;grid-template-columns:80px minmax(0,1fr) 110px;gap:12px;align-items:center;min-height:52px;border-bottom:1px solid var(--line2);font-size:11px}.memory-row small{display:block;color:var(--muted);margin-top:3px}.memory-state{text-transform:uppercase;font-size:9px;font-weight:800}.empty-row{color:var(--muted);font-size:11px;padding:22px 4px;border-bottom:1px solid var(--line2)}.side{border-left:1px solid var(--line2);padding:22px 18px;min-width:0}.side-panel{padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid var(--line)}.context-grid,.token-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:15px}.context-stat strong,.token-stat strong{display:block;margin-top:4px;font-size:14px}.policy-action{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding:10px;border:1px solid var(--line);border-radius:5px}.policy-action strong{font-size:12px}.policy-action span{font-size:9px;color:var(--muted)}.event-row{padding:10px 0;border-bottom:1px solid var(--line2)}.event-row header{display:flex;justify-content:space-between;gap:8px}.event-row strong{font-size:10px}.event-row time{font-size:9px;color:var(--muted)}.event-row p{font-size:10px;color:var(--muted);margin:5px 0 0;overflow-wrap:anywhere}.hash-button{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:0;font:10px/1.4 "SFMono-Regular",monospace}.hash-button:hover{color:var(--text)}.footer-boundary{font-size:10px;color:var(--muted);line-height:1.5}.footer-boundary strong{color:var(--text)}
+    @media(max-width:1100px){.workspace{grid-template-columns:210px minmax(0,1fr)}.side{grid-column:1/-1;border-left:0;border-top:1px solid var(--line2);display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.side-panel{margin:0}.metric-strip{grid-template-columns:1fr 1fr}}
+    @media(max-width:760px){.topbar{grid-template-columns:1fr auto;padding:0 14px}.run-title{display:none}.workspace{display:block}.rail{border-right:0;border-bottom:1px solid var(--line2);padding:14px}.generation-list{grid-auto-flow:column;grid-auto-columns:minmax(190px,1fr);overflow:auto}.main{width:100%}.run-strip,.tab-panel{padding-left:16px;padding-right:16px}.run-strip-top{display:block}.proof-score{text-align:left;margin-top:18px}.tabs{padding:0 16px;overflow:auto}.stage-grid{display:block}.stage-block+ .stage-block{border-left:0;border-top:1px solid var(--line)}.gate-grid{display:block}.decision-row{grid-template-columns:32px minmax(0,1fr)}.decision-authority{grid-column:2;text-align:left}.side{display:block;padding:18px 16px}.side-panel{margin-bottom:20px}.arm-row{grid-template-columns:80px 42px minmax(40px,1fr) 58px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">LF</span><div><strong>Loop Factory</strong><small>Recursive control plane</small></div></div>
+      <div class="run-title"><strong>${displayValue(view.run.id)}</strong><small>${displayValue(view.run.model)} / ${displayValue(view.run.reasoningEffort)}</small></div>
+      <div class="top-actions"><span class="connection" id="connection"><i></i><span>Live</span></span>${recursive.operator.canStop ? '<button class="stop-button" id="stopRun" type="button">Stop run</button>' : ''}</div>
+    </header>
+    <div class="workspace">
+      <aside class="rail">
+        <div class="rail-head"><span class="eyebrow">Generation ledger</span><h2>${recursive.generations.length} measured</h2></div>
+        <div class="generation-list">${generationRows}</div>
+      </aside>
+      <main class="main">
+        <section class="run-strip">
+          <div class="run-strip-top">
+            <div><span class="eyebrow">${displayValue(recursive.mode)}</span><h1>${escapeHtml(disposition)}</h1><p>${recursive.promotionEnabled ? 'Promotion path enabled.' : 'Routing may change only after verifier admission. Canonical promotion is disabled.'}</p></div>
+            <div class="proof-score state-text-${dispositionTone}"><strong>${recursive.experimentValid ? (recursive.causalPass ? 'PASS' : 'VALID') : displayValue(view.run.status)}</strong><small>Verifier disposition</small></div>
+          </div>
+          <div class="call-progress"><i style="width:${progress}%"></i></div>
+          <div class="call-caption"><span>${displayInteger(recursive.callsObserved)} observed calls</span><span>${displayInteger(recursive.callsMaximum)} maximum exposure</span></div>
+        </section>
+        <nav class="tabs" aria-label="Run views"><button class="tab is-active" type="button" data-tab="overview">Overview</button><button class="tab" type="button" data-tab="evidence">Evidence</button><button class="tab" type="button" data-tab="memory">Memory</button></nav>
+        <section class="tab-panel is-active" data-panel="overview">
+          <div class="stage-grid">${stageRows}</div>
+          <div class="section-head"><div><span class="eyebrow">Admission ledger</span><h2>Approval and denial</h2></div><span>Verifier-owned</span></div>
+          <div class="decision-ledger">${decisionRows}</div>
+        </section>
+        <section class="tab-panel" data-panel="evidence">
+          <div class="section-head"><div><span class="eyebrow">Independent replay</span><h2>Ship gates</h2></div><span>${gates.filter((gate) => gate.status === 'PASS').length}/${gates.length} passing</span></div>
+          <div class="gate-list gate-grid">${gateRows}</div>
+          <div class="section-head"><div><span class="eyebrow">Append-only feed</span><h2>Run events</h2></div><span id="eventCount">Loading</span></div>
+          <div class="event-list" id="eventList"><div class="empty-row">Loading event receipts...</div></div>
+        </section>
+        <section class="tab-panel" data-panel="memory">
+          <div class="section-head"><div><span class="eyebrow">Mechanism memory</span><h2>What the factory retained</h2></div><span>${recursive.memory.length} immutable records</span></div>
+          <div class="memory-list">${memoryRows}</div>
+        </section>
+      </main>
+      <aside class="side">
+        <section class="side-panel"><span class="eyebrow">Current work</span><h2>${displayValue(recursive.current.phase)}</h2><div class="context-grid"><div class="context-stat"><small>Generation</small><strong>${recursive.current.generation == null ? '--' : `G${String(recursive.current.generation).padStart(2, '0')}`}</strong></div><div class="context-stat"><small>Child run</small><strong>${recursive.current.childRunId ? 'Active' : 'None'}</strong></div></div><p class="footer-boundary">${displayValue(recursive.current.nextAction)}</p></section>
+        <section class="side-panel"><span class="eyebrow">Context policy</span><h2>${context ? displayValue(context.policyId) : 'Not active'}</h2>${context ? `<div class="policy-action"><strong>${displayValue(context.action)}</strong><span>epoch ${displayInteger(context.epoch)}</span></div><div class="context-grid"><div class="context-stat"><small>Allocation</small><strong>${displayInteger(context.allocatedInputTokens)}</strong></div><div class="context-stat"><small>Observations</small><strong>${displayInteger(context.observationCount)}</strong></div><div class="context-stat"><small>Saturation</small><strong>${displayPercent(context.medianSaturation)}</strong></div><div class="context-stat"><small>Projection</small><strong>${displayValue(context.projectionMode)}</strong></div></div>` : '<div class="empty-row">No adaptive context evidence.</div>'}</section>
+        <section class="side-panel"><span class="eyebrow">Token receipts</span><h2>Measured usage</h2><div class="token-grid"><div class="token-stat"><small>Total</small><strong>${displayInteger(tokenUsage.total)}</strong></div><div class="token-stat"><small>Calibration</small><strong>${displayInteger(tokenUsage.calibration)}</strong></div><div class="token-stat"><small>Confirmation</small><strong>${displayInteger(tokenUsage.confirmation)}</strong></div><div class="token-stat"><small>Mutation</small><strong>${displayInteger(tokenUsage.mutation)}</strong></div></div></section>
+        <section class="side-panel footer-boundary"><strong>No promotion.</strong> Active descendants can influence bounded routing. They cannot rewrite canonical loops or change their own verifier.</section>
+      </aside>
+    </div>
+  </div>
+  <script type="application/json" id="runData">${dataJson}</script>
+  <script>
+    (function(){
+      'use strict';
+      var view=JSON.parse(document.getElementById('runData').textContent);
+      var runId=view.run.id;
+      var token=${JSON.stringify(decisionToken)};
+      var connection=document.getElementById('connection');
+      document.querySelectorAll('[data-tab]').forEach(function(tab){tab.addEventListener('click',function(){document.querySelectorAll('[data-tab]').forEach(function(item){item.classList.toggle('is-active',item===tab);});document.querySelectorAll('[data-panel]').forEach(function(panel){panel.classList.toggle('is-active',panel.getAttribute('data-panel')===tab.getAttribute('data-tab'));});});});
+      function eventText(detail){if(!detail)return '';var parts=[];Object.keys(detail).slice(0,4).forEach(function(key){var value=detail[key];if(value===null||typeof value==='object')return;parts.push(key+': '+String(value));});return parts.join(' / ');}
+      function loadEvents(){fetch('/api/v1/runs/'+encodeURIComponent(runId)+'/events',{cache:'no-store'}).then(function(response){if(!response.ok)throw new Error('events');return response.json();}).then(function(feed){var list=document.getElementById('eventList');var events=feed.events||[];document.getElementById('eventCount').textContent=events.length+' receipts';list.innerHTML=events.length?events.slice().reverse().map(function(event){return '<article class="event-row"><header><strong>'+escapeText(event.type)+'</strong><time>'+escapeText(event.at||'')+'</time></header><p>'+escapeText(eventText(event.detail))+'</p></article>';}).join(''):'<div class="empty-row">No event receipts.</div>';}).catch(function(){document.getElementById('eventCount').textContent='Unavailable';});}
+      function escapeText(value){return String(value==null?'':value).replace(/[&<>"']/g,function(char){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char];});}
+      var stop=document.getElementById('stopRun');if(stop){stop.addEventListener('click',function(){if(!window.confirm('Stop this recursive run after the current durable boundary?'))return;stop.disabled=true;fetch('/api/v1/runs/'+encodeURIComponent(runId)+'/stop',{method:'POST',headers:{'x-super-loop-decision-token':token}}).then(function(response){return response.json().then(function(body){if(!response.ok)throw new Error(body.error||'stop failed');return body;});}).then(function(){stop.textContent='Stop requested';connection.querySelector('span').textContent='Stopping';}).catch(function(error){stop.disabled=false;stop.textContent='Stop run';window.alert(error.message);});});}
+      function poll(){fetch('/api/v1/runs/'+encodeURIComponent(runId),{cache:'no-store'}).then(function(response){if(!response.ok)throw new Error('poll');return response.json();}).then(function(envelope){connection.querySelector('span').textContent=envelope.snapshot.recursive.operator.stopRequested?'Stop requested':'Live';connection.className='connection';}).catch(function(){connection.querySelector('span').textContent='Reconnecting';connection.className='connection state-text-warning';});}
+      loadEvents();poll();setInterval(poll,1500);setInterval(loadEvents,4000);
+    })();
+  </script>
+</body>
+</html>`;
 }
 
 function renderCampaignDashboard(view, options = {}) {
@@ -1631,6 +1814,114 @@ function renderCampaignDashboard(view, options = {}) {
         <span class="mono">${detailText(entry.detail)}</span>
       </li>`).join('')
     : '<li class="empty">No activity has been recorded.</li>';
+  const learning = view.learning || {
+    enabled: false,
+    mode: 'off',
+    affectedExecution: false,
+    policy: { id: null, sha256: null },
+    ledger: { total: 0, eligible: 0, observed: 0, replicated: 0, contradicted: 0 },
+    shadow: {
+      status: 'OFF',
+      packetSha256: null,
+      eligibleCount: 0,
+      selected: [],
+      abstentionCode: null,
+      fallbackCode: null
+    },
+    active: {
+      status: 'OFF',
+      selections: [],
+      candidatePoolCount: 0,
+      hypothesesRegistered: 0,
+      hypothesesTested: 0,
+      hypothesesPending: 0
+    },
+    catalog: { records: 0, families: 0, eligibleFamilies: 0, quarantinedFamilies: 0 },
+    automatic: { autoBanked: 0, queuedHuman: 0, latest: null },
+    rollback: { status: 'NONE', targetEpochId: null },
+    hypotheses: []
+  };
+  const activeLearning = learning.mode === 'active-canary';
+  const learningRoute = activeLearning ? (learning.active || {}) : (learning.shadow || {});
+  const learningStatus = learningRoute.status || 'OFF';
+  const learningStatusLabel = {
+    OFF: 'Off',
+    READY: 'Shadow ready',
+    PARTIAL: 'Partial',
+    ABSTAINED: 'Abstained',
+    FALLBACK: 'Fallback',
+    COMPLETE: 'Active',
+    CONSUMED: 'Active',
+    PREPARED: 'Route prepared',
+    PENDING_TESTS: 'Tests pending',
+    ROUTE_COMPLETE: 'Route complete',
+    RETIRED: 'Route retired',
+    NOT_PREPARED: 'Not prepared',
+    BLOCKED: 'Blocked'
+  }[learningStatus] || 'Abstained';
+  const learningTone = ['READY', 'COMPLETE', 'CONSUMED', 'PREPARED', 'ROUTE_COMPLETE']
+    .includes(learningStatus)
+    ? 'info'
+    : (['PARTIAL', 'FALLBACK', 'BLOCKED', 'PENDING_TESTS'].includes(learningStatus)
+        ? 'warning'
+        : 'neutral');
+  const activeLearningNote = learningStatus === 'PREPARED'
+    ? 'The route is sealed and waiting for hypothesis registration. It has not affected execution.'
+    : (learningStatus === 'PENDING_TESTS'
+        ? `${learning.active.hypothesesPending} registered hypothesis${learning.active.hypothesesPending === 1 ? '' : 'es'} still require a full test before this route can close.`
+        : (learningStatus === 'ROUTE_COMPLETE'
+            ? 'Every registered hypothesis on this route has a persisted test. The next route may now be prepared.'
+            : (learningStatus === 'RETIRED'
+                ? 'This unused route was closed through an immutable operator retirement receipt.'
+                : (learning.affectedExecution
+                    ? 'Active routing influenced hypothesis generation. The frozen objective, benchmark, gates, and stop authority did not change.'
+                    : 'Active mode abstained from mechanism influence. Hypotheses used the no-memory control path.'))));
+  const learningCode = activeLearning
+    ? (learning.automatic?.latest?.disposition || learning.rollback?.status || null)
+    : (learning.shadow.fallbackCode || learning.shadow.abstentionCode || null);
+  const learningSelectionRows = activeLearning
+    ? (learning.active?.selections || [])
+    : (learning.shadow?.selected || []);
+  const learningSelections = learningSelectionRows.length
+    ? learningSelectionRows.map((item) => activeLearning
+      ? `<li class="learning-item" data-learning-selection>
+        <div class="learning-item-head">
+          <span class="status ${item.allocation === 'control' ? 'neutral' : 'info'}">slot ${item.position + 1} / ${escapeHtml(item.allocation)}</span>
+          <strong class="mono">${value(item.familyId, 'no-memory control')}</strong>
+        </div>
+        <dl class="learning-facts">
+          <div><dt>evidence strength</dt><dd class="mono">${value(item.evidenceStrength)}</dd></div>
+          <div><dt>selection p</dt><dd class="mono">${value(item.probability)}</dd></div>
+          <div><dt>semantics</dt><dd>${value(item.semantics, item.allocation === 'control' ? 'control' : '--')}</dd></div>
+          <div><dt>reason</dt><dd class="mono">${escapeHtml((item.reasonCodes || []).join(', ')) || '--'}</dd></div>
+        </dl>
+      </li>`
+      : `<li class="learning-item" data-learning-selection>
+        <div class="learning-item-head">
+          <span class="status neutral">${escapeHtml(item.slot)}</span>
+          <strong class="mono">${escapeHtml(item.mechanismId)}</strong>
+        </div>
+        <dl class="learning-facts">
+          <div><dt>receipt</dt><dd class="mono" title="${escapeHtml(item.receiptSha256)}">${shortHash(item.receiptSha256)}</dd></div>
+          <div><dt>score</dt><dd class="mono">${value(item.score)}</dd></div>
+          <div><dt>selection p</dt><dd class="mono">${value(item.selectionProbability)}</dd></div>
+          <div><dt>source run</dt><dd class="mono">${value(item.sourceRunId)}</dd></div>
+          <div><dt>hypothesis</dt><dd class="mono">${value(item.hypothesisId)}</dd></div>
+          <div><dt>test</dt><dd class="mono">${value(item.testId)}</dd></div>
+        </dl>
+      </li>`).join('')
+    : `<li class="learning-empty">${activeLearning
+      ? 'No evidence-backed mechanism was assigned; execution remains on no-memory control.'
+      : 'No mechanism was selected for this shadow packet.'}</li>`;
+  const allocationEntries = activeLearning && learning.policy?.allocations
+    ? Object.entries(learning.policy.allocations)
+    : [];
+  const learningAllocations = allocationEntries.length
+    ? allocationEntries.map(([name, amount]) => `<span>
+        <small>${escapeHtml(name.replace(/([A-Z])/g, ' $1'))}</small>
+        <strong class="mono">${pct(amount)}</strong>
+      </span>`).join('')
+    : '<span><small>Allocation</small><strong>not active</strong></span>';
 
   const reviewAwaiting = Number.isFinite(view.reviews.awaiting) ? view.reviews.awaiting : view.reviews.pending;
   const reviewQueuedCount = Number.isFinite(view.reviews.queued) ? view.reviews.queued : 0;
@@ -1860,6 +2151,19 @@ ${decisionToken ? `<meta name="super-loop-decision-token" content="${escapeHtml(
   .kv div:last-child{border-bottom:0}
   .kv dd{text-align:right}
   .hash{font-size:.75rem}
+  .learning-note{margin:0 0 var(--space-3);padding:var(--space-3);border-left:3px solid var(--info);background:var(--info-soft);color:var(--ink-soft);font-size:.8125rem}
+  .learning-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));margin-top:var(--space-3);border:1px solid var(--line);background:var(--line)}
+  .learning-counts span{display:grid;min-width:0;padding:var(--space-3);background:var(--surface-muted)}
+  .learning-counts small{color:var(--ink-muted);font-size:.6875rem;text-transform:uppercase}
+  .learning-counts strong{margin-top:2px;font-size:1rem}
+  .learning-list{list-style:none;margin:var(--space-3) 0 0;padding:0;border-top:1px solid var(--line)}
+  .learning-item{display:grid;gap:var(--space-3);padding:var(--space-3) 0;border-bottom:1px solid var(--line)}
+  .learning-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-2);min-width:0}
+  .learning-item-head strong{min-width:0;overflow-wrap:anywhere;font-size:.75rem}
+  .learning-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin:0}
+  .learning-facts div{min-width:0}
+  .learning-facts dd{margin-top:2px;text-align:left;font-size:.72rem;overflow-wrap:anywhere}
+  .learning-empty{padding:var(--space-3) 0;color:var(--ink-muted);font-size:.8125rem}
   .review-panel{margin-bottom:var(--space-4);overflow:hidden;border-color:var(--line-strong);box-shadow:inset 0 4px 0 var(--brand)}
   .review-panel.needs-decision{box-shadow:inset 0 4px 0 var(--warning)}
   .decision-panel-head{align-items:stretch;padding:0}
@@ -1967,6 +2271,8 @@ ${decisionToken ? `<meta name="super-loop-decision-token" content="${escapeHtml(
     .receipt .wide{grid-column:auto}
     .review-meta{grid-template-columns:1fr}
     .review-impact{grid-template-columns:1fr}
+    .learning-counts{grid-template-columns:1fr}
+    .learning-facts{grid-template-columns:1fr}
     .review-proof{grid-template-columns:repeat(2,minmax(0,1fr))}
     .review-proof span{border-bottom:1px solid var(--line)}
     .review-proof span:nth-child(2n){border-right:0}
@@ -2231,6 +2537,50 @@ ${decisionToken ? `<meta name="super-loop-decision-token" content="${escapeHtml(
           </div>
         </section>
 
+        <section class="panel" data-learning-panel aria-labelledby="learning-title">
+          <div class="panel-head">
+            <div><h2 id="learning-title">Learning layer</h2><p id="learningSubtitle">${activeLearning ? 'Evidence-bound pre-generation routing' : 'Evidence memory and shadow routing'}</p></div>
+            <span id="learningStatus" data-learning-status class="status ${learningTone}">${escapeHtml(learningStatusLabel)}</span>
+          </div>
+          <div class="panel-body">
+            <p id="learningNote" class="learning-note">${activeLearning
+              ? activeLearningNote
+              : 'Observed only. Did not affect execution.'}</p>
+            <dl class="kv">
+              <div><dt>mode</dt><dd id="learningMode">${value(learning.mode)}</dd></div>
+              <div><dt>policy</dt><dd id="learningPolicy" class="mono">${value(learning.policy.id)}</dd></div>
+              <div><dt>epoch / drift</dt><dd id="learningEpoch">${activeLearning
+                ? `${value(learning.policy.epochNumber)} / tier ${value(learning.policy.driftTier)} (${value(learning.policy.drift)})`
+                : '--'}</dd></div>
+              <div><dt>policy hash</dt><dd id="learningPolicyHash" class="mono hash" title="${value(learning.policy.sha256)}">${shortHash(learning.policy.sha256)}</dd></div>
+              <div><dt>${activeLearning ? 'catalog records' : 'receipts'}</dt><dd id="learningLedgerTotal">${activeLearning ? learning.catalog.records : learning.ledger.total}</dd></div>
+              <div><dt>${activeLearning ? 'eligible families' : 'routing eligible'}</dt><dd id="learningLedgerEligible">${activeLearning ? learning.catalog.eligibleFamilies : learning.ledger.eligible}</dd></div>
+              <div><dt>packet hash</dt><dd id="learningPacketHash" class="mono hash" title="${value(learningRoute.packetSha256)}">${shortHash(learningRoute.packetSha256)}</dd></div>
+              <div><dt>candidate pool</dt><dd id="learningEligibleCount">${activeLearning ? learning.active.candidatePoolCount : learning.shadow.eligibleCount}</dd></div>
+              <div><dt>route progress</dt><dd id="learningRouteProgress">${activeLearning
+                ? `${learning.active.hypothesesTested} / ${learning.active.hypothesesRegistered} tested (${learning.active.hypothesesPending} pending)`
+                : '--'}</dd></div>
+              <div><dt>automatic disposition</dt><dd id="learningCode" class="mono">${value(learningCode)}</dd></div>
+              <div><dt>rollback</dt><dd id="learningRollback">${activeLearning
+                ? `${value(learning.rollback.status)}${learning.rollback.targetEpochId ? ` to ${learning.rollback.targetEpochId}` : ''}`
+                : '--'}</dd></div>
+            </dl>
+            <div id="learningAllocations" class="learning-counts" aria-label="${activeLearning ? 'Policy traffic allocations' : 'Mechanism lifecycle counts'}">
+              ${activeLearning
+                ? learningAllocations
+                : `<span><small>Observed</small><strong id="learningObserved" class="mono">${learning.ledger.observed}</strong></span>
+                  <span><small>Replicated</small><strong id="learningReplicated" class="mono">${learning.ledger.replicated}</strong></span>
+                  <span><small>Contradicted</small><strong id="learningContradicted" class="mono">${learning.ledger.contradicted}</strong></span>`}
+            </div>
+            ${activeLearning ? `<div class="learning-counts" aria-label="Automatic decision counts">
+              <span><small>Auto-banked</small><strong class="mono">${learning.automatic.autoBanked}</strong></span>
+              <span><small>Human queue</small><strong class="mono">${learning.automatic.queuedHuman}</strong></span>
+              <span><small>Quarantined</small><strong class="mono">${learning.catalog.quarantinedFamilies}</strong></span>
+            </div>` : ''}
+            <ol id="learningSelections" class="learning-list">${learningSelections}</ol>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="panel-head"><div><h2>Failure budget</h2><p>Advisory only</p></div></div>
           <div class="panel-body">
@@ -2284,7 +2634,8 @@ ${decisionToken ? `<meta name="super-loop-decision-token" content="${escapeHtml(
         var v=String(value||'').toUpperCase();
         if(['ACTIVE','APPROVED','MOVED_FRONTIER','PROMOTE','REVERIFIED','PASS','COVERED'].indexOf(v)>=0) return 'success';
         if(['SLUDGE','DENIED','REJECTED','NO_IMPROVEMENT','SELF_PROMOTION','PHASE_SKIP','MODEL_REPORTED_METRIC','FAIL','BLOCKED'].indexOf(v)>=0) return 'danger';
-        if(['PENDING','REQUIRED','SENDING','APPROVAL QUEUED','DENIAL QUEUED','DECISION STALE','SATURATED'].indexOf(v)>=0) return 'warning';
+        if(['PENDING','REQUIRED','SENDING','APPROVAL QUEUED','DENIAL QUEUED','DECISION STALE','SATURATED','PARTIAL','FALLBACK'].indexOf(v)>=0) return 'warning';
+        if(v==='SHADOW READY') return 'info';
         return 'neutral';
       }
       function setConnection(label,mode){
@@ -2348,6 +2699,91 @@ ${decisionToken ? `<meta name="super-loop-decision-token" content="${escapeHtml(
             return '<div class="trust-item '+state+'"><span class="trust-mark" aria-hidden="true"></span><span><small>'+esc(key.replace(/([A-Z])/g,' $1'))+'</small><strong>'+esc(dimension.status||'UNKNOWN')+'</strong></span></div>';
           }).join('');
         }
+      }
+      function renderLearning(data){
+        var learning=data.learning||{
+          enabled:false,
+          mode:'off',
+          policy:{id:null,sha256:null},
+          ledger:{total:0,eligible:0,observed:0,replicated:0,contradicted:0},
+          shadow:{status:'OFF',packetSha256:null,eligibleCount:0,selected:[],abstentionCode:null,fallbackCode:null},
+          active:{status:'OFF',packetSha256:null,candidatePoolCount:0,hypothesesRegistered:0,hypothesesTested:0,hypothesesPending:0,selections:[]},
+          catalog:{records:0,eligibleFamilies:0,quarantinedFamilies:0},
+          automatic:{autoBanked:0,queuedHuman:0,latest:null},
+          rollback:{status:'NONE',targetEpochId:null}
+        };
+        var active=learning.mode==='active-canary';
+        var shadow=learning.shadow||{};
+        var activeRoute=learning.active||{};
+        var routing=active?activeRoute:shadow;
+        var ledger=learning.ledger||{};
+        var catalog=learning.catalog||{};
+        var automatic=learning.automatic||{};
+        var rollback=learning.rollback||{};
+        var labels={OFF:'Off',READY:'Shadow ready',PARTIAL:'Partial',ABSTAINED:'Abstained',FALLBACK:'Fallback',COMPLETE:'Active',CONSUMED:'Active',PREPARED:'Route prepared',PENDING_TESTS:'Tests pending',ROUTE_COMPLETE:'Route complete',RETIRED:'Route retired',NOT_PREPARED:'Not prepared',BLOCKED:'Blocked'};
+        setStatus(document.getElementById('learningStatus'),labels[routing.status]||'Abstained');
+        text('learningSubtitle',active?'Evidence-bound pre-generation routing':'Evidence memory and shadow routing');
+        text('learningNote',active
+          ?(activeRoute.status==='PREPARED'
+            ?'The route is sealed and waiting for hypothesis registration. It has not affected execution.'
+            :activeRoute.status==='PENDING_TESTS'
+              ?String(activeRoute.hypothesesPending||0)+' registered '+((activeRoute.hypothesesPending||0)===1?'hypothesis':'hypotheses')+' still require a full test before this route can close.'
+              :activeRoute.status==='ROUTE_COMPLETE'
+                ?'Every registered hypothesis on this route has a persisted test. The next route may now be prepared.'
+                :activeRoute.status==='RETIRED'
+                  ?'This unused route was closed through an immutable operator retirement receipt.'
+                  :learning.affectedExecution
+                    ?'Active routing influenced hypothesis generation. The frozen objective, benchmark, gates, and stop authority did not change.'
+                    :'Active mode abstained from mechanism influence. Hypotheses used the no-memory control path.')
+          :'Observed only. Did not affect execution.');
+        text('learningMode',learning.mode||'off');
+        text('learningPolicy',learning.policy&&learning.policy.id);
+        text('learningEpoch',active
+          ?String(learning.policy&&learning.policy.epochNumber==null?'--':learning.policy.epochNumber)+' / tier '+String(learning.policy&&learning.policy.driftTier==null?'--':learning.policy.driftTier)+' ('+String(learning.policy&&learning.policy.drift==null?'--':learning.policy.drift)+')'
+          :'--');
+        text('learningPolicyHash',shortHash(learning.policy&&learning.policy.sha256));
+        var policyHash=document.getElementById('learningPolicyHash');
+        if(policyHash) policyHash.title=learning.policy&&learning.policy.sha256||'--';
+        text('learningLedgerTotal',active?(catalog.records||0):(ledger.total||0));
+        text('learningLedgerEligible',active?(catalog.eligibleFamilies||0):(ledger.eligible||0));
+        text('learningPacketHash',shortHash(routing.packetSha256));
+        var packetHash=document.getElementById('learningPacketHash');
+        if(packetHash) packetHash.title=routing.packetSha256||'--';
+        text('learningEligibleCount',active?(activeRoute.candidatePoolCount||0):(shadow.eligibleCount||0));
+        text('learningRouteProgress',active
+          ?String(activeRoute.hypothesesTested||0)+' / '+String(activeRoute.hypothesesRegistered||0)+' tested ('+String(activeRoute.hypothesesPending||0)+' pending)'
+          :'--');
+        text('learningCode',active
+          ?(automatic.latest&&automatic.latest.disposition||rollback.status||'--')
+          :(shadow.fallbackCode||shadow.abstentionCode||'--'));
+        text('learningRollback',active
+          ?String(rollback.status||'UNKNOWN')+(rollback.targetEpochId?' to '+rollback.targetEpochId:'')
+          :'--');
+        var allocations=document.getElementById('learningAllocations');
+        if(allocations){
+          if(active&&learning.policy&&learning.policy.allocations){
+            allocations.setAttribute('aria-label','Policy traffic allocations');
+            allocations.innerHTML=Object.keys(learning.policy.allocations).map(function(name){
+              var amount=learning.policy.allocations[name];
+              var label=name.replace(/([A-Z])/g,' $1');
+              return '<span><small>'+esc(label)+'</small><strong class="mono">'+esc(amount==null?'--':Math.round(amount*1000)/10+'%')+'</strong></span>';
+            }).join('');
+          }else{
+            allocations.setAttribute('aria-label','Mechanism lifecycle counts');
+            allocations.innerHTML='<span><small>Observed</small><strong class="mono">'+esc(ledger.observed||0)+'</strong></span><span><small>Replicated</small><strong class="mono">'+esc(ledger.replicated||0)+'</strong></span><span><small>Contradicted</small><strong class="mono">'+esc(ledger.contradicted||0)+'</strong></span>';
+          }
+        }
+        var holder=document.getElementById('learningSelections');
+        var selected=active
+          ?(Array.isArray(activeRoute.selections)?activeRoute.selections.slice(0,20):[])
+          :(Array.isArray(shadow.selected)?shadow.selected.slice(0,5):[]);
+        holder.innerHTML=selected.length?selected.map(function(item){
+          if(active){
+            var family=item.familyId||'no-memory control';
+            return '<li class="learning-item" data-learning-selection><div class="learning-item-head"><span class="status '+(item.allocation==='control'?'neutral':'info')+'">slot '+esc(Number(item.position)+1)+' / '+esc(item.allocation||'--')+'</span><strong class="mono">'+esc(family)+'</strong></div><dl class="learning-facts"><div><dt>evidence strength</dt><dd class="mono">'+esc(item.evidenceStrength==null?'--':item.evidenceStrength)+'</dd></div><div><dt>selection p</dt><dd class="mono">'+esc(item.probability==null?'--':item.probability)+'</dd></div><div><dt>semantics</dt><dd>'+esc(item.semantics||(item.allocation==='control'?'control':'--'))+'</dd></div><div><dt>reason</dt><dd class="mono">'+esc((item.reasonCodes||[]).join(', ')||'--')+'</dd></div></dl></li>';
+          }
+          return '<li class="learning-item" data-learning-selection><div class="learning-item-head"><span class="status neutral">'+esc(item.slot||'--')+'</span><strong class="mono">'+esc(item.mechanismId||'--')+'</strong></div><dl class="learning-facts"><div><dt>receipt</dt><dd class="mono" title="'+esc(item.receiptSha256||'')+'">'+esc(shortHash(item.receiptSha256))+'</dd></div><div><dt>score</dt><dd class="mono">'+esc(item.score==null?'--':item.score)+'</dd></div><div><dt>selection p</dt><dd class="mono">'+esc(item.selectionProbability==null?'--':item.selectionProbability)+'</dd></div><div><dt>source run</dt><dd class="mono">'+esc(item.sourceRunId||'--')+'</dd></div><div><dt>hypothesis</dt><dd class="mono">'+esc(item.hypothesisId||'--')+'</dd></div><div><dt>test</dt><dd class="mono">'+esc(item.testId||'--')+'</dd></div></dl></li>';
+        }).join(''):'<li class="learning-empty">'+(active?'No evidence-backed mechanism was assigned; execution remains on no-memory control.':'No mechanism was selected for this shadow packet.')+'</li>';
       }
       function renderLoops(data){
         var holder=document.getElementById('loopProgress');
@@ -2629,7 +3065,7 @@ ${decisionToken ? `<meta name="super-loop-decision-token" content="${escapeHtml(
         text('failureValue',data.failures.consecutive+'/'+data.failures.patience);
         text('failureDetail',data.failures.total+' total');
         document.getElementById('failureBar').style.width=(data.failures.patience>0?Math.min(100,Math.round((data.failures.consecutive/data.failures.patience)*100)):0)+'%';
-        renderRealTest(data);renderLoops(data);renderLanes(data);renderVerdicts(data);renderScore(data);renderActivity(data);renderReviews(data);markTableOverflow();
+        renderRealTest(data);renderLearning(data);renderLoops(data);renderLanes(data);renderVerdicts(data);renderScore(data);renderActivity(data);renderReviews(data);markTableOverflow();
       }
       function postDecision(id,act,card){
         var statusEl=card.querySelector('[data-status]');

@@ -5,7 +5,7 @@
 // values, notes, loop content, and filesystem paths never enter the returned object.
 import { buildScoreMatrix } from './scorecard.mjs';
 import { STOP_CONDITION_WARNING } from './constants.mjs';
-import { isSafeId } from './util.mjs';
+import { isSafeId, sha256 } from './util.mjs';
 import { isDeterministicOracle } from './measure.mjs';
 import { reviewDecisionBinding } from './review-decisions.mjs';
 
@@ -42,6 +42,11 @@ function route(value) {
 function code(value) {
   const s = text(value, 64);
   return s && CODE_RE.test(s) ? s : null;
+}
+
+function reason(value) {
+  const s = text(value, 120);
+  return s && /^[A-Z0-9][A-Z0-9_]{0,119}$/.test(s) ? s : null;
 }
 
 function authority(value) {
@@ -722,6 +727,357 @@ function publicPolicy(state) {
   };
 }
 
+function nonnegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function opaqueReference(value, prefix) {
+  const safe = id(value);
+  return safe ? `${prefix}-${sha256(safe).slice(0, 16)}` : null;
+}
+
+function publicLearning(state) {
+  const mode = state?.config?.metaLearning?.enabled === true
+    && ['shadow', 'active-canary'].includes(state.config.metaLearning.mode)
+    ? state.config.metaLearning.mode
+    : 'off';
+  const enabled = mode !== 'off';
+  if (!enabled) {
+    return {
+      enabled: false,
+      mode: 'off',
+      affectedExecution: false,
+      policy: {
+        id: null,
+        sha256: null,
+        epochNumber: null,
+        drift: null,
+        driftTier: null,
+        allocations: null,
+        quarantinedFamilyIds: []
+      },
+      ledger: {
+        total: 0,
+        eligible: 0,
+        observed: 0,
+        replicated: 0,
+        contradicted: 0
+      },
+      shadow: {
+        status: 'OFF',
+        packetSha256: null,
+        eligibleCount: 0,
+        selected: [],
+        abstentionCode: null,
+        fallbackCode: null
+      },
+      active: {
+        status: 'OFF',
+        routingDecisionId: null,
+        routingDecisionSha256: null,
+        packetSha256: null,
+        capsuleSha256: null,
+        candidatePoolSha256: null,
+        candidatePoolCount: 0,
+        hypothesesRegistered: 0,
+        hypothesesTested: 0,
+        hypothesesPending: 0,
+        selections: []
+      },
+      catalog: {
+        records: 0,
+        families: 0,
+        eligibleFamilies: 0,
+        quarantinedFamilies: 0,
+        rejectedRecords: 0,
+        rejectedLedgerEntries: 0
+      },
+      automatic: {
+        autoBanked: 0,
+        queuedHuman: 0,
+        latest: null
+      },
+      rollback: {
+        status: 'NONE',
+        targetEpochId: null
+      },
+      hypotheses: []
+    };
+  }
+
+  const learning = state.metaLearning && typeof state.metaLearning === 'object'
+    ? state.metaLearning
+    : {};
+  const ledger = learning.ledger && typeof learning.ledger === 'object'
+    ? learning.ledger
+    : {};
+  const lifecycle = ledger.byLifecycle && typeof ledger.byLifecycle === 'object'
+    ? ledger.byLifecycle
+    : {};
+
+  if (mode === 'active-canary') {
+    const adaptive = state.adaptiveIntelligence && typeof state.adaptiveIntelligence === 'object'
+      ? state.adaptiveIntelligence
+      : {};
+    const policy = adaptive.policy?.current || {};
+    const routing = adaptive.routing?.current?.view || {};
+    const catalog = adaptive.catalog || {};
+    const automatic = adaptive.automaticDecisions || {};
+    const rollback = adaptive.rollback || {};
+    const allocations = policy.allocations && typeof policy.allocations === 'object'
+      ? {
+          control: roundNumber(policy.allocations.control),
+          related: roundNumber(policy.allocations.related),
+          adjacent: roundNumber(policy.allocations.adjacent),
+          failureDerived: roundNumber(policy.allocations.failureDerived),
+          wildcard: roundNumber(policy.allocations.wildcard)
+        }
+      : null;
+    const selections = safeList(routing.allocationSchedule, (item) => {
+      const allocation = ['control', 'related', 'adjacent', 'failure-derived', 'wildcard']
+        .includes(item?.allocation)
+        ? item.allocation
+        : null;
+      const familyId = item?.familyId == null
+        ? null
+        : (/^family-[a-f0-9]{24}$/.test(String(item.familyId)) ? item.familyId : null);
+      const position = integer(item?.position);
+      if (!allocation || position == null || (allocation === 'control') !== (familyId == null)) {
+        return null;
+      }
+      return {
+        position,
+        allocation,
+        familyId,
+        probability: roundNumber(item.probability),
+        evidenceStrength: roundNumber(item.evidenceStrength),
+        reasonCodes: safeList(item.reasonCodes, reason, 8),
+        semantics: ['positive-transfer', 'failure-inversion'].includes(item?.semantics)
+          ? item.semantics
+          : null
+      };
+    }, 20);
+    const hypotheses = safeList(state.hypotheses, (hypothesis) => {
+      const binding = hypothesis?.routingBinding || {};
+      if (binding.routingDecisionId !== routing.routingDecisionId) return null;
+      const allocation = ['control', 'related', 'adjacent', 'failure-derived', 'wildcard']
+        .includes(binding.allocation)
+        ? binding.allocation
+        : null;
+      return allocation ? {
+        hypothesisId: id(hypothesis.id),
+        schedulePosition: integer(binding.schedulePosition),
+        allocation,
+        familyId: /^family-[a-f0-9]{24}$/.test(String(binding.familyId || ''))
+          ? binding.familyId
+          : null,
+        affectedExecution: allocation !== 'control'
+      } : null;
+    }, 20);
+    const latest = automatic.latest && typeof automatic.latest === 'object'
+      ? {
+          id: id(automatic.latest.automaticPromotionDecisionId),
+          sha256: hash(automatic.latest.automaticPromotionDecisionSha256),
+          disposition: ['AUTO_BANK_INTERNAL', 'QUEUE_HUMAN_REVIEW']
+            .includes(automatic.latest.disposition)
+            ? automatic.latest.disposition
+            : null,
+          eligible: automatic.latest.eligible === true,
+          reasonCodes: safeList(automatic.latest.reasonCodes, reason, 20),
+          recordedAt: timestamp(automatic.latest.recordedAt)
+        }
+      : null;
+    const testedHypothesisIds = new Set((Array.isArray(state.tests) ? state.tests : [])
+      .map((test) => test?.hypothesisId)
+      .filter(Boolean));
+    const hypothesesRegistered = hypotheses.length;
+    const hypothesesTested = hypotheses.filter((hypothesis) => (
+      testedHypothesisIds.has(hypothesis.hypothesisId)
+    )).length;
+    const hypothesesPending = Math.max(0, hypothesesRegistered - hypothesesTested);
+    const currentRouting = adaptive.routing?.current || null;
+    const rawStatus = currentRouting?.retired === true
+      ? 'RETIRED'
+      : (currentRouting && currentRouting.consumed !== true
+          ? 'PREPARED'
+          : (currentRouting && hypothesesRegistered > 0 && hypothesesPending > 0
+              ? 'PENDING_TESTS'
+              : (currentRouting && hypothesesRegistered > 0
+                  ? 'ROUTE_COMPLETE'
+                  : String(routing.status || adaptive.routing?.status || '').toUpperCase())));
+    const activeStatus = adaptive.status === 'BLOCKED'
+      ? 'BLOCKED'
+      : (['COMPLETE', 'PARTIAL', 'ABSTAINED', 'CONSUMED', 'PREPARED',
+          'PENDING_TESTS', 'ROUTE_COMPLETE', 'RETIRED'].includes(rawStatus)
+          ? rawStatus
+          : 'NOT_PREPARED');
+    return {
+      enabled: true,
+      mode: 'active-canary',
+      affectedExecution: adaptive.affectedExecution === true,
+      policy: {
+        id: id(policy.policyEpochId),
+        sha256: hash(policy.policyEpochSha256),
+        epochNumber: integer(policy.epochNumber),
+        drift: roundNumber(policy.drift),
+        driftTier: integer(policy.driftTier),
+        allocations,
+        quarantinedFamilyIds: safeList(
+          policy.quarantinedFamilyIds,
+          (value) => /^family-[a-f0-9]{24}$/.test(String(value || '')) ? value : null,
+          50
+        )
+      },
+      ledger: {
+        total: nonnegativeInteger(ledger.total),
+        eligible: nonnegativeInteger(ledger.eligibleForRouting),
+        observed: nonnegativeInteger(lifecycle.observed),
+        replicated: nonnegativeInteger(lifecycle.replicated),
+        contradicted: nonnegativeInteger(lifecycle.contradicted)
+      },
+      shadow: {
+        status: 'OFF',
+        packetSha256: null,
+        eligibleCount: 0,
+        selected: [],
+        abstentionCode: null,
+        fallbackCode: null
+      },
+      active: {
+        status: activeStatus,
+        routingDecisionId: id(routing.routingDecisionId),
+        routingDecisionSha256: hash(routing.routingDecisionSha256),
+        packetSha256: hash(routing.routingPacketSha256),
+        capsuleSha256: hash(routing.mechanismCapsuleSha256),
+        candidatePoolSha256: hash(routing.candidatePoolSha256),
+        candidatePoolCount: nonnegativeInteger(routing.candidatePoolCount),
+        hypothesesRegistered,
+        hypothesesTested,
+        hypothesesPending,
+        selections
+      },
+      catalog: {
+        records: nonnegativeInteger(catalog.recordCount),
+        families: nonnegativeInteger(catalog.familyCount),
+        eligibleFamilies: nonnegativeInteger(catalog.routingEligibleFamilyCount),
+        quarantinedFamilies: nonnegativeInteger(catalog.quarantinedFamilyCount),
+        rejectedRecords: nonnegativeInteger(catalog.rejectedRecordCount),
+        rejectedLedgerEntries: nonnegativeInteger(catalog.rejectedLedgerEntryCount)
+      },
+      automatic: {
+        autoBanked: nonnegativeInteger(automatic.autoBanked),
+        queuedHuman: nonnegativeInteger(automatic.queuedHuman),
+        latest
+      },
+      rollback: {
+        status: ['NONE', 'ACTIVATED'].includes(rollback.status) ? rollback.status : 'UNKNOWN',
+        targetEpochId: id(rollback.targetEpochId)
+      },
+      hypotheses
+    };
+  }
+
+  const shadow = learning.shadow && typeof learning.shadow === 'object'
+    ? learning.shadow
+    : {};
+  const selected = safeList(shadow.selected, (item) => {
+    const slot = String(item?.slot || '');
+    const publicSlot = slot.startsWith('related-')
+      ? 'related'
+      : (['adjacent', 'wildcard', 'failure-derived'].includes(slot) ? slot : null);
+    const mechanismId = id(item?.mechanismId);
+    const receiptId = id(item?.receiptId);
+    const receiptSha256 = hash(item?.receiptSha256);
+    if (!publicSlot
+        || !/^mech-[a-f0-9]{24}$/.test(mechanismId || '')
+        || !/^receipt-[a-f0-9]{24}$/.test(receiptId || '')
+        || !receiptSha256) return null;
+    const probability = roundNumber(item.selectionProbability);
+    const score = roundNumber(item.score);
+    if (score == null || probability == null) return null;
+    return {
+      slot: publicSlot,
+      mechanismId,
+      receiptId,
+      receiptSha256,
+      sourceRunId: opaqueReference(item?.source?.runId, 'runref'),
+      hypothesisId: opaqueReference(item?.source?.hypothesisId, 'hypref'),
+      testId: opaqueReference(item?.source?.testId, 'testref'),
+      score,
+      selectionProbability: Math.max(0, Math.min(1, probability))
+    };
+  }, 5);
+  const rawStatus = String(shadow.status || '').toUpperCase();
+  const status = shadow.fallbackCode === 'META_POLICY_FALLBACK' || rawStatus === 'FALLBACK'
+    ? 'FALLBACK'
+    : (rawStatus === 'COMPLETE'
+      ? (selected.length === 5 ? 'READY' : (selected.length ? 'PARTIAL' : 'ABSTAINED'))
+      : (rawStatus === 'PARTIAL'
+        ? (selected.length ? 'PARTIAL' : 'ABSTAINED')
+        : 'ABSTAINED'));
+
+  return {
+    enabled: true,
+    mode: 'shadow',
+    affectedExecution: false,
+    policy: {
+      id: id(state.config.metaLearning.policyId),
+      sha256: hash(state.config.metaLearning.policySha256),
+      epochNumber: null,
+      drift: null,
+      driftTier: null,
+      allocations: null,
+      quarantinedFamilyIds: []
+    },
+    ledger: {
+      total: nonnegativeInteger(ledger.total),
+      eligible: nonnegativeInteger(ledger.eligibleForRouting),
+      observed: nonnegativeInteger(lifecycle.observed),
+      replicated: nonnegativeInteger(lifecycle.replicated),
+      contradicted: nonnegativeInteger(lifecycle.contradicted)
+    },
+    shadow: {
+      status,
+      packetSha256: hash(shadow.packetSha256),
+      eligibleCount: nonnegativeInteger(shadow.eligibleCount),
+      selected,
+      abstentionCode: code(shadow.abstentionCode),
+      fallbackCode: status === 'FALLBACK' ? 'META_POLICY_FALLBACK' : null
+    },
+    active: {
+      status: 'OFF',
+      routingDecisionId: null,
+      routingDecisionSha256: null,
+      packetSha256: null,
+      capsuleSha256: null,
+      candidatePoolSha256: null,
+      candidatePoolCount: 0,
+      hypothesesRegistered: 0,
+      hypothesesTested: 0,
+      hypothesesPending: 0,
+      selections: []
+    },
+    catalog: {
+      records: 0,
+      families: 0,
+      eligibleFamilies: 0,
+      quarantinedFamilies: 0,
+      rejectedRecords: 0,
+      rejectedLedgerEntries: 0
+    },
+    automatic: {
+      autoBanked: 0,
+      queuedHuman: 0,
+      latest: null
+    },
+    rollback: {
+      status: 'NONE',
+      targetEpochId: null
+    },
+    hypotheses: []
+  };
+}
+
 function publicLoops(state) {
   return Object.entries(state.loops || {}).map(([loopId, loop]) => {
     const evidence = loop && loop.evidence && typeof loop.evidence === 'object' ? loop.evidence : {};
@@ -1014,9 +1370,351 @@ function publicRealTest(state) {
   };
 }
 
+function recursiveArmRows(analysis) {
+  const arms = analysis?.summary?.arms || {};
+  return ['candidate', 'parent', 'sham', 'cold'].map((arm) => ({
+    id: arm,
+    label: arm === 'candidate'
+      ? 'Candidate'
+      : arm === 'parent'
+        ? 'Parent'
+        : arm === 'sham'
+          ? 'Sham'
+          : 'Cold baseline',
+    exact: integer(arms[arm]?.exact) ?? null,
+    cases: integer(arms[arm]?.cases) ?? null,
+    decisions: integer(arms[arm]?.decisions) ?? null,
+    codes: integer(arms[arm]?.codes) ?? null,
+    tokenCost: integer(arms[arm]?.tokenCost) ?? null
+  }));
+}
+
+function recursiveBaseSnapshot(state, recursive) {
+  const model = route(
+    state.plan?.modelPolicy?.model
+    || state.verification?.modelAuthority?.requestedModel
+  );
+  const reasoning = text(
+    state.plan?.modelPolicy?.reasoningEffort
+    || state.verification?.modelAuthority?.reasoningEffort,
+    20
+  );
+  return {
+    schemaVersion: 3,
+    kind: state.kind,
+    generatedAt: timestamp(state.updatedAt),
+    stopCondition: STOP_CONDITION_WARNING,
+    run: {
+      id: id(state.runId),
+      status: text(state.status, 40),
+      createdAt: timestamp(state.createdAt),
+      updatedAt: timestamp(state.updatedAt),
+      completedAt: timestamp(state.completedAt),
+      mode: 'recursive',
+      runMode: state.kind,
+      activeLoop: null,
+      parentRunId: null,
+      model,
+      reasoningEffort: reasoning
+    },
+    policy: {
+      source: 'sealed-recursive-plan',
+      primary: model,
+      testRoutes: model ? [model] : [],
+      builderRoutes: model ? [model] : [],
+      judgeRoute: model,
+      banlist: { mode: 'strict', extraAllowCount: 0, extraDenyCount: 0 },
+      allowUnknownFrontier: false
+    },
+    intake: { answerSources: { operator: 0, config: 1, default: 0 } },
+    continuation: {
+      required: false,
+      id: null,
+      since: null,
+      source: null,
+      inProgress: state.status === 'RUNNING',
+      nextTool: null
+    },
+    failures: {
+      consecutive: state.status === 'BLOCKED' ? 1 : 0,
+      total: state.status === 'BLOCKED' ? 1 : 0,
+      patience: 0,
+      retirementBatches: 0,
+      exhaustionFlagged: false
+    },
+    loops: [],
+    campaign: { activeLaneId: null, lanes: [], transitions: [] },
+    evidence: {
+      baselineLocked: true,
+      baselineSha256: hash(state.plan?.configSha256),
+      benchmarkFrozen: true,
+      benchmarkSource: 'sealed-recursive-plan',
+      benchmarkPartition: 'calibration-confirmation',
+      benchmarkCases: recursive.taskCount,
+      deterministicOracle: true,
+      routeIndependenceRequired: false,
+      requiredRoutes: model ? 1 : 0,
+      integrityOverrideCount: 0,
+      negativeControl: null,
+      baselineQuality: null,
+      baselineArtifactOutputTokenEstimate: null,
+      baselineCliReceiptTokenCost: null,
+      baselineQualityAuthority: 'machine-verifier',
+      baselineSamples: 0,
+      baselineStdevQuality: null,
+      observations: recursive.callsObserved,
+      artifacts: recursive.artifactCount,
+      evidencedPhases: recursive.generations?.length || 0
+    },
+    scoreMatrix: [],
+    verdicts: [],
+    activity: [],
+    reviews: {
+      pending: 0,
+      approved: recursive.decisions.filter((decision) => (
+        decision.status === 'AUTO_ADMITTED'
+      )).length,
+      sludge: recursive.decisions.filter((decision) => (
+        decision.status === 'REJECTED'
+      )).length,
+      items: []
+    },
+    promotions: [],
+    realTest: { enabled: false },
+    canary: { enabled: false },
+    recursive
+  };
+}
+
+function buildRecursiveCanaryV2Snapshot(state) {
+  const verification = state.verification || {};
+  const calibration = verification.calibrationAnalysis || null;
+  const confirmation = verification.confirmationAnalysis || null;
+  const calls = Array.isArray(state.calls) ? state.calls : [];
+  const decisions = [];
+  if (verification.activeAdmission) {
+    decisions.push({
+      id: id(verification.activeAdmission.admissionReceiptId),
+      generation: 0,
+      status: 'AUTO_ADMITTED',
+      authority: 'independent-replicated-verifier',
+      reason: 'Untouched confirmation cleared every causal gate.',
+      evidenceSha256: hash(verification.evidenceSha256)
+    });
+  } else if (verification.rejectedAdmission || verification.rejectedEvolution) {
+    decisions.push({
+      id: id(
+        verification.rejectedAdmission?.admissionReceiptId
+        || verification.rejectedEvolution?.evolutionReceiptId
+      ),
+      generation: 0,
+      status: 'REJECTED',
+      authority: 'independent-replicated-verifier',
+      reason: state.status === 'CALIBRATION_REJECTED'
+        ? 'Candidate did not clear calibrated placebo noise.'
+        : 'Candidate did not clear untouched confirmation.',
+      evidenceSha256: hash(verification.evidenceSha256)
+    });
+  }
+  return recursiveBaseSnapshot(state, {
+    enabled: true,
+    mode: 'canary-v2',
+    experimentValid: verification.experimentValid === true,
+    causalPass: verification.causalPass === true,
+    calibrationQualified: verification.calibrationQualified === true,
+    promotionEnabled: false,
+    callsObserved: calls.length,
+    callsMaximum: integer(state.plan?.exposure?.maximumCalls) ?? 120,
+    taskCount: 10,
+    artifactCount: Object.keys(state.evidenceArtifacts || {}).length
+      + Object.keys(state.derivedArtifacts || {}).length
+      + calls.length * 8,
+    current: {
+      generation: 0,
+      phase: state.status,
+      childRunId: null,
+      nextAction: state.status === 'RUNNING'
+        ? 'Continue sealed dispatch schedule'
+        : state.status === 'OPERATOR_STOP'
+          ? 'Stopped by operator'
+          : 'No pending dispatch'
+    },
+    stages: [{
+      id: 'calibration',
+      label: 'Placebo calibration',
+      status: calibration
+        ? (calibration.qualified ? 'PASS' : 'REJECTED')
+        : 'PENDING',
+      calls: calls.filter((call) => call.stage === 'calibration').length,
+      maximumCalls: 60,
+      candidateMean: finite(calibration?.summary?.candidateVsParent?.mean),
+      lower95: finite(calibration?.summary?.candidateVsParent?.lower95),
+      shamMean: finite(calibration?.summary?.shamVsCold?.mean),
+      noiseUpper95: finite(calibration?.placeboUpper95),
+      adjustedMean: finite(calibration?.summary?.adjusted?.mean),
+      arms: recursiveArmRows(calibration)
+    }, {
+      id: 'confirmation',
+      label: 'Untouched confirmation',
+      status: confirmation
+        ? (confirmation.causalPass ? 'PASS' : 'REJECTED')
+        : 'LOCKED',
+      calls: calls.filter((call) => call.stage === 'confirmation').length,
+      maximumCalls: 60,
+      candidateMean: finite(confirmation?.summary?.candidateVsParent?.mean),
+      lower95: finite(confirmation?.summary?.candidateVsParent?.lower95),
+      shamMean: finite(confirmation?.summary?.shamVsCold?.mean),
+      noiseUpper95: finite(confirmation?.frozenNoiseThreshold),
+      adjustedMean: finite(confirmation?.summary?.adjusted?.mean),
+      arms: recursiveArmRows(confirmation)
+    }],
+    gates: Object.entries(verification.gates || {}).map(([gateId, passed]) => ({
+      id: code(gateId),
+      label: text(gateId.replaceAll(/([A-Z])/g, ' $1').trim(), 80),
+      status: passed === true ? 'PASS' : passed === false ? 'FAIL' : 'UNKNOWN'
+    })),
+    generations: [{
+      generation: 0,
+      status: text(state.status, 40),
+      causalPass: verification.causalPass === true,
+      mutationPlanId: null,
+      childRunId: id(state.runId),
+      evidenceSha256: hash(verification.evidenceSha256),
+      calls: calls.length
+    }],
+    decisions,
+    memory: [],
+    context: null,
+    tokenUsage: {
+      total: integer(verification.tokenUsage?.total),
+      mutation: null,
+      calibration: integer(verification.tokenUsage?.byStage?.calibration?.total),
+      confirmation: integer(verification.tokenUsage?.byStage?.confirmation?.total)
+    },
+    operator: {
+      canStop: ['RUNNING', 'CALIBRATION_DRAINED'].includes(state.status),
+      stopRequested: false,
+      stopEndpoint: `/api/v1/runs/${encodeURIComponent(state.runId)}/stop`
+    }
+  });
+}
+
+function buildRecursiveCampaignSnapshot(state) {
+  const verification = state.verification || {};
+  const generations = (state.generations || []).map((generation) => ({
+    generation: integer(generation.generation) ?? 0,
+    status: text(generation.status, 50),
+    causalPass: generation.causalPass === true,
+    calibrationQualified: generation.calibrationQualified === true,
+    mutationPlanId: id(generation.mutationPlan?.mutationPlanId),
+    childRunId: id(generation.childRunId),
+    evidenceSha256: hash(generation.childEvidenceSha256),
+    calls: null
+  }));
+  const decisions = generations.map((generation) => ({
+    id: generation.mutationPlanId || `generation-${generation.generation}`,
+    generation: generation.generation,
+    status: generation.causalPass ? 'AUTO_ADMITTED' : 'REJECTED',
+    authority: generation.causalPass
+      ? 'independent-replicated-verifier'
+      : 'measured-failure-or-bounded-rejection',
+    reason: generation.causalPass
+      ? 'Descendant entered routing after untouched confirmation.'
+      : 'Descendant stayed out of routing.',
+    evidenceSha256: generation.evidenceSha256
+  }));
+  const latest = state.generations?.at(-1);
+  const latestVerification = latest?.childRunId && latest.childEvidenceSha256
+    ? latest
+    : null;
+  return recursiveBaseSnapshot(state, {
+    enabled: true,
+    mode: 'campaign',
+    experimentValid: verification.experimentValid === true,
+    causalPass: generations.some((generation) => generation.causalPass),
+    calibrationQualified: latest?.calibrationQualified === true,
+    promotionEnabled: false,
+    callsObserved: integer(verification.modelCalls) ?? 0,
+    callsMaximum: integer(state.plan?.bounds?.maximumCalls) ?? 0,
+    taskCount: integer(state.plan?.bounds?.maximumGenerations) * 10,
+    artifactCount: Object.keys(state.evidenceArtifacts || {}).length
+      + (state.memoryRecords || []).length
+      + (state.contextObservations || []).length,
+    current: {
+      generation: integer(state.currentGeneration?.generation ?? state.nextGeneration),
+      phase: text(state.currentGeneration?.phase || state.status, 50),
+      childRunId: id(state.currentGeneration?.childRunId),
+      nextAction: state.status === 'RUNNING'
+        ? 'Advance the current bounded generation'
+        : state.status === 'IDLE_NO_NEW_WORK'
+          ? 'Waiting without inference for new measured failures'
+          : state.status === 'OPERATOR_STOP'
+            ? 'Stopped by operator'
+            : 'Wave drained'
+    },
+    stages: latestVerification ? [{
+      id: 'latest-generation',
+      label: `Generation ${latestVerification.generation}`,
+      status: latestVerification.status,
+      calls: null,
+      maximumCalls: 121,
+      candidateMean: null,
+      lower95: null,
+      shamMean: null,
+      noiseUpper95: null,
+      adjustedMean: null,
+      arms: []
+    }] : [],
+    gates: Object.entries(verification.gates || {}).map(([gateId, passed]) => ({
+      id: code(gateId),
+      label: text(gateId.replaceAll(/([A-Z])/g, ' $1').trim(), 80),
+      status: passed === true ? 'PASS' : passed === false ? 'FAIL' : 'UNKNOWN'
+    })),
+    generations,
+    decisions,
+    memory: (state.memoryRecords || []).map((record) => ({
+      id: id(record.recordId),
+      lifecycle: code(record.lifecycle),
+      priority: finite(record.priority),
+      artifactSha256: hash(record.artifactSha256),
+      semanticSha256: hash(record.semanticSha256)
+    })),
+    context: state.contextPolicy ? {
+      policyId: id(state.contextPolicy.policyId),
+      epoch: integer(state.contextPolicy.epoch),
+      action: code(state.contextPolicy.action),
+      allocatedInputTokens: integer(state.contextPolicy.allocatedInputTokens),
+      observationCount: integer(state.contextPolicy.evidence?.observationCount),
+      medianSaturation: finite(state.contextPolicy.evidence?.medianSaturation),
+      medianLift: finite(state.contextPolicy.evidence?.medianLift),
+      projectionMode: code(state.contextPolicy.compaction?.mode),
+      contentDeletionAuthorized:
+        state.contextPolicy.compaction?.contentDeletionAuthorized === true,
+      permanentControlFraction: finite(state.contextPolicy.permanentControlFraction)
+    } : null,
+    tokenUsage: {
+      total: null,
+      mutation: null,
+      calibration: null,
+      confirmation: null
+    },
+    operator: {
+      canStop: state.status === 'RUNNING',
+      stopRequested: false,
+      stopEndpoint: `/api/v1/runs/${encodeURIComponent(state.runId)}/stop`
+    }
+  });
+}
+
 export function buildConsoleSnapshot(state) {
   if (state && state.kind === 'real-test-canary') {
     return buildCanaryConsoleSnapshot(state);
+  }
+  if (state && state.kind === 'adaptive-recursive-canary-v2') {
+    return buildRecursiveCanaryV2Snapshot(state);
+  }
+  if (state && state.kind === 'adaptive-recursive-campaign') {
+    return buildRecursiveCampaignSnapshot(state);
   }
   const loops = publicLoops(state);
   const benchmark = state.benchmark || {};
@@ -1096,6 +1794,7 @@ export function buildConsoleSnapshot(state) {
     activity: publicActivity(state),
     reviews: publicReviews(state),
     promotions: publicPromotions(state),
+    learning: publicLearning(state),
     realTest: publicRealTest(state)
   };
 }

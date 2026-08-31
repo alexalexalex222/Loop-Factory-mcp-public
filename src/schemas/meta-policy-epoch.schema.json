@@ -1,0 +1,281 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "meta-policy-epoch-legacy-v1",
+  "title": "Loop Factory meta policy epoch (superseded contract)",
+  "description": "Retained for compatibility; meta-policy-epoch-v1.schema.json is authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "epoch",
+    "previousPolicyEpochSha256",
+    "trigger",
+    "evidenceWindowSha256",
+    "baselinePolicySha256",
+    "createdAt",
+    "policy",
+    "changes",
+    "drift",
+    "quarantines",
+    "rollback",
+    "policyEpochId",
+    "policyEpochSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "meta-policy-epoch-v1"
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "previousPolicyEpochSha256": {
+      "$ref": "#/definitions/nullableSha256"
+    },
+    "trigger": {
+      "type": "string",
+      "enum": [
+        "initial",
+        "five-valid-applications",
+        "lane-boundary",
+        "rollback"
+      ]
+    },
+    "evidenceWindowSha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "baselinePolicySha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "policy": {
+      "$ref": "#/definitions/policy"
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "before",
+          "after",
+          "delta"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^(allocations|scoring|penalties)\\.[A-Za-z0-9]+$"
+          },
+          "before": {
+            "type": "number"
+          },
+          "after": {
+            "type": "number"
+          },
+          "delta": {
+            "type": "number",
+            "minimum": -0.05,
+            "maximum": 0.05
+          }
+        }
+      }
+    },
+    "drift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "l1",
+        "tier",
+        "requiresMetaCanary",
+        "metaCanaryReceiptSha256"
+      ],
+      "properties": {
+        "l1": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "requiresMetaCanary": {
+          "type": "boolean"
+        },
+        "metaCanaryReceiptSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        }
+      }
+    },
+    "quarantines": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "familyId",
+          "reasonCodes"
+        ],
+        "properties": {
+          "familyId": {
+            "type": "string",
+            "pattern": "^family-[a-f0-9]{24}$"
+          },
+          "reasonCodes": {
+            "$ref": "#/definitions/reasonCodes"
+          }
+        }
+      }
+    },
+    "rollback": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetPolicyEpochId",
+            "targetPolicyEpochSha256",
+            "reasonCodes"
+          ],
+          "properties": {
+            "targetPolicyEpochId": {
+              "type": "string",
+              "pattern": "^policy-epoch-[a-f0-9]{24}$"
+            },
+            "targetPolicyEpochSha256": {
+              "$ref": "#/definitions/sha256"
+            },
+            "reasonCodes": {
+              "$ref": "#/definitions/reasonCodes"
+            }
+          }
+        }
+      ]
+    },
+    "policyEpochId": {
+      "type": "string",
+      "pattern": "^policy-epoch-[a-f0-9]{24}$"
+    },
+    "policyEpochSha256": {
+      "$ref": "#/definitions/sha256"
+    }
+  },
+  "definitions": {
+    "unit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocations",
+        "scoring",
+        "penalties"
+      ],
+      "properties": {
+        "allocations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "control",
+            "related",
+            "adjacent",
+            "failureDerived",
+            "wildcard"
+          ],
+          "properties": {
+            "control": {
+              "$ref": "#/definitions/unit"
+            },
+            "related": {
+              "$ref": "#/definitions/unit"
+            },
+            "adjacent": {
+              "$ref": "#/definitions/unit"
+            },
+            "failureDerived": {
+              "$ref": "#/definitions/unit"
+            },
+            "wildcard": {
+              "$ref": "#/definitions/unit"
+            }
+          }
+        },
+        "scoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "relevanceWeight",
+            "confidenceWeight",
+            "positiveEffectWeight",
+            "contradictionPenaltyWeight"
+          ],
+          "properties": {
+            "relevanceWeight": {
+              "$ref": "#/definitions/unit"
+            },
+            "confidenceWeight": {
+              "$ref": "#/definitions/unit"
+            },
+            "positiveEffectWeight": {
+              "$ref": "#/definitions/unit"
+            },
+            "contradictionPenaltyWeight": {
+              "$ref": "#/definitions/unit"
+            }
+          }
+        },
+        "penalties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cooldown",
+            "failedTransfer"
+          ],
+          "properties": {
+            "cooldown": {
+              "$ref": "#/definitions/unit"
+            },
+            "failedTransfer": {
+              "$ref": "#/definitions/unit"
+            }
+          }
+        }
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableSha256": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+      }
+    }
+  }
+}

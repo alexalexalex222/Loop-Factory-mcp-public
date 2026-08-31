@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "id": "bravo-hidden-target", "bravoBaselineMarker": "MISSED" },
+    { "id": "bravo-hidden-clean", "bravoControlMarker": "ACCEPT" },
+    { "id": "bravo-hidden-guard", "bravoGuardMarker": "REJECT" }
+  ]
+}

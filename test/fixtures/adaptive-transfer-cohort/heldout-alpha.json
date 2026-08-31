@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "id": "alpha-hidden-target", "alphaBaselineMarker": "MISSED" },
+    { "id": "alpha-hidden-clean", "alphaControlMarker": "ACCEPT" },
+    { "id": "alpha-hidden-guard", "alphaGuardMarker": "REJECT" }
+  ]
+}

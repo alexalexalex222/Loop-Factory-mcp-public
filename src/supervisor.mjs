@@ -45,17 +45,124 @@ export function floorBaselineScaffold(label = 'loop') {
   ].join('\n');
 }
 
-export function standardSupervisorHypotheses(target = {}, routes = [], task = '') {
+export const PRESENTATION_ONLY_SHAM_VALIDATION =
+  'presentation-only-sham-v1';
+
+function controlCausalFingerprint(target = {}) {
+  const benchmark = target.benchmark || {};
+  return {
+    bottleneckKind: 'target-specific-bottleneck',
+    interventionKind: 'no-memory-control',
+    operationKind: 'direct-hypothesis-generation',
+    expectedEffectKind: 'frozen-benchmark-improvement',
+    preconditions: ['frozen-baseline', 'frozen-benchmark'],
+    applicability: {
+      taskModes: ['improve'],
+      loopRoles: [target.loop || 'loop-de-loop'],
+      taskValueDimensions: Array.isArray(benchmark.taskValueDimensions)
+        ? benchmark.taskValueDimensions
+        : [],
+      resourceDimensions: Array.isArray(benchmark.resourceDimensions)
+        ? benchmark.resourceDimensions
+        : []
+    }
+  };
+}
+
+function hypothesisCapsule(prepared, position) {
+  const item = prepared?.capsule?.items?.find((candidate) => candidate.position === position);
+  if (!item) return null;
+  const treatment = prepared?.treatment?.positions?.find(
+    (candidate) => candidate.position === position
+  );
+  if (treatment?.compiledTreatment) {
+    return {
+      sourceItem: structuredClone(item),
+      workerTreatment: structuredClone(treatment.compiledTreatment),
+      treatmentKind: 'compiled',
+      treatmentSha256: treatment.compiledTreatment.packetSha256,
+      interfaceSha256: treatment.compiledTreatment.interfaceSha256
+    };
+  }
+  return {
+    sourceItem: structuredClone(item),
+    workerTreatment: {
+      schemaVersion: prepared.capsule.schemaVersion,
+      targetSha256: prepared.capsule.targetSha256,
+      policyEpochId: prepared.capsule.policyEpochId,
+      policyEpochSha256: prepared.capsule.policyEpochSha256,
+      candidatePoolSha256: prepared.capsule.candidatePoolSha256,
+      mechanismCapsuleSha256: prepared.capsule.mechanismCapsuleSha256,
+      item: structuredClone(item)
+    },
+    treatmentKind: 'legacy',
+    treatmentSha256: null,
+    interfaceSha256: null
+  };
+}
+
+function restoreRoutedHypothesis(hypothesis, prepared) {
+  const position = hypothesis?.routingBinding?.schedulePosition;
+  const capsule = Number.isInteger(position)
+    ? hypothesisCapsule(prepared, position)
+    : null;
+  return {
+    ...structuredClone(hypothesis),
+    mechanismCapsule: capsule?.workerTreatment || null
+  };
+}
+
+export function bindHypothesesToMechanismRouting(hypotheses = [], prepared, target = {}) {
+  if (!prepared?.decision || !prepared?.capsule) return hypotheses.map((item) => ({ ...item }));
+  if (prepared.decision.allocationSchedule.length !== hypotheses.length) {
+    throw new Error('routing schedule does not match hypothesis count');
+  }
+  return hypotheses.map((hypothesis, position) => {
+    const scheduled = prepared.decision.allocationSchedule[position];
+    const capsule = hypothesisCapsule(prepared, position);
+    return {
+      ...hypothesis,
+      operation: capsule
+        ? capsule.treatmentKind === 'compiled'
+          ? `${hypothesis.operation} Apply the exact compiled mechanism treatment bound to this hypothesis.`
+          : `${hypothesis.operation} Assigned mechanism constraint: ${capsule.sourceItem.instruction}`
+        : hypothesis.operation,
+      causalFingerprint: capsule?.sourceItem?.causalFingerprint || controlCausalFingerprint(target),
+      mechanismCapsule: capsule?.workerTreatment || null,
+      routingBinding: {
+        routingDecisionId: prepared.decision.routingDecisionId,
+        routingDecisionSha256: prepared.decision.routingDecisionSha256,
+        routingPacketSha256: prepared.decision.routingPacketSha256,
+        mechanismCapsuleSha256: prepared.decision.mechanismCapsuleSha256,
+        policyEpochId: prepared.decision.policyEpochId,
+        policyEpochSha256: prepared.decision.policyEpochSha256,
+        targetSha256: prepared.decision.targetSha256,
+        schedulePosition: position,
+        allocation: scheduled.allocation,
+        familyId: scheduled.familyId,
+        treatmentKind: capsule?.treatmentKind || 'control',
+        treatmentSha256: capsule?.treatmentSha256 || null,
+        interfaceSha256: capsule?.interfaceSha256 || null
+      }
+    };
+  });
+}
+
+export function standardSupervisorHypotheses(target = {}, routes = [], task = '', prepared = null) {
   const loopId = target.loop || 'loop-de-loop';
   const objective = String(task || `improve ${loopId}`).trim();
-  return routes.map((route, index) => ({
+  const hypotheses = routes.map((route, index) => ({
     title: `Test evidence-bound ${loopId} intervention ${index + 1}`,
     bottleneck: `The current ${loopId} baseline has not isolated which procedure step causes the measured gap for "${objective}", so an ungrounded rewrite could look different without moving the frozen benchmark.`,
     operation: `Use ${route} to change one evidence-supported bottleneck in the complete ${loopId} procedure, preserve its acceptance criteria, and return a comparable end-to-end output for the frozen cases.`,
     expectedMovement: 'Raise tool-measured benchmark quality at equal or lower cost, or produce a measured tradeoff that remains unpromoted and visible for operator review.',
     falsifier: 'Reject this hypothesis if the full route batch fails to improve the frozen scorecard, regresses cost or quality, or cannot reverify from sealed artifacts.',
+    evidenceRefs: Array.isArray(target.evidenceRefs) ? target.evidenceRefs : [],
     route: { model: route }
   }));
+  return prepared
+    ? bindHypothesesToMechanismRouting(hypotheses, prepared, target)
+    : hypotheses;
 }
 
 function resolveBaselineContent(target, loopId) {
@@ -166,7 +273,7 @@ export function parseWorkerPacket(text, { route = null, invocation = null } = {}
 
 // Dispatch an independent judge to compare baseline vs challenger FINAL OUTPUTS under
 // a frozen rubric. The judge must be a trusted builder/gating route under the active
-// modelPolicy (defaults: Opus/GLM). The judge prompt is the rubric + the two outputs
+// modelPolicy (defaults: Fable 5 / GPT-5.6). The judge prompt is the rubric + the two outputs
 // (not a loop slice). policy is optional; omit → default policy.
 function dispatchJudge(baselineOutput, challengerOutput, rubric, judgeRoute, worker, log, policy) {
   const pol = policy ? normalizeModelPolicy(policy) : defaultModelPolicy();
@@ -296,8 +403,24 @@ export function compilePhaseContract(loopId, phaseIndex, opts = {}) {
       bottleneck: opts.hypothesis.bottleneck || null,
       operation: opts.hypothesis.operation || null,
       expectedMovement: opts.hypothesis.expectedMovement || null,
-      falsifier: opts.hypothesis.falsifier || null
+      falsifier: opts.hypothesis.falsifier || null,
+      causalFingerprint: opts.hypothesis.causalFingerprint
+        ? structuredClone(opts.hypothesis.causalFingerprint)
+        : null,
+      routingBinding: opts.hypothesis.routingBinding
+        ? structuredClone(opts.hypothesis.routingBinding)
+        : null
     } : null,
+    mechanismCapsule: opts.mechanismCapsule && typeof opts.mechanismCapsule === 'object'
+      ? structuredClone(opts.mechanismCapsule)
+      : null,
+    ...(opts.proposalValidationMode === PRESENTATION_ONLY_SHAM_VALIDATION
+      ? { proposalValidationMode: PRESENTATION_ONLY_SHAM_VALIDATION }
+      : {}),
+    ...(typeof opts.proposalTreatmentInstruction === 'string'
+        && opts.proposalTreatmentInstruction.trim()
+      ? { proposalTreatmentInstruction: opts.proposalTreatmentInstruction.trim() }
+      : {}),
     frozenCases: Array.isArray(opts.frozenCases) ? opts.frozenCases.map((item) => ({ ...item })) : [],
     evidenceCapsule: Array.isArray(opts.evidenceCapsule) ? opts.evidenceCapsule.map((item) => ({ ...item })) : [],
     evaluationArm: typeof opts.evaluationArm === 'string' && opts.evaluationArm.trim()
@@ -342,6 +465,36 @@ function hypothesisLinkage(contract, revisedContent, changeSummary) {
   return matches.length >= Math.min(3, meaningful.length);
 }
 
+function isIrrelevantControl(contract) {
+  const items = Array.isArray(contract.mechanismCapsule?.items)
+    ? contract.mechanismCapsule.items
+    : [];
+  return items.length === 1 && items[0]?.semantics === 'irrelevant-control';
+}
+
+function requiresPresentationOnlySham(contract) {
+  return contract.proposalValidationMode === PRESENTATION_ONLY_SHAM_VALIDATION
+    && isIrrelevantControl(contract);
+}
+
+function presentationOnlyEquivalent(baselineContent, revisedContent) {
+  const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  return normalize(baselineContent) === normalize(revisedContent);
+}
+
+function presentationOnlyLinkage(contract, revisedContent, changeSummary) {
+  if (!requiresPresentationOnlySham(contract)) return false;
+  const summary = String(changeSummary || '').toLowerCase();
+  const preservesBehavior = /(unchanged|preserv)/.test(summary)
+    || /\bno\b[^.!;\n]{0,96}\bbehavior\b[^.!;\n]{0,48}\b(?:change|changed|altered|modified)\b/.test(summary);
+  return presentationOnlyEquivalent(
+    contract.target?.baselineContent,
+    revisedContent
+  )
+    && /(presentation|format|heading|spacing)/.test(summary)
+    && preservesBehavior;
+}
+
 function validateBoundStructuredOutput(contract, finalOutput) {
   if (!contract.target || !['baseline', 'challenger', 'proposal', 'evaluation'].includes(contract.kind)) return [];
   const reasons = [];
@@ -362,7 +515,11 @@ function validateBoundStructuredOutput(contract, finalOutput) {
     if (!revisedContent.trim() || revisedContent === String(target.baselineContent || '')
       || !checkBaselineIntegrity(revisedContent).ok || !changeSummary.trim()) {
       reasons.push('TARGET_UNBOUND');
-    } else if (!hypothesisLinkage(contract, revisedContent, changeSummary)) {
+    } else if (requiresPresentationOnlySham(contract)
+      && !presentationOnlyLinkage(contract, revisedContent, changeSummary)) {
+      reasons.push('SHAM_NOT_PRESENTATION_ONLY');
+    } else if (!requiresPresentationOnlySham(contract)
+      && !hypothesisLinkage(contract, revisedContent, changeSummary)) {
       reasons.push('HYPOTHESIS_UNLINKED');
     }
     return [...new Set(reasons)];
@@ -542,6 +699,7 @@ export function runFullTestBatch(engine, runId, {
   procedureContent,
   procedureSha256,
   evidenceCapsule,
+  mechanismCapsule,
   frozenCases,
   worker,
   recordMeasurement,
@@ -564,6 +722,7 @@ export function runFullTestBatch(engine, runId, {
       hypothesis,
       frozenCases,
       evidenceCapsule,
+      mechanismCapsule,
       procedureContent,
       procedureSha256,
       toolPolicy: strictEvaluation ? 'none' : 'default'
@@ -702,7 +861,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
         }
       }
     : config.engineConfig;
-  engine.initialize_loop_run({
+  const campaignInitialized = engine.initialize_loop_run({
     runId, task: config.task || 'supervised campaign',
     answers: config.answers || ['a measurably better loop', config.startMode || 'mine then improve', 'measured quality up at equal-or-lower cost', 'keep authorship', 'keep moving'],
     answerSource: Array.isArray(config.answers) && config.answers.length ? 'config' : 'default',
@@ -711,39 +870,81 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
     modelPolicy: config.modelPolicy,
     config: engineRealTestConfig
   });
+  if (campaignInitialized.status !== 'OK') {
+    return {
+      status: 'BLOCKED',
+      code: campaignInitialized.code || 'RUN_INITIALIZATION_FAILED',
+      message: campaignInitialized.message
+    };
+  }
 
-  const queue = (config.targets || []).map((t) => ({ ...t }));
-  const stones = [];
+  const schedulerOperator = engine?.operator;
+  const schedulerPersistenceAvailable = !!schedulerOperator
+    && typeof schedulerOperator.loadCampaignSchedulerCheckpoint === 'function'
+    && typeof schedulerOperator.recordCampaignSchedulerCheckpoint === 'function';
+  const loadedScheduler = schedulerPersistenceAvailable
+    ? schedulerOperator.loadCampaignSchedulerCheckpoint({ runId, config })
+    : { status: 'OK', checkpoint: null, checkpointCount: 0 };
+  if (loadedScheduler.status !== 'OK') {
+    return {
+      status: 'BLOCKED',
+      code: loadedScheduler.code || 'CAMPAIGN_SCHEDULER_CHECKPOINT_INVALID',
+      message: loadedScheduler.message,
+      reasonCode: loadedScheduler.reasonCode || null
+    };
+  }
+  const restored = loadedScheduler.checkpoint?.snapshot || null;
+  const queue = restored
+    ? restored.queue.map((target) => ({ ...target }))
+    : (config.targets || []).map((target) => ({ ...target }));
+  let activeTarget = restored?.activeTarget
+    ? {
+        target: { ...restored.activeTarget.target },
+        childRunId: restored.activeTarget.childRunId,
+        batchesAtStart: restored.activeTarget.batchesAtStart,
+        invalidAttemptsAtStart: restored.activeTarget.invalidAttemptsAtStart
+      }
+    : null;
+  const stones = restored ? restored.stones.map((stone) => ({ ...stone })) : [];
   // Fix-2: a measured win is QUEUED for operator approval, never auto-banked. Track the pending
   // lanes so that once the operator Approves (dashboard → run inbox → applyInboxDecisions), the
   // supervisor re-attempts promotion_request and the approved win actually banks — closing the
   // autonomous loop with no manual re-call. bankedPromotions prevents ever banking a win twice.
-  const pendingPromotions = [];          // { runId, hypothesisId, reviewId, loop } awaiting approval
-  const bankedPromotions = new Set();    // `${runId}::${hypothesisId}` already banked
-  let batchesTotal = 0;
-  let improveIdx = 0;
-  let findingsAccepted = 0;
-  let findingsRejected = 0;
-  let invalidAttempts = 0;
-  let benchmarkLocked = false;
-  let baselineSamples = 0;
-  let latestSubRunId = null;
-  const seenFindings = new Set();
-  const seenMinedCandidates = new Set(
+  const pendingPromotions = restored
+    ? restored.pendingPromotions.map((item) => ({ ...item }))
+    : []; // { runId, hypothesisId, reviewId, loop } awaiting approval
+  const bankedPromotions = new Set(restored?.bankedPromotionKeys || []);
+  let batchesTotal = restored?.batchesTotal || 0;
+  let improveIdx = restored?.improveIndex || 0;
+  let findingsAccepted = restored?.findingsAccepted || 0;
+  let findingsRejected = restored?.findingsRejected || 0;
+  let invalidAttempts = restored?.invalidAttempts || 0;
+  let benchmarkLocked = restored?.benchmarkLocked === true;
+  let baselineSamples = restored?.baselineSamples || 0;
+  let latestSubRunId = restored?.latestSubRunId || null;
+  const seenFindings = new Set(restored?.seenFindings || []);
+  const seenMinedCandidates = new Set(restored?.seenMinedCandidates || (
     queue
       .filter((target) => target.kind === 'improve')
       .map((target) => minedCandidateFingerprint(target))
-  );
-  const coverage = [];
-  let miningExhausted = false;
-  let idle = false;
-  let idleReason = null;
-  let idleCycles = 0;
-  let idleAnnounced = false;
-  let lastMiningFingerprint = null;
+  ));
+  const coverage = restored ? restored.coverage.map((item) => ({
+    ...item,
+    hypothesisIds: Array.isArray(item.hypothesisIds) ? [...item.hypothesisIds] : []
+  })) : [];
+  let miningExhausted = restored?.miningExhausted === true;
+  let idle = restored?.idle === true;
+  let idleReason = restored?.idleReason || null;
+  let idleCycles = restored?.idleCycles || 0;
+  let idleAnnounced = loadedScheduler.checkpoint?.status === 'IDLE';
+  let lastMiningFingerprint = restored?.lastMiningFingerprint || null;
   let schedulerError = null;
+  const allRunIds = new Set(restored?.allRunIds || [runId]);
+  allRunIds.add(runId);
+  if (activeTarget?.childRunId) allRunIds.add(activeTarget.childRunId);
+  let lastSchedulerCheckpoint = loadedScheduler.checkpoint || null;
 
-  const stopped = () => stopCheck() || batchesTotal >= maxBatches;
+  const stopped = () => !!schedulerError || stopCheck() || batchesTotal >= maxBatches;
   const coverageSummary = () => ({
     findingsAccepted,
     findingsTested: coverage.filter((item) => item.valid > 0).length,
@@ -758,7 +959,82 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
   // Approve/Sludge → exported decisions.json saved to runs/<runId>/inbox-decisions.json).
   // Covers the top-level run and every per-improve sub-run. Operator-driven, model-
   // independent, NON-BLOCKING: a failure here is logged and never stops the campaign.
-  const allRunIds = new Set([runId]);
+  const schedulerSnapshot = () => ({
+    queue: queue.map((target) => ({ ...target })),
+    activeTarget: activeTarget ? {
+      target: { ...activeTarget.target },
+      childRunId: activeTarget.childRunId || null,
+      batchesAtStart: activeTarget.batchesAtStart,
+      invalidAttemptsAtStart: activeTarget.invalidAttemptsAtStart
+    } : null,
+    stones: stones.map((stone) => ({ ...stone })),
+    pendingPromotions: pendingPromotions.map((item) => ({ ...item })),
+    bankedPromotionKeys: [...bankedPromotions].sort(),
+    batchesTotal,
+    improveIndex: improveIdx,
+    findingsAccepted,
+    findingsRejected,
+    invalidAttempts,
+    benchmarkLocked,
+    baselineSamples,
+    latestSubRunId,
+    seenFindings: [...seenFindings].sort(),
+    seenMinedCandidates: [...seenMinedCandidates].sort(),
+    coverage: coverage.map((item) => ({
+      ...item,
+      hypothesisIds: Array.isArray(item.hypothesisIds) ? [...item.hypothesisIds] : []
+    })),
+    miningExhausted,
+    idle,
+    idleReason,
+    idleCycles,
+    lastMiningFingerprint,
+    allRunIds: [...allRunIds].sort()
+  });
+  const persistScheduler = (status) => {
+    if (!schedulerPersistenceAvailable) return true;
+    const recorded = schedulerOperator.recordCampaignSchedulerCheckpoint({
+      runId,
+      config,
+      status,
+      snapshot: schedulerSnapshot()
+    });
+    if (recorded.status !== 'OK') {
+      schedulerError = new Error(recorded.message || 'campaign scheduler checkpoint failed');
+      schedulerError.code = recorded.reasonCode || recorded.code;
+      tx('campaign_scheduler_checkpoint_failed', {
+        reason: schedulerError.message,
+        code: schedulerError.code || null
+      });
+      return false;
+    }
+    lastSchedulerCheckpoint = recorded.checkpoint;
+    if (typeof hooks.onSchedulerCheckpoint === 'function') {
+      hooks.onSchedulerCheckpoint({
+        status,
+        checkpoint: recorded.checkpoint,
+        snapshot: schedulerSnapshot()
+      });
+    }
+    return true;
+  };
+  const persistCurrentScheduler = () => persistScheduler(
+    activeTarget ? 'TARGET_STARTED' : (idle ? 'IDLE' : 'WOKE')
+  );
+  if (restored) {
+    tx('campaign_scheduler_resumed', {
+      sequence: loadedScheduler.checkpoint.sequence,
+      checkpointSha256: loadedScheduler.checkpoint.checkpointSha256,
+      activeTarget: activeTarget?.target?.kind || null,
+      queuedTargets: queue.length
+    });
+  } else if (!persistScheduler('INITIALIZED')) {
+    return {
+      status: 'BLOCKED',
+      code: 'CAMPAIGN_SCHEDULER_CHECKPOINT_FAILED',
+      message: schedulerError.message
+    };
+  }
   const syncRealTestProgress = (status = 'RUNNING') => {
     if (!realTestEnabled || !engine?.operator || typeof engine.operator.recordCampaignProgress !== 'function') return;
     for (const rid of allRunIds) {
@@ -800,6 +1076,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
       stones.push(stone);
       tx('stone_banked', { stone: stone.id, runId: rid, hypothesisId, afterApproval: true, note: 'operator-approved measured win banked after dashboard approval — autonomous loop closed' });
       try { engine.update_dashboard({ runId: rid }); engine.report_export({ runId: rid }); } catch { /* dashboard refresh is best-effort; a write failure must not unbank a stone */ }
+      persistCurrentScheduler();
     } else {
       tx('promotion_reattempt_deferred', { runId: rid, hypothesisId, code: promo.code || promo.status, note: 'approved win not yet bankable on re-attempt — left for a later signal, not retried in a grind' });
     }
@@ -810,6 +1087,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
     const { hypothesisId } = pendingPromotions[i];
     pendingPromotions.splice(i, 1);
     tx('promotion_rejected_after_review', { runId: rid, hypothesisId, reviewId, note: 'operator sludged the dashboard review — not banked' });
+    persistCurrentScheduler();
   };
 
   const drainInbox = () => {
@@ -848,11 +1126,12 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
 
   while (!stopped()) {
     drainInbox();
-    if (queue.length === 0) {
+    if (!activeTarget && queue.length === 0) {
       if (config.remineOnEmpty !== true) break;
       if (!miningExhausted) {
         queue.push({ kind: 'mine', routes: config.routes, benchmark: config.benchmark });
         tx('queue_empty_remine', { note: 'empty target queue -> one mining pass for this work epoch' });
+        if (!persistScheduler('WOKE')) break;
         continue;
       }
 
@@ -871,6 +1150,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
             : 'idle-no-new-work',
           reasons: [idleReason || 'NO_NOVEL_MINING_WORK']
         });
+        if (!persistScheduler('IDLE')) break;
       }
       if (!idleWait) break;
 
@@ -890,6 +1170,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
           scenario: 'idle-wait-failed',
           reasons: [error.message]
         });
+        persistScheduler('BLOCKED');
         break;
       }
       if (stopped()) break;
@@ -912,11 +1193,33 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
           ? `target-inbox-${wake.sourceSha256.slice(0, 12)}`
           : 'new-targets-accepted'
       });
+      if (!persistScheduler('WOKE')) break;
       continue;
     }
 
     idle = false;
-    const target = queue.shift();
+    if (!activeTarget) {
+      const target = queue.shift();
+      let childRunId = null;
+      if (target.kind === 'improve') {
+        improveIdx++;
+        childRunId = `${runId}-t${improveIdx}`;
+        latestSubRunId = childRunId;
+        allRunIds.add(childRunId);
+      }
+      activeTarget = {
+        target: { ...target },
+        childRunId,
+        batchesAtStart: batchesTotal,
+        invalidAttemptsAtStart: invalidAttempts
+      };
+      if (!persistScheduler('TARGET_STARTED')) break;
+    }
+    const target = activeTarget.target;
+    const finishActiveTarget = () => {
+      activeTarget = null;
+      return persistScheduler('TARGET_COMPLETED');
+    };
 
     if (target.kind === 'mine') {
       const candidateSchema = realTestEnabled
@@ -938,6 +1241,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
         lastMiningFingerprint = sha256(d.reasons.join(','));
         miningExhausted = true;
         tx('mine_worker_rejected', { reason: d.reasons.join(',') });
+        finishActiveTarget();
         continue;
       }
       const miningFingerprint = miningResultFingerprint(d.packet);
@@ -951,6 +1255,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
           lastMiningFingerprint = miningFingerprint;
           miningExhausted = true;
           tx('mine_capture_rejected', { reason: 'CAPTURE_FAILED' });
+          finishActiveTarget();
           continue;
         }
       }
@@ -1070,10 +1375,10 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
         }
         syncRealTestProgress('RUNNING');
       }
+      if (!finishActiveTarget()) break;
     } else if (target.kind === 'improve') {
       seenMinedCandidates.add(minedCandidateFingerprint(target));
-      improveIdx++;
-      const subRunId = `${runId}-t${improveIdx}`; // each branch is its own measured run
+      const subRunId = activeTarget.childRunId; // persisted before execution and reused after restart
       latestSubRunId = subRunId;
       const coverageEntry = realTestEnabled
         ? coverage.find((item) => item.findingId === target.findingId)
@@ -1097,6 +1402,7 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
         requirements: config.requirements,
         model: config.model,
         modelPolicy: config.modelPolicy,
+        engineConfig: config.engineConfig,
         realTest: realTestEnabled ? {
           ...config.realTest,
           evidenceManifest: config.evidenceManifest,
@@ -1106,25 +1412,60 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
         onRunReady: () => {
           allRunIds.add(subRunId);
           syncRealTestProgress('RUNNING');
+          persistCurrentScheduler();
         },
         onBenchmarkLocked: (samples) => {
           benchmarkLocked = true;
           baselineSamples = Math.max(baselineSamples, samples || 0);
           syncRealTestProgress('RUNNING');
+          persistCurrentScheduler();
         },
         onBatch: () => {
           batchesTotal++;
+          if (coverageEntry) {
+            coverageEntry.valid = Math.min(
+              coverageEntry.planned,
+              coverageEntry.valid + 1
+            );
+            coverageEntry.status = coverageEntry.valid === coverageEntry.planned
+              ? 'COVERED'
+              : 'PARTIAL';
+          }
           syncRealTestProgress(batchesTotal >= maxBatches ? 'CAP_REACHED' : 'RUNNING');
+          persistCurrentScheduler();
         },
         onInvalidBatch: () => {
           invalidAttempts++;
+          if (coverageEntry) coverageEntry.invalid++;
           syncRealTestProgress('RUNNING');
+          persistCurrentScheduler();
         }
       });
+      if (r.recoveredComplete) {
+        const accountedValid = Math.max(0, batchesTotal - activeTarget.batchesAtStart);
+        const recoveredValid = Number.isInteger(r.validAttempts) ? r.validAttempts : 0;
+        if (recoveredValid > accountedValid) {
+          batchesTotal += recoveredValid - accountedValid;
+        }
+        const accountedInvalid = Math.max(
+          0,
+          invalidAttempts - activeTarget.invalidAttemptsAtStart
+        );
+        const recoveredInvalid = Number.isInteger(r.invalidAttempts) ? r.invalidAttempts : 0;
+        if (recoveredInvalid > accountedInvalid) {
+          invalidAttempts += recoveredInvalid - accountedInvalid;
+        }
+        syncRealTestProgress(batchesTotal >= maxBatches ? 'CAP_REACHED' : 'RUNNING');
+        persistCurrentScheduler();
+      }
       transcript.push(...r.transcript);
       if (coverageEntry) {
-        coverageEntry.valid = Number.isInteger(r.validAttempts) ? r.validAttempts : coverageEntry.valid;
-        coverageEntry.invalid = Number.isInteger(r.invalidAttempts) ? r.invalidAttempts : coverageEntry.invalid;
+        coverageEntry.valid = Number.isInteger(r.validAttempts)
+          ? Math.max(coverageEntry.valid, r.validAttempts)
+          : coverageEntry.valid;
+        coverageEntry.invalid = Number.isInteger(r.invalidAttempts)
+          ? Math.max(coverageEntry.invalid, r.invalidAttempts)
+          : coverageEntry.invalid;
         coverageEntry.status = r.blocked
           ? 'BLOCKED'
           : (coverageEntry.valid === coverageEntry.planned ? 'COVERED' : 'PARTIAL');
@@ -1138,10 +1479,19 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
       else if (r.queued) tx('subjective_win_queued', { reviewId: r.reviewId, note: 'judged win queued to dashboard (human Approve/Sludge) — supervisor continues, never auto-promotes' });
       else if (r.retired) tx('branch_retired', { note: 'pivot to next target — NOT campaign stop' });
       else if (r.blocked) tx('improve_blocked', { reason: r.code });
+      else if (r.incomplete) tx('improve_checkpointed', {
+        childRunId: subRunId,
+        note: 'safety cap reached with persisted child work remaining; resume the same target and child run'
+      });
       // Completing an improve target changes the work epoch. One fresh mining pass is
       // allowed after the remaining queued targets drain.
       miningExhausted = false;
       idleReason = null;
+      if (r.incomplete) {
+        persistScheduler('CAP_REACHED');
+        break;
+      }
+      if (!finishActiveTarget()) break;
     }
   }
 
@@ -1160,6 +1510,11 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
   syncRealTestProgress(
     finalProgressStatus
   );
+  persistScheduler(
+    schedulerError
+      ? 'BLOCKED'
+      : finalProgressStatus
+  );
   if (realTestEnabled) {
     for (const rid of allRunIds) {
       try {
@@ -1171,19 +1526,26 @@ export function runSupervisedCampaign(engine, config = {}, hooks = {}) {
 
   return {
     status: schedulerError ? 'BLOCKED' : 'OK',
-    code: schedulerError ? 'IDLE_WAIT_FAILED' : undefined,
+    code: schedulerError ? (schedulerError.code || 'CAMPAIGN_SCHEDULER_FAILED') : undefined,
     stoppedBy: operatorStopped
       ? 'operator-stop'
       : (batchesTotal >= maxBatches
           ? (realTestEnabled ? 'real-test-improvement-cap (NOT completion)' : 'maxBatches-safety-cap (NOT completion)')
           : (schedulerError
-              ? 'idle-wait-error (NOT completion)'
+              ? 'scheduler-error (NOT completion)'
               : (idle ? 'idle-no-new-work (NOT completion)' : 'queue-drained (NOT completion)'))),
     campaignContinues: !operatorStopped,
     idle,
     idleReason,
     idleCycles,
     lastMiningFingerprint,
+    scheduler: lastSchedulerCheckpoint ? {
+      schemaVersion: lastSchedulerCheckpoint.schemaVersion,
+      status: lastSchedulerCheckpoint.status,
+      sequence: lastSchedulerCheckpoint.sequence,
+      checkpointSha256: lastSchedulerCheckpoint.checkpointSha256,
+      snapshotSha256: lastSchedulerCheckpoint.snapshotSha256
+    } : null,
     stones, batchesTotal, transcript,
     realTest: realTestEnabled ? {
       limits: REAL_TEST_LIMITS,
@@ -1215,24 +1577,46 @@ function runImproveTarget(engine, runId, target, ctx) {
   const runRequirements = strictRealTest
     ? [...(requirements || []), ...realTestBenchmarkRequirements(target.benchmark)]
     : requirements;
+  const configuredMetaLearning = ctx.engineConfig?.metaLearning?.enabled === true
+    ? {
+        ...ctx.engineConfig.metaLearning,
+        ...(ctx.engineConfig.metaLearning.mode === 'active-canary'
+          ? {
+              policyScopeId: ctx.engineConfig.metaLearning.policyScopeId
+                || ctx.parentRunId
+                || runId
+            }
+          : {})
+      }
+    : null;
+  const metaLearningConfig = configuredMetaLearning
+    ? { metaLearning: configuredMetaLearning }
+    : {};
+  const childEngineConfig = strictRealTest
+    ? {
+        ...metaLearningConfig,
+        maxCycles: REAL_TEST_LIMITS.maxImprovementAttempts,
+        realTest: {
+          ...ctx.realTest,
+          parentRunId: ctx.parentRunId,
+          findingId: target.findingId
+        }
+      }
+    : metaLearningConfig;
   // Each improve target is its own measured run (own baseline + frozen benchmark),
   // so two targets never collide on the write-once baseline hash-lock.
-  engine.initialize_loop_run({
+  const initialized = engine.initialize_loop_run({
     runId,
     task: task || `improve ${loopId}`,
     answers: ctx.answers || ['a measurably better loop', `improve ${loopId}`, 'measured quality up at equal-or-lower cost', 'keep authorship', 'keep moving'],
     answerSource: Array.isArray(ctx.answers) && ctx.answers.length ? 'config' : 'default',
     model: strictRealTest ? ctx.model : undefined,
     modelPolicy: strictRealTest ? ctx.modelPolicy : undefined,
-    config: strictRealTest ? {
-      maxCycles: REAL_TEST_LIMITS.maxImprovementAttempts,
-      realTest: {
-        ...ctx.realTest,
-        parentRunId: ctx.parentRunId,
-        findingId: target.findingId
-      }
-    } : undefined
+    config: Object.keys(childEngineConfig).length ? childEngineConfig : undefined
   });
+  if (initialized.status !== 'OK') {
+    return { blocked: true, code: initialized.code || 'RUN_INITIALIZATION_FAILED', transcript };
+  }
   if (typeof ctx.onRunReady === 'function') ctx.onRunReady();
   const recordMeasurement = (packet, route, comparableContent = null) => {
     const finalOutput = String(packet.finalOutput || '');
@@ -1246,25 +1630,117 @@ function runImproveTarget(engine, runId, target, ctx) {
     });
   };
 
-  engine.loop_start({ runId, loop: loopId });
-  const bl = engine.artifact_record({ runId, role: 'baseline', name: 'baseline', content: resolveBaselineContent(target, loopId) });
+  const resumeCheckpoint = configuredMetaLearning?.mode === 'active-canary'
+    && engine.operator
+    && typeof engine.operator.resumeMechanismRouting === 'function'
+    ? engine.operator.resumeMechanismRouting({ runId })
+    : null;
+  if (resumeCheckpoint && resumeCheckpoint.status !== 'OK') {
+    return {
+      blocked: true,
+      code: resumeCheckpoint.code || 'ADAPTIVE_RESUME_FAILED',
+      transcript
+    };
+  }
+  let pendingRoutingResume = resumeCheckpoint?.resume?.status === 'PENDING_TESTS'
+    ? resumeCheckpoint.resume
+    : null;
+  const reuseBenchmark = resumeCheckpoint?.resume?.benchmarkReady === true;
+  const baselineContent = resolveBaselineContent(target, loopId);
+  if (reuseBenchmark
+      && resumeCheckpoint.resume.baseline?.sha256 !== sha256(baselineContent)) {
+    return {
+      blocked: true,
+      code: 'ADAPTIVE_RESUME_BASELINE_MISMATCH',
+      transcript
+    };
+  }
+  if (resumeCheckpoint?.resume?.status === 'ROUTE_COMPLETE') {
+    const completedTests = Array.isArray(resumeCheckpoint.resume.completedTests)
+      ? resumeCheckpoint.resume.completedTests
+      : [];
+    let recoveredStone = null;
+    let recoveredPromotion = null;
+    for (const completed of completedTests) {
+      const reverified = engine.reverify_run({ runId, testId: completed.testId });
+      if (reverified.status !== 'OK') continue;
+      const promotion = engine.promotion_request({
+        runId,
+        hypothesisId: completed.hypothesisId
+      });
+      if (promotion.status === 'OK' && !recoveredStone) {
+        recoveredStone = {
+          id: promotion.promotionId,
+          loop: loopId,
+          hypothesisId: completed.hypothesisId,
+          kind: promotion.decision && promotion.decision.kind,
+          fixtureOnly: !!(promotion.integrity && promotion.integrity.fixtureOnly)
+        };
+      } else if (promotion.code === 'PROMOTION_NEEDS_APPROVAL' && !recoveredPromotion) {
+        recoveredPromotion = {
+          promotionQueued: true,
+          reviewId: promotion.queuedReviewId,
+          hypothesisId: completed.hypothesisId,
+          loop: loopId
+        };
+      }
+    }
+    const policyBoundary = engine.operator
+      && typeof engine.operator.advanceMetaPolicy === 'function'
+      ? engine.operator.advanceMetaPolicy({ runId, trigger: 'lane-boundary' })
+      : null;
+    t('adaptive_route_recovered_complete', {
+      testedHypotheses: completedTests.length,
+      note: 'persisted child tests were reverified without launching another worker'
+    });
+    return {
+      ...(recoveredStone ? { stone: recoveredStone } : {}),
+      ...(recoveredPromotion || {}),
+      recoveredComplete: true,
+      covered: true,
+      findingId: target.findingId,
+      hypothesisIds: completedTests.map((item) => item.hypothesisId),
+      validAttempts: completedTests.length,
+      invalidAttempts: 0,
+      ...(policyBoundary ? { adaptivePolicyBoundary: policyBoundary.policy || {
+        status: policyBoundary.status,
+        code: policyBoundary.code || null
+      } } : {}),
+      transcript
+    };
+  }
+
+  const started = engine.loop_start({ runId, loop: loopId });
+  if (started.status !== 'OK') return { blocked: true, code: started.code, transcript };
+  const bl = reuseBenchmark
+    ? {
+        status: 'OK',
+        artifactId: resumeCheckpoint.resume.baseline.artifactId,
+        sha256: resumeCheckpoint.resume.baseline.sha256
+      }
+    : engine.artifact_record({
+        runId,
+        role: 'baseline',
+        name: 'baseline',
+        content: baselineContent
+      });
   if (bl.status !== 'OK') return { blocked: true, code: bl.code, transcript };
   const contractTarget = strictRealTest ? {
     findingId: target.findingId,
     title: target.title,
     baselineArtifactId: bl.artifactId,
     baselineSha256: bl.sha256,
-    baselineContent: resolveBaselineContent(target, loopId),
+    baselineContent,
     evidenceRefs: target.evidenceRefs || []
   } : null;
-  if (strictRealTest) {
+  if (!reuseBenchmark && strictRealTest) {
     const frozen = engine.benchmark_freeze_maker({
       runId,
       benchmark: target.benchmark,
       benchPartition: 'gate'
     });
     if (frozen.status !== 'OK') return { blocked: true, code: frozen.code, transcript };
-  } else {
+  } else if (!reuseBenchmark) {
     const prop = engine.benchmark_propose({ runId, benchmarks: [target.benchmark] });
     if (prop.status !== 'OK') return { blocked: true, code: prop.code, transcript };
     engine.benchmark_select({ runId, benchmarkId: prop.benchmarkIds[0] });
@@ -1276,7 +1752,7 @@ function runImproveTarget(engine, runId, target, ctx) {
   const baselineRefs = [];
   const baselineRuns = [];
   const baselineRoutes = strictRealTest ? (target.routes || []) : [(target.routes || [])[0]];
-  for (const route of baselineRoutes) {
+  for (const route of reuseBenchmark ? [] : baselineRoutes) {
     const baseContract = compilePhaseContract(loopId, 0, {
       kind: strictRealTest ? 'evaluation' : 'baseline',
       evaluationArm: strictRealTest ? 'baseline' : null,
@@ -1302,19 +1778,104 @@ function runImproveTarget(engine, runId, target, ctx) {
     baselineRefs.push(typeof baseRecorded === 'string' ? baseRecorded : baseRecorded.measurementRef);
     if (strictRealTest) baselineRuns.push({ model: route, ...baseRecorded });
   }
-  const bar = engine.benchmark_run(strictRealTest
-    ? { runId, arm: 'baseline', agentRuns: baselineRuns }
-    : { runId, arm: 'baseline', measurementRef: baselineRefs[0] });
-  if (bar.status !== 'OK') return { blocked: true, code: bar.code, transcript };
-  t('baseline_measured', { samples: baselineRefs.length, strategy: strictRealTest ? 'route-batch' : 'single-run' });
-  if (typeof ctx.onBenchmarkLocked === 'function') ctx.onBenchmarkLocked(baselineRefs.length);
+  if (reuseBenchmark) {
+    t('baseline_reused', {
+      routingStatus: resumeCheckpoint.resume.status,
+      note: 'persisted frozen baseline reused without a model call'
+    });
+    if (typeof ctx.onBenchmarkLocked === 'function') ctx.onBenchmarkLocked(
+      strictRealTest ? (target.routes || []).length : 1
+    );
+  } else {
+    const bar = engine.benchmark_run(strictRealTest
+      ? { runId, arm: 'baseline', agentRuns: baselineRuns }
+      : { runId, arm: 'baseline', measurementRef: baselineRefs[0] });
+    if (bar.status !== 'OK') return { blocked: true, code: bar.code, transcript };
+    t('baseline_measured', { samples: baselineRefs.length, strategy: strictRealTest ? 'route-batch' : 'single-run' });
+    if (typeof ctx.onBenchmarkLocked === 'function') ctx.onBenchmarkLocked(baselineRefs.length);
+  }
+  const prepareActiveRouting = (hypothesisCount) => {
+    if (configuredMetaLearning?.mode !== 'active-canary') return null;
+    if (pendingRoutingResume) {
+      const checkpoint = pendingRoutingResume;
+      pendingRoutingResume = null;
+      return {
+        status: 'OK',
+        decision: checkpoint.decision,
+        capsule: checkpoint.capsule,
+        treatment: checkpoint.treatment,
+        pendingHypotheses: checkpoint.pendingHypotheses,
+        resumed: true
+      };
+    }
+    if (!engine.operator || typeof engine.operator.prepareMechanismRouting !== 'function') {
+      return {
+        status: 'BLOCKED',
+        code: 'ADAPTIVE_OPERATOR_SURFACE_MISSING',
+        message: 'The supervisor-only adaptive routing surface is unavailable.'
+      };
+    }
+    return engine.operator.prepareMechanismRouting({
+      runId,
+      hypothesisCount,
+      interfaceContract: target.executableInterfaceContract || null,
+      target: {
+        taskMode: 'improve',
+        loopRole: loopId,
+        taskValueDimensions: target.benchmark?.taskValueDimensions || [],
+        resourceDimensions: target.benchmark?.resourceDimensions || []
+      }
+    });
+  };
+  const closeActivePolicyLane = () => {
+    if (configuredMetaLearning?.mode !== 'active-canary') return null;
+    if (!engine.operator || typeof engine.operator.advanceMetaPolicy !== 'function') {
+      return {
+        status: 'BLOCKED',
+        code: 'ADAPTIVE_OPERATOR_SURFACE_MISSING'
+      };
+    }
+    const result = engine.operator.advanceMetaPolicy({
+      runId,
+      trigger: 'lane-boundary'
+    });
+    t('adaptive_policy_lane_boundary', {
+      status: result.status,
+      code: result.code || null,
+      action: result.policy?.action || null,
+      epochNumber: result.policy?.epoch?.epochNumber ?? null
+    });
+    return result;
+  };
 
   if (strictRealTest) {
-    const planned = (target.hypotheses || []).map((hypothesis, index) => ({
+    const preparedRouting = prepareActiveRouting((target.hypotheses || []).length);
+    if (preparedRouting && preparedRouting.status !== 'OK') {
+      return {
+        blocked: true,
+        code: preparedRouting.code || 'ADAPTIVE_ROUTING_FAILED',
+        transcript,
+        validAttempts: 0,
+        invalidAttempts: 0
+      };
+    }
+    const plannedBase = (target.hypotheses || []).map((hypothesis, index) => ({
       ...hypothesis,
+      evidenceRefs: Array.isArray(hypothesis.evidenceRefs)
+        ? hypothesis.evidenceRefs
+        : (Array.isArray(target.evidenceRefs) ? target.evidenceRefs : []),
       route: { model: (target.routes || [])[index % Math.max(1, (target.routes || []).length)] }
     }));
-    const reg = engine.register_hypotheses({ runId, hypotheses: planned });
+    const planned = preparedRouting?.resumed
+      ? preparedRouting.pendingHypotheses.map((hypothesis) => (
+          restoreRoutedHypothesis(hypothesis, preparedRouting)
+        ))
+      : preparedRouting
+      ? bindHypothesesToMechanismRouting(plannedBase, preparedRouting, target)
+      : plannedBase;
+    const reg = preparedRouting?.resumed
+      ? { status: 'OK', hypothesisIds: planned.map((hypothesis) => hypothesis.id) }
+      : engine.register_hypotheses({ runId, hypotheses: planned });
     if (reg.status !== 'OK') return { blocked: true, code: reg.code, transcript, validAttempts: 0, invalidAttempts: 0 };
     let validAttempts = 0;
     let invalidAttempts = 0;
@@ -1336,6 +1897,7 @@ function runImproveTarget(engine, runId, target, ctx) {
           requirements: runRequirements,
           target: contractTarget,
           hypothesis,
+          mechanismCapsule: hypothesis.mechanismCapsule,
           frozenCases: target.benchmark && target.benchmark.cases,
           evidenceCapsule: ctx.realTest.evidenceCapsule,
           toolPolicy: 'none'
@@ -1396,6 +1958,7 @@ function runImproveTarget(engine, runId, target, ctx) {
           procedureContent,
           procedureSha256,
           evidenceCapsule: ctx.realTest.evidenceCapsule,
+          mechanismCapsule: hypothesis.mechanismCapsule,
           frozenCases: target.benchmark && target.benchmark.cases,
           worker,
           recordMeasurement: (packet, route, comparableContent) => {
@@ -1485,29 +2048,55 @@ function runImproveTarget(engine, runId, target, ctx) {
         }
       }
     }
+    const policyBoundary = closeActivePolicyLane();
     engine.update_dashboard({ runId }); engine.report_export({ runId });
     return {
       ...(bankedStone ? { stone: bankedStone } : {}),
       ...(queuedPromotion || {}),
       covered: validAttempts === planned.length,
+      incomplete: validAttempts !== planned.length && stopped(),
       findingId: target.findingId,
       hypothesisIds: reg.hypothesisIds,
       validAttempts,
       invalidAttempts,
+      ...(policyBoundary ? { adaptivePolicyBoundary: policyBoundary.policy || {
+        status: policyBoundary.status,
+        code: policyBoundary.code || null
+      } } : {}),
       transcript
     };
   }
 
   let noImprove = 0;
   let invalidStreak = 0;
+  const queuedPromotions = [];
   while (noImprove < noImprovePolicy && !stopped()) {
     // a branch = a registered family of 3-5 frontier hypotheses
-    const reg = engine.register_hypotheses({
-      runId,
-      hypotheses: standardSupervisorHypotheses(target, target.routes || [], task)
-    });
+    const preparedRouting = prepareActiveRouting((target.routes || []).length);
+    if (preparedRouting && preparedRouting.status !== 'OK') {
+      return {
+        blocked: true,
+        code: preparedRouting.code || 'ADAPTIVE_ROUTING_FAILED',
+        transcript
+      };
+    }
+    const planned = preparedRouting?.resumed
+      ? preparedRouting.pendingHypotheses.map((hypothesis) => (
+          restoreRoutedHypothesis(hypothesis, preparedRouting)
+        ))
+      : standardSupervisorHypotheses(
+          target,
+          target.routes || [],
+          task,
+          preparedRouting
+        );
+    const reg = preparedRouting?.resumed
+      ? { status: 'OK', hypothesisIds: planned.map((hypothesis) => hypothesis.id) }
+      : engine.register_hypotheses({ runId, hypotheses: planned });
     if (reg.status !== 'OK') return { blocked: true, code: reg.code, transcript };
-    for (const hypothesisId of reg.hypothesisIds) {
+    for (let index = 0; index < reg.hypothesisIds.length; index++) {
+      const hypothesisId = reg.hypothesisIds[index];
+      const hypothesis = { ...planned[index], id: hypothesisId };
       if (stopped()) break;
       const batch = runFullTestBatch(engine, runId, {
         hypothesisId,
@@ -1516,6 +2105,8 @@ function runImproveTarget(engine, runId, target, ctx) {
         task,
         routes: target.routes,
         requirements: runRequirements,
+        hypothesis,
+        mechanismCapsule: hypothesis.mechanismCapsule,
         worker,
         recordMeasurement,
         log,
@@ -1536,16 +2127,33 @@ function runImproveTarget(engine, runId, target, ctx) {
         if (rv.status === 'OK') {
           const promo = engine.promotion_request({ runId, hypothesisId });
           if (promo.status === 'OK') {
+            const policyBoundary = closeActivePolicyLane();
             engine.update_dashboard({ runId }); engine.report_export({ runId });
-            return { stone: { id: promo.promotionId, loop: loopId, hypothesisId, kind: promo.decision && promo.decision.kind, fixtureOnly: !!(promo.integrity && promo.integrity.fixtureOnly) }, transcript };
+            return {
+              stone: {
+                id: promo.promotionId,
+                loop: loopId,
+                hypothesisId,
+                kind: promo.decision && promo.decision.kind,
+                fixtureOnly: !!(promo.integrity && promo.integrity.fixtureOnly)
+              },
+              ...(policyBoundary ? { adaptivePolicyBoundary: policyBoundary.policy || {
+                status: policyBoundary.status,
+                code: policyBoundary.code || null
+              } } : {}),
+              transcript
+            };
           }
           // Step 2 — a measured+reverified win is NOT auto-banked. It is queued to the
           // dashboard for operator Approve (same posture as a subjective/judge win); the
           // supervisor keeps running and never self-promotes.
           if (promo.code === 'PROMOTION_NEEDS_APPROVAL') {
-            engine.update_dashboard({ runId }); engine.report_export({ runId });
             t('promotion_queued', { hypothesisId, reviewId: promo.queuedReviewId });
-            return { promotionQueued: true, reviewId: promo.queuedReviewId, hypothesisId, loop: loopId, transcript };
+            queuedPromotions.push({
+              reviewId: promo.queuedReviewId,
+              hypothesisId,
+              loop: loopId
+            });
           }
         }
       } else {
@@ -1553,8 +2161,26 @@ function runImproveTarget(engine, runId, target, ctx) {
       }
     }
   }
+  const policyBoundary = closeActivePolicyLane();
   engine.update_dashboard({ runId }); engine.report_export({ runId });
-  return { retired: noImprove >= noImprovePolicy, transcript };
+  return {
+    retired: noImprove >= noImprovePolicy,
+    incomplete: noImprove < noImprovePolicy && stopped(),
+    ...(queuedPromotions.length
+      ? {
+          promotionQueued: true,
+          queuedPromotions,
+          reviewId: queuedPromotions[0].reviewId,
+          hypothesisId: queuedPromotions[0].hypothesisId,
+          loop: loopId
+        }
+      : {}),
+    ...(policyBoundary ? { adaptivePolicyBoundary: policyBoundary.policy || {
+      status: policyBoundary.status,
+      code: policyBoundary.code || null
+    } } : {}),
+    transcript
+  };
 }
 
 // Judge-mode improve target: benchmarks evaluate REAL final outputs. Measure the
@@ -1570,7 +2196,7 @@ function runJudgeImproveTarget(engine, runId, target, ctx) {
   const rubric = target.benchmark.rubric || 'Higher-quality, clearer, more correct final output at equal-or-lower cost; no regressions.';
   // Judge route: explicit benchmark.judgeRoute → policy.judgeRoute → first
   // builder-gating route among target.routes → policy.primary. Never a hard-coded
-  // Opus/DEFAULT_PRIMARY_MODEL terminal that reintroduces Opus into a non-Opus campaign.
+  // hard-coded terminal that reintroduces a stale route into a current campaign.
   const targetPolicy = target.modelPolicy
     ? normalizeModelPolicy(target.modelPolicy)
     : defaultModelPolicy();
@@ -1586,7 +2212,10 @@ function runJudgeImproveTarget(engine, runId, target, ctx) {
     answers: ctx.answers || ['a measurably better loop', `improve ${loopId}`, 'judged better final output', 'keep authorship', 'defaults', 'keep moving'],
     answerSource: Array.isArray(ctx.answers) && ctx.answers.length ? 'config' : 'default',
     modelPolicy: target.modelPolicy || undefined,
-    model: target.modelPolicy && target.modelPolicy.primary ? target.modelPolicy.primary : undefined
+    model: target.modelPolicy && target.modelPolicy.primary ? target.modelPolicy.primary : undefined,
+    config: ctx.engineConfig?.metaLearning?.enabled === true
+      ? { metaLearning: ctx.engineConfig.metaLearning }
+      : undefined
   });
   // After init, prefer the run's live policy for judge gating.
   const statusSnap = engine.campaign_status({ runId });
@@ -1619,5 +2248,9 @@ function runJudgeImproveTarget(engine, runId, target, ctx) {
     noImprove++;
   }
   engine.update_dashboard({ runId }); engine.report_export({ runId });
-  return { retired: noImprove >= noImprovePolicy, transcript };
+  return {
+    retired: noImprove >= noImprovePolicy,
+    incomplete: noImprove < noImprovePolicy && stopped(),
+    transcript
+  };
 }

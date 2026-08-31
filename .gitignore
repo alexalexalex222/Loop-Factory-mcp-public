@@ -11,9 +11,12 @@ __pycache__/
 .DS_Store
 
 # local working backups (never publish)
-.backup-*/
+.backup-*
 *.backup
 src.bak-*/
+
+# internal operator work orders (never publish)
+docs/CODEX_REAL_TEST_TIER1_REPAIR_PROMPT.md
 
 # secrets / scratchpad keys (never publish)
 .keys.env

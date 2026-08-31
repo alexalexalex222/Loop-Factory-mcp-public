@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "id": "ember-hidden-target", "emberBaselineMarker": "MISSED" },
+    { "id": "ember-hidden-clean", "emberControlMarker": "ACCEPT" },
+    { "id": "ember-hidden-guard", "emberGuardMarker": "REJECT" }
+  ]
+}

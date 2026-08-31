@@ -1,19 +1,18 @@
-// Frontier-route policy. The spec is blunt: under the default banlist, full tests
-// run on frontier models (e.g. claude-opus-4-8, gpt-5.5, glm-5.2). Cheap/old routes
-// are rejected so a campaign can never quietly downgrade itself to look "done".
+// Frontier-route policy. Current defaults use GPT-5.6 Sol for primary/test work
+// and Fable 5 for independent building and judgment. Cheap/old routes are rejected
+// so a campaign can never quietly downgrade itself to look "done".
 // Operator-chosen modelPolicy (persisted at init) is the single source of truth;
 // module-level DEFAULT_* constants feed banlist mode "default" for backward compat.
 import {
   DEFAULT_PRIMARY_MODEL, KNOWN_FRONTIER_EXAMPLES, BUILDER_GATING_ROUTES
 } from './constants.mjs';
 
-// Builds and in-loop gating route ONLY to trusted builder/gating workers under the
-// default policy (Opus 4.8 / GLM 5.2). Codex/GPT stays a supported HOST surface but
-// is NOT a trusted in-loop builder/gating worker. This is intentionally separate
-// from the frontier banlist: gpt-5.5 is a valid frontier TEST worker by default,
-// but not a builder/gating worker here.
+// Builds and in-loop gating route only to the current trusted defaults. Explicit
+// operator policies may still allow other routes through modelPolicy.builderRoutes.
 export const DEFAULT_BUILDER_ROUTE_PATTERNS = [
-  /claude[-_ ]?opus[-_ ]?4/i, /\bopus[-_ ]?4/i, /glm[-_ ]?5\.[2-9]/i, /glm[-_ ]?[6-9]/i
+  /claude[-_ ]?fable[-_ ]?5/i,
+  /\bfable[-_ ]?5/i,
+  /gpt[-_ ]?5\.6[-_ ]?sol/i
 ];
 // Alias kept for any external readers of the pre-redesign name.
 const BUILDER_ROUTE_PATTERNS = DEFAULT_BUILDER_ROUTE_PATTERNS;
@@ -87,9 +86,9 @@ export function defaultModelPolicy(source = 'defaults') {
     version: 1,
     source: normalizePolicySource(source),
     primary: DEFAULT_PRIMARY_MODEL,
-    testRoutes: [DEFAULT_PRIMARY_MODEL, 'gpt-5.5', 'glm-5.2'],
+    testRoutes: [DEFAULT_PRIMARY_MODEL, 'claude-fable-5', 'gpt-5.6-terra'],
     builderRoutes: [...BUILDER_GATING_ROUTES],
-    judgeRoute: DEFAULT_PRIMARY_MODEL,
+    judgeRoute: BUILDER_GATING_ROUTES[0] || DEFAULT_PRIMARY_MODEL,
     banlist: { mode: 'default', extraDeny: [], extraAllow: [] },
     allowUnknownFrontier: true
   };
@@ -123,10 +122,13 @@ export function normalizeModelPolicy(input, opts = {}) {
     ? input.primary.trim()
     : base.primary;
   const testRoutes = normalizeStringList(input.testRoutes);
-  const builderRoutes = normalizeStringList(input.builderRoutes);
+  const requestedBuilderRoutes = normalizeStringList(input.builderRoutes);
+  const builderRoutes = requestedBuilderRoutes.length
+    ? requestedBuilderRoutes
+    : base.builderRoutes;
   const judgeRoute = typeof input.judgeRoute === 'string' && input.judgeRoute.trim()
     ? input.judgeRoute.trim()
-    : (builderRoutes[0] || primary || base.judgeRoute);
+    : (builderRoutes[0] || base.judgeRoute || primary);
   const banlist = normalizeBanlist(input.banlist);
   const source = normalizePolicySource(opts.source || input.source || base.source);
   return {
@@ -134,7 +136,7 @@ export function normalizeModelPolicy(input, opts = {}) {
     source,
     primary,
     testRoutes: testRoutes.length ? testRoutes : base.testRoutes,
-    builderRoutes: builderRoutes.length ? builderRoutes : base.builderRoutes,
+    builderRoutes,
     judgeRoute,
     banlist,
     allowUnknownFrontier: input.allowUnknownFrontier === false ? false : true
@@ -151,9 +153,9 @@ export function modelPolicyPreset(name) {
   return normalizeModelPolicy({
     source: 'preset:gpt-5.6-sol',
     primary: 'gpt-5.6-sol',
-    testRoutes: ['gpt-5.6-sol', DEFAULT_PRIMARY_MODEL, 'glm-5.2'],
+    testRoutes: ['gpt-5.6-sol', 'claude-fable-5', 'gpt-5.6-terra'],
     builderRoutes: [...BUILDER_GATING_ROUTES],
-    judgeRoute: DEFAULT_PRIMARY_MODEL,
+    judgeRoute: BUILDER_GATING_ROUTES[0] || DEFAULT_PRIMARY_MODEL,
     banlist: { mode: 'default', extraDeny: [], extraAllow: [] },
     allowUnknownFrontier: true
   }, { source: 'preset:gpt-5.6-sol' });
@@ -315,7 +317,7 @@ export function rejectedBuilderRoutes(models, policy) {
     .filter((m) => !isBuilderGatingRoute(m, pol))
     .map((m) => ({
       model: m,
-      reason: `not a trusted builder/gating route — builds and in-loop gating route to ${allowed} (Codex/GPT stays a host surface, not an in-loop builder unless listed in modelPolicy.builderRoutes)`
+      reason: `not a trusted builder/gating route — builds and in-loop gating route to ${allowed}; a host alias such as "codex" is not a model route, and any additional builder must be listed in modelPolicy.builderRoutes`
     }));
 }
 
@@ -351,7 +353,7 @@ export function parseModelChoiceText(text) {
   const lower = raw.toLowerCase();
   if (/\b(?:gpt[-_ ]?5\.6(?:[-_ ]?sol)?|gpt56[-_ ]?sol)\b.*\bpreset\b|\bpreset\b.*\b(?:gpt[-_ ]?5\.6(?:[-_ ]?sol)?|gpt56[-_ ]?sol)\b|\bbuild[-_ ]?week\b/i.test(lower)) {
     const policy = modelPolicyPreset('gpt-5.6-sol');
-    notes.push('gpt-5.6-sol preset selected: GPT-5.6 Sol primary/test worker; trusted builder and judge defaults preserved');
+    notes.push('gpt-5.6-sol preset selected: GPT-5.6 Sol primary/test worker with Fable 5 as the default independent builder and judge');
     return { policy, source: policy.source, notes };
   }
   if (/\bany models?\b|\bno ban(?:list)?\b|\bbanlist\s*off\b|\bdisable (?:the )?banlist\b|\ball models?\b/.test(lower)) {
@@ -362,7 +364,6 @@ export function parseModelChoiceText(text) {
       || raw.match(/\buse\s+([a-z0-9][a-z0-9._+\-]{2,60})/i);
     if (primaryMatch) {
       pol.primary = primaryMatch[1].trim().replace(/[.,;]+$/, '');
-      pol.judgeRoute = pol.primary;
     }
     notes.push('banlist mode set to "off" for this run (any model)');
     return { policy: pol, source: 'operator-init', notes };
@@ -376,7 +377,7 @@ export function parseModelChoiceText(text) {
   } else {
     // Bare model id as the whole answer or first token that looks like a model
     const bare = raw.match(/^(?:use\s+)?([a-z][a-z0-9]*(?:[-_.][a-z0-9]+){1,6})\s*$/i)
-      || raw.match(/\b((?:claude|gpt|glm|gemini|grok|opus|sonnet|haiku|codex|minimax|deepseek|mimo)[-_a-z0-9.]{2,60})\b/i);
+      || raw.match(/\b((?:claude|gpt|glm|gemini|grok|opus|fable|sonnet|haiku|codex|minimax|deepseek|mimo)[-_a-z0-9.]{2,60})\b/i);
     if (bare) pol.primary = bare[1].trim();
   }
 
@@ -390,7 +391,7 @@ export function parseModelChoiceText(text) {
   }
   const judgeMatch = raw.match(/\bjudge(?:\s+route)?\s*[:=]\s*([a-z0-9][a-z0-9._+\- ]{1,80})/i);
   if (judgeMatch) pol.judgeRoute = judgeMatch[1].trim().split(/[,\s;]/)[0];
-  else pol.judgeRoute = pol.primary;
+  else pol.judgeRoute = pol.builderRoutes[0] || defaultModelPolicy().judgeRoute;
 
   if (/\bstrict\b/i.test(raw)) {
     pol.banlist.mode = 'strict';

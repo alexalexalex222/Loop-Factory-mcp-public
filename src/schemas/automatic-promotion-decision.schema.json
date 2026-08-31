@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "automatic-promotion-decision-legacy-v1",
+  "title": "Loop Factory automatic promotion decision (superseded contract)",
+  "description": "Retained for compatibility; automatic-promotion-decision-v1.schema.json is authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "binding",
+    "metrics",
+    "gates",
+    "eligible",
+    "disposition",
+    "reasonCodes",
+    "promotionRecorded",
+    "canonicalChange",
+    "decidedAt",
+    "automaticPromotionDecisionId",
+    "automaticPromotionDecisionSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "automatic-promotion-decision-v1"
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "hypothesisId",
+        "testId",
+        "benchmarkSha256",
+        "routingDecisionSha256",
+        "policyEpochSha256"
+      ],
+      "properties": {
+        "runId": {
+          "$ref": "#/definitions/safeId"
+        },
+        "hypothesisId": {
+          "$ref": "#/definitions/safeId"
+        },
+        "testId": {
+          "$ref": "#/definitions/safeId"
+        },
+        "benchmarkSha256": {
+          "$ref": "#/definitions/sha256"
+        },
+        "routingDecisionSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        },
+        "policyEpochSha256": {
+          "$ref": "#/definitions/nullableSha256"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baselineQuality",
+        "challengerQuality",
+        "qualityDelta",
+        "baselineTokenCost",
+        "challengerTokenCost",
+        "tokenCostDeltaPct"
+      ],
+      "properties": {
+        "baselineQuality": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "challengerQuality": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "qualityDelta": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "baselineTokenCost": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "challengerTokenCost": {
+          "$ref": "#/definitions/nullableNumber"
+        },
+        "tokenCostDeltaPct": {
+          "$ref": "#/definitions/nullableNumber"
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "passed",
+          "evidenceSha256"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "evidenceSha256": {
+            "$ref": "#/definitions/nullableSha256"
+          }
+        }
+      }
+    },
+    "eligible": {
+      "type": "boolean"
+    },
+    "disposition": {
+      "type": "string",
+      "enum": [
+        "AUTO_BANK_INTERNAL",
+        "QUEUE_HUMAN_REVIEW",
+        "REFUSE",
+        "NO_MOVEMENT"
+      ]
+    },
+    "reasonCodes": {
+      "$ref": "#/definitions/reasonCodes"
+    },
+    "promotionRecorded": {
+      "type": "boolean"
+    },
+    "canonicalChange": {
+      "const": false
+    },
+    "decidedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "automaticPromotionDecisionId": {
+      "type": "string",
+      "pattern": "^auto-promotion-[a-f0-9]{24}$"
+    },
+    "automaticPromotionDecisionSha256": {
+      "$ref": "#/definitions/sha256"
+    }
+  },
+  "definitions": {
+    "safeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableSha256": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableNumber": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+      }
+    }
+  }
+}

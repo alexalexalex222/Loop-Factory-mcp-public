@@ -12,6 +12,7 @@ import { createEngine } from '../src/engine.mjs';
 import { buildDashboardServer } from '../scripts/dashboard-server.mjs';
 import { canaryState } from './fixtures/canary-state.mjs';
 import { reviewDecisionBinding } from '../src/review-decisions.mjs';
+import { createInitialAdaptiveContextPolicy } from '../src/adaptive-context-policy.mjs';
 
 const TASK = 'Improve the strip-miner loop to raise candidate precision by at least 10% while keeping token cost under the current benchmark.';
 const IMPROVED = 'PHASE ONE INTAKE\nImproved served candidate DELTA with recorded evidence.\n\nPHASE TWO MEASURE\nMeasure it on the frozen benchmark.\n\nPHASE THREE VERIFY\nReverify; the operator is the only stop.';
@@ -353,5 +354,135 @@ test('served dashboard: run selection is a polished, filterable operational inde
     assert.match(page.text, /Decision required/i);
     assert.match(page.text, /1 pending/i);
     assert.doesNotMatch(page.text, /<body style=/);
+  } finally { server.close(); }
+});
+
+test('served dashboard: recursive app API exposes cursored evidence and token-bound operator stop', async () => {
+  const store = createStore(mkdtempSync(join(tmpdir(), 'sl-dash-recursive-')));
+  const policy = createInitialAdaptiveContextPolicy({
+    scopeId: 'recursive-ui-context',
+    minInputTokens: 1000,
+    initialInputTokens: 10000,
+    maxInputTokens: 20000,
+    permanentControlFraction: 0.2,
+    recordedAt: '2026-08-05T05:00:00.000Z'
+  });
+  assert.equal(policy.status, 'OK');
+  store.save({
+    schemaVersion: 1,
+    kind: 'adaptive-recursive-campaign',
+    runId: 'recursive-ui-live',
+    status: 'RUNNING',
+    createdAt: '2026-08-05T05:00:00.000Z',
+    updatedAt: '2026-08-05T05:01:00.000Z',
+    completedAt: null,
+    plan: {
+      sha256: 'a'.repeat(64),
+      configSha256: 'b'.repeat(64),
+      modelPolicy: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+      bounds: { maximumGenerations: 5, maximumCalls: 605 }
+    },
+    events: [{
+      schemaVersion: 'adaptive-recursive-campaign-event-v1',
+      runId: 'recursive-ui-live',
+      sequence: 0,
+      previousEventSha256: null,
+      type: 'CAMPAIGN_INITIALIZED',
+      createdAt: '2026-08-05T05:00:00.000Z',
+      detail: {
+        planSha256: 'a'.repeat(64),
+        promptContent: 'EVENT_PROMPT_SECRET'
+      },
+      eventSha256: 'c'.repeat(64)
+    }],
+    generations: [{
+      generation: 0,
+      status: 'VERIFIED_IMPROVEMENT',
+      causalPass: true,
+      calibrationQualified: true,
+      childRunId: null,
+      childEvidenceSha256: 'd'.repeat(64),
+      mutationPlan: { mutationPlanId: 'mutation-aaaaaaaaaaaaaaaaaaaaaaaa' }
+    }],
+    currentGeneration: null,
+    nextGeneration: 1,
+    evidenceArtifacts: {},
+    memoryRecords: [{
+      recordId: 'memory-generation-0',
+      lifecycle: 'active',
+      priority: 2,
+      artifactSha256: 'e'.repeat(64),
+      semanticSha256: 'f'.repeat(64)
+    }],
+    contextPolicy: policy.record,
+    contextObservations: [],
+    promotion: { enabled: false, recorded: false },
+    verification: {
+      experimentValid: false,
+      modelCalls: 121,
+      gates: { eventChain: true, promotionDisabled: true }
+    }
+  });
+  const server = dashboardServer(store);
+  const port = await listen(server);
+  try {
+    const list = await req(port, 'GET', '/api/v1/runs');
+    assert.equal(list.status, 200);
+    assert.equal(list.json.schemaVersion, 'loop-factory-app-api-v1');
+    assert.ok(list.json.runs.some((run) => run.runId === 'recursive-ui-live'));
+
+    const envelope = await req(port, 'GET', '/api/v1/runs/recursive-ui-live');
+    assert.equal(envelope.status, 200);
+    assert.equal(envelope.json.snapshot.recursive.enabled, true);
+    assert.equal(envelope.json.snapshot.recursive.mode, 'campaign');
+    assert.equal(envelope.json.capabilities.operatorStop, true);
+    assert.match(envelope.json.envelopeSha256, /^[a-f0-9]{64}$/);
+
+    const events = await req(port, 'GET', '/api/v1/runs/recursive-ui-live/events');
+    assert.equal(events.status, 200);
+    assert.equal(events.json.events.length, 1);
+    assert.match(events.json.events[0].cursor, /^evt-[a-f0-9]{32}$/);
+    assert.ok(!events.text.includes('EVENT_PROMPT_SECRET'));
+    const after = await req(
+      port,
+      'GET',
+      `/api/v1/runs/recursive-ui-live/events?after=${events.json.events[0].cursor}`
+    );
+    assert.equal(after.status, 200);
+    assert.equal(after.json.events.length, 0);
+
+    const page = await req(port, 'GET', '/?run=recursive-ui-live');
+    assert.equal(page.status, 200);
+    assert.match(page.text, /Recursive control plane/);
+    assert.match(page.text, /Approval and denial/);
+    assert.match(page.text, /Stop run/);
+
+    const refused = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      null,
+      { origin: `http://127.0.0.1:${port}` }
+    );
+    assert.equal(refused.status, 403);
+    const stopped = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      null,
+      decisionHeaders(port)
+    );
+    assert.equal(stopped.status, 200);
+    assert.equal(stopped.json.state, 'STOP_REQUESTED');
+    assert.ok(store.readRunFile('recursive-ui-live', 'OPERATOR_STOP'));
+    const idempotent = await req(
+      port,
+      'POST',
+      '/api/v1/runs/recursive-ui-live/stop',
+      null,
+      decisionHeaders(port)
+    );
+    assert.equal(idempotent.status, 200);
+    assert.equal(idempotent.json.idempotent, true);
   } finally { server.close(); }
 });

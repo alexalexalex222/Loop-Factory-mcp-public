@@ -36,9 +36,9 @@ function fakeBinDir({ sleep = false } = {}) {
 }
 
 test('exec helpers: allowlist mapping + usage parsing + default-off', () => {
-  assert.equal(execBinaryForRoute('claude-opus-4-8'), 'claude');
+  assert.equal(execBinaryForRoute('claude-fable-5'), 'claude');
   assert.equal(execBinaryForRoute('glm-5.2'), 'glm');
-  assert.equal(execBinaryForRoute('gpt-5.5'), 'codex');
+  assert.equal(execBinaryForRoute('gpt-5.6-sol'), 'codex');
   assert.equal(execBinaryForRoute('totally-unknown-model'), null);
   assert.equal(parseTokenUsage('{"usage":{"total_tokens":1234}}'), 1234);
   assert.equal(parseTokenUsage('tokens: 42'), 42);
@@ -49,6 +49,9 @@ test('exec helpers: allowlist mapping + usage parsing + default-off', () => {
     'exec', '-m', 'gpt-5.6-sol', '--json', '--skip-git-repo-check',
     '--ephemeral', '--ignore-rules', '-s', 'read-only',
     '-c', 'suppress_unstable_features_warning=true'
+  ]);
+  assert.deepEqual(buildArgs('claude', null, 'claude-fable-5'), [
+    '-p', '--output-format', 'json', '--model', 'claude-fable-5'
   ]);
 });
 
@@ -93,10 +96,56 @@ printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":12,"cached_inpu
     assert.equal(res.invocation.reportedModelMatchesRequest, null);
     assert.equal(res.invocation.modelSelectionAuthority, 'explicit-model-flag');
     assert.equal(res.invocation.modelIdentityAuthority, 'explicit-model-flag');
+    assert.equal(res.invocation.executableBasename, 'codex');
+    assert.equal(res.invocation.executableSha256, sha256(readFileSync(bin)));
+    assert.equal(res.invocation.executableBytes, readFileSync(bin).length);
+    assert.equal(res.invocation.authMode, null);
+    assert.equal(res.invocation.oauthAuthoritySha256, null);
+    assert.equal(res.invocation.promptSha256, sha256(prompt));
     assert.equal(res.invocation.tokenUsage, 20);
     assert.match(res.invocation.stdoutSha256, /^[a-f0-9]{64}$/);
     assert.match(res.invocation.resultSha256, /^[a-f0-9]{64}$/);
     assert.equal('prompt' in res.invocation, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Claude execution pins Fable 5 explicitly instead of trusting the ambient default', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-fakeclaude-'));
+  const argvPath = join(dir, 'argv.txt');
+  const stdinPath = join(dir, 'stdin.txt');
+  const bin = join(dir, 'claude');
+  writeFileSync(bin, `#!/bin/sh
+printf '%s\\n' "$@" > "$ARGV_OUT"
+cat > "$STDIN_OUT"
+printf '%s\\n' '{"type":"result","result":"verified Fable output","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5}}'
+`);
+  chmodSync(bin, 0o755);
+  const prompt = 'Fable prompt stays on stdin';
+  try {
+    const res = runWorker({
+      model: 'claude-fable-5',
+      prompt,
+      env: {
+        ...process.env,
+        PATH: dir + delimiter + process.env.PATH,
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        ARGV_OUT: argvPath,
+        STDIN_OUT: stdinPath
+      }
+    });
+    assert.equal(res.ok, true, res.message);
+    assert.equal(readFileSync(stdinPath, 'utf8'), prompt);
+    assert.deepEqual(readFileSync(argvPath, 'utf8').trim().split('\n'), [
+      '-p', '--output-format', 'json', '--model', 'claude-fable-5'
+    ]);
+    assert.equal(res.invocation.requestedModel, 'claude-fable-5');
+    assert.equal(res.invocation.reportedModel, 'claude-fable-5');
+    assert.equal(res.invocation.reportedModelMatchesRequest, true);
+    assert.equal(res.invocation.modelSelectionAuthority, 'explicit-model-flag');
+    assert.equal(res.invocation.modelIdentityAuthority, 'cli-reported');
+    assert.equal(res.invocation.tokenUsage, 15);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -184,6 +233,14 @@ test('strict Codex argv disables tool surfaces, ignores ambient config, and bind
     [...STRICT_CODEX_DISABLED_FEATURES]
   );
   assert.deepEqual(args.slice(args.indexOf('-C'), args.indexOf('-C') + 2), ['-C', '/tmp/loop-factory-capsule']);
+  const maxArgs = buildArgs('codex', null, 'gpt-5.6-luna', {
+    strictIsolation: true,
+    schemaPath,
+    workspaceRoot: '/tmp/loop-factory-luna-capsule',
+    reasoningEffort: 'max'
+  });
+  assert.ok(maxArgs.includes('model_reasoning_effort="max"'));
+  assert.equal(maxArgs[maxArgs.indexOf('-m') + 1], 'gpt-5.6-luna');
 });
 
 test('schema-constrained JSON is normalized into the existing supervisor wrapper and remains hashable', () => {
@@ -237,6 +294,35 @@ test('strict evaluation prompt requires canonical decision words', () => {
   assert.match(prompt, /"disposition":"ACCEPTED or REJECTED only"/);
 });
 
+test('executor renders only the explicitly assigned mechanism capsule', () => {
+  const assigned = buildExecutorPrompt({
+    kind: 'proposal',
+    proposalTreatmentInstruction:
+      'Use the assigned treatment. If it is a nonbehavioral control, preserve behavior.',
+    mechanismCapsule: {
+      schemaVersion: 'mechanism-capsule-v1',
+      mechanismCapsuleSha256: 'a'.repeat(64),
+      item: {
+        familyId: 'family-111111111111111111111111',
+        instruction: 'Apply the evidence-bound intervention.'
+      }
+    }
+  });
+  assert.match(assigned, /ASSIGNED IMPROVEMENT MECHANISM/);
+  assert.match(assigned, /family-111111111111111111111111/);
+  assert.match(assigned, /Apply the evidence-bound intervention/);
+  assert.match(assigned, /assigned treatment/);
+  assert.match(assigned, /nonbehavioral control/);
+  assert.match(assigned, /specific assigned-treatment change/);
+  assert.doesNotMatch(assigned, /only according to the assigned hypothesis/);
+
+  const control = buildExecutorPrompt({ kind: 'proposal', mechanismCapsule: null });
+  assert.match(control, /ASSIGNED IMPROVEMENT MECHANISM\nNONE/);
+  assert.doesNotMatch(control, /family-111111111111111111111111/);
+  assert.match(control, /only according to the assigned hypothesis/);
+  assert.match(control, /specific hypothesis-linked change/);
+});
+
 test('explicit Codex binary override is absolute, basename-locked, and used without widening execution', () => {
   const dir = mkdtempSync(join(tmpdir(), 'superloop-codex-override-'));
   const bin = join(dir, 'codex');
@@ -250,6 +336,13 @@ printf '%s\\n' '{"type":"agent_message","text":"override output"}'
     const resolved = resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: bin });
     assert.equal(resolved.bin, 'codex');
     assert.equal(resolved.binPath, bin);
+    const realBin = join(dir, 'codex.real');
+    writeFileSync(realBin, readFileSync(bin));
+    chmodSync(realBin, 0o755);
+    assert.equal(
+      resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: realBin }).binPath,
+      realBin
+    );
     const result = runWorker({
       model: 'gpt-5.6-sol',
       prompt: 'x',
@@ -261,6 +354,71 @@ printf '%s\\n' '{"type":"agent_message","text":"override output"}'
     });
     assert.equal(result.ok, true, result.message);
     assert.equal(result.resultText, 'override output');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('OAuth-locked Codex workers omit API credentials and bind the authority receipt', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-worker-oauth-'));
+  const bin = join(dir, 'codex.real');
+  writeFileSync(bin, `#!/bin/sh
+printf '%s\\n' "{\\"type\\":\\"agent_message\\",\\"text\\":\\"\${OPENAI_API_KEY:-clean}:\${OPENAI_BASE_URL:-clean}:\${CODEX_ACCESS_TOKEN:-clean}:\${SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256:-clean}\\"}"
+`);
+  chmodSync(bin, 0o755);
+  try {
+    const authoritySha256 = 'a'.repeat(64);
+    const executableSha256 = sha256(readFileSync(bin));
+    const result = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt: 'x',
+      env: {
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        SUPER_LOOP_CODEX_BIN: bin,
+        SUPER_LOOP_REQUIRE_CHATGPT_OAUTH: '1',
+        SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256: authoritySha256,
+        SUPER_LOOP_CODEX_EXECUTABLE_SHA256: executableSha256,
+        OPENAI_API_KEY: 'api-secret',
+        OPENAI_BASE_URL: 'https://wrong.example',
+        CODEX_ACCESS_TOKEN: 'token-secret',
+        PATH: ''
+      }
+    });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.resultText, 'clean:clean:clean:clean');
+    assert.equal(result.invocation.authMode, 'chatgpt-oauth');
+    assert.equal(result.invocation.oauthAuthoritySha256, authoritySha256);
+    assert.equal(result.invocation.executableBasename, 'codex.real');
+    assert.equal(result.invocation.executableSha256, executableSha256);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('OAuth authority mismatch stops before the Codex executable launches', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'superloop-worker-oauth-mismatch-'));
+  const bin = join(dir, 'codex.real');
+  const marker = join(dir, 'launched');
+  writeFileSync(bin, `#!/bin/sh
+touch "${marker}"
+`);
+  chmodSync(bin, 0o755);
+  try {
+    const result = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt: 'x',
+      env: {
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        SUPER_LOOP_CODEX_BIN: bin,
+        SUPER_LOOP_REQUIRE_CHATGPT_OAUTH: '1',
+        SUPER_LOOP_CODEX_OAUTH_AUTHORITY_SHA256: 'a'.repeat(64),
+        SUPER_LOOP_CODEX_EXECUTABLE_SHA256: 'b'.repeat(64),
+        PATH: ''
+      }
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'OAUTH_AUTHORITY_MISMATCH');
+    assert.equal(existsSync(marker), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -1,0 +1,7 @@
+{
+  "finding": "finding-004",
+  "cases": [
+    { "id": "delta-dev-gap", "observation": "delta development target remains unresolved" },
+    { "id": "delta-dev-control", "observation": "delta development control remains stable" }
+  ]
+}

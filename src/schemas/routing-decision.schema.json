@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "routing-decision-legacy-v1",
+  "title": "Loop Factory routing decision (superseded contract)",
+  "description": "Retained for compatibility; routing-decision-v1.schema.json is authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mode",
+    "affectedExecution",
+    "targetSha256",
+    "candidatePoolSha256",
+    "policyEpochId",
+    "policyEpochSha256",
+    "seed",
+    "allocationSchedule",
+    "packetSha256",
+    "candidatePoolCount",
+    "status",
+    "abstentionCode",
+    "fallbackCode",
+    "routingDecisionId",
+    "routingDecisionSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "routing-decision-v1"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "shadow",
+        "active-canary"
+      ]
+    },
+    "affectedExecution": {
+      "type": "boolean"
+    },
+    "targetSha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "candidatePoolSha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "policyEpochId": {
+      "type": "string",
+      "pattern": "^policy-epoch-[a-f0-9]{24}$"
+    },
+    "policyEpochSha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "seed": {
+      "type": "string",
+      "pattern": "^seed-[a-f0-9]{16}$"
+    },
+    "allocationSchedule": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position",
+          "allocationClass",
+          "familyId",
+          "applicationReceiptId",
+          "selectionProbability",
+          "evidenceStrength",
+          "reasonCodes"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "allocationClass": {
+            "type": "string",
+            "enum": [
+              "control",
+              "related",
+              "adjacent",
+              "failureDerived",
+              "wildcard"
+            ]
+          },
+          "familyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^family-[a-f0-9]{24}$"
+          },
+          "applicationReceiptId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^app-receipt-[a-f0-9]{24}$"
+          },
+          "selectionProbability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidenceStrength": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reasonCodes": {
+            "$ref": "#/definitions/reasonCodes"
+          }
+        }
+      }
+    },
+    "packetSha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "candidatePoolCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "ABSTAINED",
+        "FALLBACK"
+      ]
+    },
+    "abstentionCode": {
+      "$ref": "#/definitions/nullableKind"
+    },
+    "fallbackCode": {
+      "$ref": "#/definitions/nullableKind"
+    },
+    "routingDecisionId": {
+      "type": "string",
+      "pattern": "^routing-[a-f0-9]{24}$"
+    },
+    "routingDecisionSha256": {
+      "$ref": "#/definitions/sha256"
+    }
+  },
+  "definitions": {
+    "kind": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,119}$"
+    },
+    "nullableKind": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/kind"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+      }
+    }
+  }
+}

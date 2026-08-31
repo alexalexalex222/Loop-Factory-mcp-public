@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lossless-context-index-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "policyId",
+    "policySha256",
+    "mode",
+    "contentDeletionAuthorized",
+    "maxInlineBytes",
+    "totalBytes",
+    "inlineBytes",
+    "recordCount",
+    "inlineCount",
+    "referenceCount",
+    "entries",
+    "inlineRecords",
+    "fullRecordSetSha256",
+    "indexSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "lossless-context-index-v1" },
+    "policyId": { "type": "string", "pattern": "^context-policy-[a-f0-9]{24}$" },
+    "policySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "mode": { "enum": ["FULL_RECORDS", "LOSSLESS_INDEX"] },
+    "contentDeletionAuthorized": { "const": false },
+    "maxInlineBytes": { "type": "integer", "minimum": 1 },
+    "totalBytes": { "type": "integer", "minimum": 0 },
+    "inlineBytes": { "type": "integer", "minimum": 0 },
+    "recordCount": { "type": "integer", "minimum": 1 },
+    "inlineCount": { "type": "integer", "minimum": 0 },
+    "referenceCount": { "type": "integer", "minimum": 0 },
+    "entries": { "type": "array", "minItems": 1 },
+    "inlineRecords": { "type": "array" },
+    "fullRecordSetSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "indexSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

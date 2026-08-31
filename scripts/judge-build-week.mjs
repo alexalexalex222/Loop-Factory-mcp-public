@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-command Build Week judge path:
+// One-command Build Week judge path with an explicit caller opt-in:
 // compatible Codex CLI -> exact GPT-5.6 Sol auth/model sentinel -> three controlled
 // supervisor rejections -> evidence packet. No model fallback is permitted.
 import { execFileSync } from 'node:child_process';
@@ -14,6 +14,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const JUDGE_MODEL = 'gpt-5.6-sol';
 export const MIN_CODEX_VERSION = '0.144.0';
 const PREFLIGHT_SENTINEL = 'LOOP_FACTORY_SOL_READY';
+const EXEC_OPT_IN_INSTRUCTION =
+  'Explicit opt-in required: rerun as SUPER_LOOP_ALLOW_EXEC=1 npm run judge:gpt56-sol';
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(name);
@@ -140,7 +142,7 @@ function judgeMarkdown(summary) {
     '## Fast judge path',
     '',
     '```bash',
-    'npm run judge:gpt56-sol',
+    'SUPER_LOOP_ALLOW_EXEC=1 npm run judge:gpt56-sol',
     '```',
     '',
     'The command performs one exact-model auth sentinel, then three controlled',
@@ -169,6 +171,11 @@ export function runJudgeKit({
   worker = runWorker,
   proof = runProof
 } = {}) {
+  if (env.SUPER_LOOP_ALLOW_EXEC !== '1') {
+    throw Object.assign(new Error(EXEC_OPT_IN_INSTRUCTION), {
+      code: 'EXEC_OPT_IN_REQUIRED'
+    });
+  }
   const evidenceRoot = newEvidenceRoot(outDir);
   const compatibility = findCompatibleCodex({ env, candidates });
   if (!compatibility.selected) {
@@ -181,7 +188,6 @@ export function runJudgeKit({
   const selected = compatibility.selected;
   const liveEnv = {
     ...env,
-    SUPER_LOOP_ALLOW_EXEC: '1',
     SUPER_LOOP_CODEX_BIN: selected.path
   };
   const preflight = worker({
@@ -265,6 +271,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     main();
   } catch (error) {
+    if (error.code === 'EXEC_OPT_IN_REQUIRED') {
+      process.stderr.write(`${error.message}\n`);
+      process.exit(1);
+    }
     const evidence = error.evidenceRoot ? ` Evidence: ${relative(ROOT, error.evidenceRoot)}.` : '';
     process.stderr.write(`Build Week judge kit blocked: ${error.message}.${evidence}\n`);
     process.stderr.write('No model fallback was attempted. Run `npm run demo` for the deterministic no-auth path.\n');

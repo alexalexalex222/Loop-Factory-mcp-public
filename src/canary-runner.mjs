@@ -36,11 +36,11 @@ function stableValue(value) {
   return value;
 }
 
-function stableJson(value) {
+export function stableJson(value) {
   return JSON.stringify(stableValue(value));
 }
 
-function writeArtifact(store, runId, artifactId, {
+export function writeCanaryArtifact(store, runId, artifactId, {
   role,
   name = artifactId,
   content,
@@ -62,12 +62,21 @@ function invocationRecord(invocation, route) {
   return {
     model: route,
     requestedModel: invocation.requestedModel || route,
+    reasoningEffort: invocation.reasoningEffort || null,
     reportedModel: invocation.reportedModel || null,
     binaryFamily: invocation.binaryFamily || null,
     argv: Array.isArray(invocation.argv) ? invocation.argv.map(String) : [],
     modelSelectionAuthority: invocation.modelSelectionAuthority || null,
     modelIdentityAuthority: invocation.modelIdentityAuthority || invocation.modelSelectionAuthority || null,
     reportedModelMatchesRequest: invocation.reportedModelMatchesRequest ?? null,
+    executableBasename: invocation.executableBasename || null,
+    executableSha256: invocation.executableSha256 || null,
+    executableBytes: Number.isInteger(invocation.executableBytes)
+      ? invocation.executableBytes
+      : null,
+    authMode: invocation.authMode || null,
+    oauthAuthoritySha256: invocation.oauthAuthoritySha256 || null,
+    promptSha256: invocation.promptSha256 || null,
     strictIsolation: invocation.strictIsolation === true,
     disabledFeatures: Array.isArray(invocation.disabledFeatures)
       ? invocation.disabledFeatures.map(String)
@@ -95,7 +104,7 @@ function invocationRecord(invocation, route) {
   };
 }
 
-function persistRejectedDispatch(store, runId, packet, route, {
+export function persistRejectedDispatch(store, runId, packet, route, {
   artifactPrefix,
   kind,
   reasons,
@@ -105,19 +114,26 @@ function persistRejectedDispatch(store, runId, packet, route, {
   const executorOwned = packet?.executorOwned === true;
   const rawStdout = executorOwned ? String(packet.rawStdout || '') : '';
   const rawStderr = executorOwned ? String(packet.rawStderr || '') : '';
+  const finalOutput = executorOwned ? String(packet.finalOutput || '') : '';
   const invocation = packet?.invocation && typeof packet.invocation === 'object'
     ? invocationRecord(packet.invocation, route)
     : null;
   const stdoutArtifact = rawStdout
-    ? writeArtifact(store, runId, `${artifactPrefix}-stdout`, {
+    ? writeCanaryArtifact(store, runId, `${artifactPrefix}-stdout`, {
         role: 'executor-failed-stdout',
         content: rawStdout
       })
     : null;
   const stderrArtifact = rawStderr
-    ? writeArtifact(store, runId, `${artifactPrefix}-stderr`, {
+    ? writeCanaryArtifact(store, runId, `${artifactPrefix}-stderr`, {
         role: 'executor-failed-stderr',
         content: rawStderr
+      })
+    : null;
+  const resultArtifact = finalOutput
+    ? writeCanaryArtifact(store, runId, `${artifactPrefix}-final`, {
+        role: 'executor-failed-final',
+        content: finalOutput
       })
     : null;
   const evidenceRecord = (artifact, receiptSha256, content) => artifact ? {
@@ -136,6 +152,7 @@ function persistRejectedDispatch(store, runId, packet, route, {
     invocation,
     stdout: evidenceRecord(stdoutArtifact, invocation?.stdoutSha256, rawStdout),
     stderr: evidenceRecord(stderrArtifact, invocation?.stderrSha256, rawStderr),
+    result: evidenceRecord(resultArtifact, invocation?.resultSha256, finalOutput),
     ...context
   };
 }
@@ -174,7 +191,10 @@ function groupQuality(content, oracle, group) {
   return scoreCaseResults(`<CASE_RESULTS>${JSON.stringify(subset)}</CASE_RESULTS>`, grouped);
 }
 
-function persistProposal(store, runId, packet, route) {
+export function persistCanaryProposal(store, runId, packet, route, {
+  artifactPrefix = 'proposal',
+  normalizationContract = null
+} = {}) {
   const evidence = packetEvidence(packet);
   if (!evidence.ok) return evidence;
   const parsed = parseCaseResults(evidence.finalOutput);
@@ -182,11 +202,11 @@ function persistProposal(store, runId, packet, route) {
   if (!parsed?.ok || parsed.wrapper !== 'IMPROVEMENT' || !revisedContent.trim()) {
     return { ok: false, reason: 'proposal final output is not a complete IMPROVEMENT record' };
   }
-  const raw = writeArtifact(store, runId, 'proposal-raw', {
+  const raw = writeCanaryArtifact(store, runId, `${artifactPrefix}-raw`, {
     role: 'executor-raw',
     content: evidence.rawStdout
   });
-  const result = writeArtifact(store, runId, 'proposal-final', {
+  const result = writeCanaryArtifact(store, runId, `${artifactPrefix}-final`, {
     role: 'worker-final',
     content: evidence.finalOutput
   });
@@ -196,13 +216,15 @@ function persistProposal(store, runId, packet, route) {
     resultArtifactRef: result.id,
     procedureSha256: sha256(revisedContent)
   };
-  const verification = verifyPersistedProposalRun(store, runId, record);
+  const verification = verifyPersistedProposalRun(store, runId, record, {
+    normalizationContract
+  });
   return verification.ok
     ? { ok: true, record, revisedContent, verification }
     : { ok: false, reason: verification.reasons.join('; '), record, verification };
 }
 
-function persistEvaluation(store, runId, packet, route, {
+export function persistCanaryEvaluation(store, runId, packet, route, {
   artifactPrefix,
   oracle,
   armRole,
@@ -221,15 +243,15 @@ function persistEvaluation(store, runId, packet, route, {
   if (![quality, targetQuality, controlQuality].every(Number.isFinite)) {
     return { ok: false, reason: 'target/control quality could not be derived from the frozen oracle' };
   }
-  const raw = writeArtifact(store, runId, `${artifactPrefix}-raw`, {
+  const raw = writeCanaryArtifact(store, runId, `${artifactPrefix}-raw`, {
     role: 'executor-raw',
     content: evidence.rawStdout
   });
-  const result = writeArtifact(store, runId, `${artifactPrefix}-final`, {
+  const result = writeCanaryArtifact(store, runId, `${artifactPrefix}-final`, {
     role: 'worker-final',
     content: evidence.finalOutput
   });
-  const evaluation = writeArtifact(store, runId, `${artifactPrefix}-evaluation`, {
+  const evaluation = writeCanaryArtifact(store, runId, `${artifactPrefix}-evaluation`, {
     role: 'runlog',
     content: comparable,
     measurement: {
@@ -263,7 +285,7 @@ function persistEvaluation(store, runId, packet, route, {
     : { ok: false, reason: verification.reasons.join('; '), record, verification };
 }
 
-function expectedSchedule(plan) {
+export function expectedCanarySchedule(plan) {
   return (plan?.contract?.schedule || []).flatMap((row, replicate) => (
     row.map((armRole, position) => ({
       armRole,
@@ -349,7 +371,7 @@ export function verifyCanaryRun(store, runId) {
     && schemaRowsMatch
     && measurementMatches;
 
-  const schedule = expectedSchedule(state.plan);
+  const schedule = expectedCanarySchedule(state.plan);
   const actualSchedule = evaluations.map((item) => ({
     armRole: item.armRole,
     blindArm: item.blindArm,
@@ -539,11 +561,11 @@ export function runRealTestCanary(store, config, {
     reportPath: null
   };
   store.save(state);
-  const benchmarkArtifact = writeArtifact(store, runId, 'frozen-benchmark', {
+  const benchmarkArtifact = writeCanaryArtifact(store, runId, 'frozen-benchmark', {
     role: 'benchmark',
     content: stableJson(config.benchmark)
   });
-  const capsuleArtifact = writeArtifact(store, runId, 'sealed-evidence-capsule', {
+  const capsuleArtifact = writeCanaryArtifact(store, runId, 'sealed-evidence-capsule', {
     role: 'evidence-capsule',
     content: stableJson(config.evidenceCapsule)
   });
@@ -604,7 +626,7 @@ export function runRealTestCanary(store, config, {
     store.save(state);
     return block('PROPOSAL_INVALID', proposalDispatch.reasons.join(','));
   }
-  const proposal = persistProposal(store, runId, proposalDispatch.packet, config.routes[0]);
+  const proposal = persistCanaryProposal(store, runId, proposalDispatch.packet, config.routes[0]);
   if (!proposal.ok) return block('PROPOSAL_RECEIPT_INVALID', proposal.reason);
   state.proposal = proposal.record;
   state.updatedAt = clock();
@@ -623,7 +645,7 @@ export function runRealTestCanary(store, config, {
     evidenceRefs: target.evidenceRefs
   };
   const evaluationHypothesis = { id: hypothesis.id };
-  const schedule = expectedSchedule(plan);
+  const schedule = expectedCanarySchedule(plan);
   for (const item of schedule) {
     const route = config.routes[item.replicate];
     const procedureContent = procedures[item.armRole];
@@ -681,7 +703,7 @@ export function runRealTestCanary(store, config, {
         `${item.armRole} replicate ${item.replicate + 1}: ${dispatch.reasons.join(',')}`
       );
     }
-    const persisted = persistEvaluation(store, runId, dispatch.packet, route, {
+    const persisted = persistCanaryEvaluation(store, runId, dispatch.packet, route, {
       artifactPrefix: `eval-r${item.replicate + 1}-p${item.position + 1}`,
       oracle: config.benchmark.oracle,
       ...item,

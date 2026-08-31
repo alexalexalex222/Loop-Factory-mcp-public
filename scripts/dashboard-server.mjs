@@ -21,10 +21,24 @@ import { buildConsoleSnapshot } from '../src/console.mjs';
 import { renderDashboard, renderRunSelector } from '../src/dashboard.mjs';
 import { isSafeId, sha256 } from '../src/util.mjs';
 import { isReviewDecisionBinding, reviewDecisionBinding } from '../src/review-decisions.mjs';
+import {
+  LOOP_FACTORY_APP_API_SCHEMA,
+  buildLoopFactoryEventFeed,
+  buildLoopFactoryRunEnvelope,
+  buildLoopFactoryRunSummary
+} from '../src/app-contract.mjs';
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
   return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : dflt;
+}
+function pathRunId(value) {
+  try {
+    const decoded = decodeURIComponent(String(value || ''));
+    return isSafeId(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
 }
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const home = flag('--home', process.env.SUPER_LOOP_HOME || join(PKG_ROOT, '.super-loop'));
@@ -65,6 +79,27 @@ function readInbox(theStore, runId) {
 
 function buildServedSnapshot(theStore, runId, state = theStore.load(runId)) {
   const snapshot = buildConsoleSnapshot(state);
+  if (snapshot.recursive?.enabled) {
+    snapshot.recursive.operator.stopRequested =
+      theStore.readRunFile(runId, 'OPERATOR_STOP') != null;
+    const latestChildRunId = state.currentGeneration?.childRunId
+      || [...(state.generations || [])].reverse()
+        .find((generation) => generation.childRunId)?.childRunId
+      || null;
+    if (latestChildRunId && theStore.exists(latestChildRunId)) {
+      const childSnapshot = buildConsoleSnapshot(theStore.load(latestChildRunId));
+      if (childSnapshot.recursive?.enabled) {
+        snapshot.recursive.latestChild = {
+          runId: latestChildRunId,
+          experimentValid: childSnapshot.recursive.experimentValid,
+          causalPass: childSnapshot.recursive.causalPass,
+          stages: childSnapshot.recursive.stages,
+          gates: childSnapshot.recursive.gates,
+          tokenUsage: childSnapshot.recursive.tokenUsage
+        };
+      }
+    }
+  }
   if (!snapshot.reviews || !Array.isArray(snapshot.reviews.items)) return snapshot;
   const inbox = readInbox(theStore, runId);
   let queued = 0;
@@ -120,6 +155,107 @@ export function buildDashboardServer(theStore = store, thePort = port, options =
         return res.end();
       }
       return send(res, 200, 'application/json; charset=utf-8', body, headers);
+    }
+
+    if (req.method === 'GET' && u.pathname === '/api/v1/runs') {
+      const runs = theStore.listRuns().map((runId) => {
+        try {
+          const state = theStore.load(runId);
+          const summary = buildLoopFactoryRunSummary(state);
+          if (summary.kind === 'adaptive-recursive-campaign'
+              || summary.kind === 'adaptive-recursive-canary-v2') {
+            summary.stopRequested = theStore.readRunFile(runId, 'OPERATOR_STOP') != null;
+          }
+          return summary;
+        } catch {
+          return null;
+        }
+      }).filter(Boolean).sort((left, right) => (
+        String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))
+        || String(left.runId).localeCompare(String(right.runId))
+      ));
+      const payload = {
+        schemaVersion: LOOP_FACTORY_APP_API_SCHEMA,
+        runs
+      };
+      payload.listSha256 = sha256(JSON.stringify(payload));
+      return json(res, 200, payload, { 'cache-control': 'no-store' });
+    }
+
+    const appRunMatch = u.pathname.match(/^\/api\/v1\/runs\/([^/]+)$/);
+    if (req.method === 'GET' && appRunMatch) {
+      const runId = pathRunId(appRunMatch[1]);
+      if (!runId || !theStore.exists(runId)) {
+        return json(res, 404, { ok: false, error: 'unknown run' }, { 'cache-control': 'no-store' });
+      }
+      const state = theStore.load(runId);
+      const snapshot = buildServedSnapshot(theStore, runId, state);
+      const envelope = buildLoopFactoryRunEnvelope(state, { snapshot });
+      const body = JSON.stringify(envelope);
+      const etag = `"${envelope.envelopeSha256}"`;
+      const headers = { etag, 'cache-control': 'no-store' };
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, headers);
+        return res.end();
+      }
+      return send(res, 200, 'application/json; charset=utf-8', body, headers);
+    }
+
+    const appEventsMatch = u.pathname.match(/^\/api\/v1\/runs\/([^/]+)\/events$/);
+    if (req.method === 'GET' && appEventsMatch) {
+      const runId = pathRunId(appEventsMatch[1]);
+      if (!runId || !theStore.exists(runId)) {
+        return json(res, 404, { ok: false, error: 'unknown run' }, { 'cache-control': 'no-store' });
+      }
+      const feed = buildLoopFactoryEventFeed(theStore.load(runId), {
+        after: u.searchParams.get('after')
+      });
+      if (feed.status !== 'OK') {
+        return json(res, 409, {
+          ok: false,
+          error: feed.code,
+          latestCursor: feed.latestCursor || null
+        }, { 'cache-control': 'no-store' });
+      }
+      return json(res, 200, feed, { 'cache-control': 'no-store' });
+    }
+
+    const appStopMatch = u.pathname.match(/^\/api\/v1\/runs\/([^/]+)\/stop$/);
+    if (req.method === 'POST' && appStopMatch) {
+      if (!originOk(req)) {
+        return json(res, 403, { ok: false, error: 'same-origin browser POST required' });
+      }
+      if (!decisionTokenOk(req)) {
+        return json(res, 403, { ok: false, error: 'decision session token required' });
+      }
+      const runId = pathRunId(appStopMatch[1]);
+      if (!runId || !theStore.exists(runId)) {
+        return json(res, 404, { ok: false, error: 'unknown run' });
+      }
+      const state = theStore.load(runId);
+      if (!['adaptive-recursive-campaign', 'adaptive-recursive-canary-v2']
+        .includes(state.kind)) {
+        return json(res, 409, { ok: false, error: 'run does not support operator stop' });
+      }
+      if (['WAVE_DRAINED', 'IDLE_NO_NEW_WORK', 'CALIBRATION_REJECTED',
+        'QUEUE_DRAINED', 'BLOCKED'].includes(state.status)) {
+        return json(res, 409, { ok: false, error: `run is already ${state.status}` });
+      }
+      const existing = theStore.readRunFile(runId, 'OPERATOR_STOP');
+      if (!existing) {
+        theStore.writeRunFile(runId, 'OPERATOR_STOP', JSON.stringify({
+          schemaVersion: 'loop-factory-operator-stop-v1',
+          runId,
+          requestedAt: new Date().toISOString(),
+          authority: 'dashboard-session-token'
+        }, null, 2));
+      }
+      return json(res, 200, {
+        ok: true,
+        state: 'STOP_REQUESTED',
+        runId,
+        idempotent: existing != null
+      });
     }
 
     if (req.method === 'POST' && u.pathname === '/apply') {
@@ -245,6 +381,6 @@ export function buildDashboardServer(theStore = store, thePort = port, options =
 if (process.argv[1] && process.argv[1].endsWith('dashboard-server.mjs')) {
   buildDashboardServer().listen(port, '127.0.0.1', () => {
     console.log(`super-loop dashboard → http://127.0.0.1:${port}  (home: ${home})`);
-    console.log('Open it, choose Approve or Deny, then queue the session-authorized decision. The running campaign revalidates it on its next tick.');
+    console.log('Review admission evidence, queue any human decisions, or request an operator stop at a durable boundary.');
   });
 }

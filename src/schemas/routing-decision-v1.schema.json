@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "routing-decision-v1",
+  "title": "Replayable mechanism routing decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "routingDecisionId",
+    "routingDecisionSha256",
+    "routingPacketSha256",
+    "mode",
+    "affectedExecution",
+    "targetSha256",
+    "candidatePoolSha256",
+    "candidatePoolCount",
+    "policyEpochId",
+    "policyEpochSha256",
+    "mechanismCapsuleSha256",
+    "seed",
+    "status",
+    "abstentionCode",
+    "allocationSchedule"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "routing-decision-v1" },
+    "routingDecisionId": { "type": "string", "pattern": "^route-[a-f0-9]{24}$" },
+    "routingDecisionSha256": { "$ref": "#/definitions/sha256" },
+    "routingPacketSha256": { "$ref": "#/definitions/sha256" },
+    "mode": { "enum": ["shadow", "active-canary"] },
+    "affectedExecution": { "type": "boolean" },
+    "targetSha256": { "$ref": "#/definitions/sha256" },
+    "candidatePoolSha256": { "$ref": "#/definitions/sha256" },
+    "candidatePoolCount": { "type": "integer", "minimum": 0 },
+    "policyEpochId": { "type": "string", "pattern": "^epoch-[a-f0-9]{24}$" },
+    "policyEpochSha256": { "$ref": "#/definitions/sha256" },
+    "mechanismCapsuleSha256": { "$ref": "#/definitions/sha256" },
+    "seed": { "type": "string", "pattern": "^seed-[a-f0-9]{24}$" },
+    "status": { "enum": ["COMPLETE", "PARTIAL", "ABSTAINED", "FALLBACK"] },
+    "abstentionCode": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$"
+    },
+    "allocationSchedule": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position",
+          "allocation",
+          "familyId",
+          "applicationReceiptId",
+          "probability",
+          "evidenceStrength",
+          "reasonCodes"
+        ],
+        "properties": {
+          "position": { "type": "integer", "minimum": 0 },
+          "allocation": {
+            "enum": ["control", "related", "adjacent", "failure-derived", "wildcard"]
+          },
+          "familyId": {
+            "type": ["string", "null"],
+            "pattern": "^family-[a-f0-9]{24}$"
+          },
+          "applicationReceiptId": {
+            "type": ["string", "null"],
+            "pattern": "^app-receipt-[a-f0-9]{24}$"
+          },
+          "probability": { "type": "number", "minimum": 0, "maximum": 1 },
+          "evidenceStrength": {
+            "anyOf": [
+              { "type": "number", "minimum": 0, "maximum": 1 },
+              { "type": "null" }
+            ]
+          },
+          "reasonCodes": { "$ref": "#/definitions/reasons" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reasons": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,119}$" }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "finding": "finding-003",
+  "cases": [
+    { "id": "cinder-dev-gap", "observation": "cinder development target remains unresolved" },
+    { "id": "cinder-dev-control", "observation": "cinder development control remains stable" }
+  ]
+}
