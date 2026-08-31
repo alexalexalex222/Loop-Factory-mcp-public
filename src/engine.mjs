@@ -6,7 +6,7 @@ import {
   STATUS, BLOCK, VERDICT, DEFAULTS, DEFAULT_PRIMARY_MODEL, KNOWN_FRONTIER_EXAMPLES, STOP_CONDITION_WARNING,
   NATIVE_CONTINUATION_NOTICE, COLD_START_NOTICE, CONTINUOUS_MODE_BY_HOST, NEVER_STOP_ON, LANE_KIND, LANE_STATUS, BUILDER_GATING_ROUTES, MANDATED_LOOPS
 } from './constants.mjs';
-import { sha256, hash8, nowIso, wordCount, round, mean, stdev, isSafeId, clone } from './util.mjs';
+import { sha256, hash8, nowIso, wordCount, round, mean, stdev, isPortableId, isSafeId, clone } from './util.mjs';
 import {
   classifyRoute, rejectedRoutes, rejectedBuilderRoutes,
   defaultModelPolicy, normalizeModelPolicy, ensureModelPolicy, parseModelChoiceText, modelPolicyPreset
@@ -2981,6 +2981,13 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     });
     const runId = args.runId || `run-${hash8(String(args.task || '') + ts)}`;
     if (!isSafeId(runId)) return invalidIdBlock('runId', runId);
+    if (!store.exists(runId) && !isPortableId(runId)) {
+      return blocked(BLOCK.BAD_INPUT, `runId "${runId}" is unsafe for a new cross-platform state directory.`);
+    }
+    const runCollision = store.runIdCollision(runId);
+    if (!store.exists(runId) && runCollision) {
+      return blocked(BLOCK.BAD_INPUT, `runId "${runId}" has a case-insensitive collision with existing run "${runCollision}".`);
+    }
     let state = store.exists(runId) ? store.load(runId) : freshRun(runId, ts);
     ensureModelPolicy(state); // resume-safe: backfill pre-modelPolicy state.json
 
@@ -5071,6 +5078,14 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
     if (args.runId && !isSafeId(args.runId)) return invalidIdBlock('runId', args.runId);
     const id = String(args.id || args.loopId || '').toLowerCase().trim();
     if (!isSafeId(id)) return invalidIdBlock('loop id', id);
+    const existingLibraryId = args.role === 'skill' ? store.skillExists(id) : store.loopExists(id);
+    if (!existingLibraryId && !isPortableId(id)) {
+      return blocked(BLOCK.BAD_INPUT, `id "${id}" is unsafe for a new cross-platform library file.`);
+    }
+    const libraryCollision = args.role === 'skill' ? store.skillIdCollision(id) : store.loopIdCollision(id);
+    if (!existingLibraryId && libraryCollision) {
+      return blocked(BLOCK.BAD_INPUT, `id "${id}" has a case-insensitive collision with existing id "${libraryCollision}".`);
+    }
     if (isMandatedId(id)) {
       return blocked(BLOCK.LOOP_EXISTS, `"${id}" collides with a hash-locked mandated loop (The Strip Miner Loop / Loop-de-loop). Those are never overwritten — choose another id for your custom loop.`);
     }
@@ -5315,6 +5330,9 @@ export function createEngine(store, { clock = nowIso, operatorAuthority = proces
   function adoptLoop({ loopId, content, from } = {}) {
     const id = String(loopId || '').toLowerCase().trim();
     if (!isSafeId(id)) return { ok: false, reason: `invalid loop id "${loopId}"` };
+    if (!store.loopExists(id) && !isPortableId(id)) return { ok: false, reason: `loop id "${loopId}" is unsafe for a new cross-platform library file` };
+    const collision = store.loopIdCollision(id);
+    if (!store.loopExists(id) && collision) return { ok: false, reason: `loop id "${loopId}" collides case-insensitively with "${collision}"` };
     if (isMandatedId(id)) return { ok: false, reason: `"${id}" is a hash-locked mandated loop (the Strip Miner / Loop-de-loop) and is immutable. Adopt the improvement under a NEW custom loop id; the canonical loop is never overwritten.` };
     const text = String(content == null ? '' : content);
     if (text.trim().length < 40) return { ok: false, reason: 'adopted loop content is too small to phase-gate (provide the real multi-section loop text)' };

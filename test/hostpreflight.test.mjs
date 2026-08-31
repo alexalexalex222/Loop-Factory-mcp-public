@@ -4,18 +4,17 @@
 // presence on PATH, not as proof of working auth and not as SOTA/web research.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { detectHostCapabilities, KNOWN_ROUTE_CLIS } from '../src/host.mjs';
 import { freshEngine, SPECIFIC_TASK } from './helpers.mjs';
+import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 test('detects a known CLI placed on an injected PATH, and misses an absent one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'superloop-bin-'));
-  const bin = join(dir, 'claude');
-  writeFileSync(bin, '#!/bin/sh\necho hi\n');
-  chmodSync(bin, 0o755);
-  const report = detectHostCapabilities({ env: { PATH: dir }, platform: 'linux' });
+  const bin = createFakeCli(dir, 'claude', { stdout: 'hi\n' });
+  const report = detectHostCapabilities({ env: { PATH: dir }, platform: process.platform });
   const claude = report.routes.find((r) => r.name === 'claude');
   const codex = report.routes.find((r) => r.name === 'codex');
   assert.equal(claude.installed, true);

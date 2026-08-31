@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { createStore } from '../src/store.mjs';
 import { createEngine } from '../src/engine.mjs';
+import { resolveStateHome } from '../src/state-home.mjs';
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -42,7 +43,7 @@ try {
 }
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const home = flag('--home', process.env.SUPER_LOOP_HOME || join(PKG_ROOT, '.super-loop'));
+const home = resolveStateHome(PKG_ROOT, { home: flag('--home') }).homeDir;
 const runId = flag('--run', payload.runId);
 if (!runId) {
   console.error('no runId — pass --run <id> or include "runId" in the decisions file');

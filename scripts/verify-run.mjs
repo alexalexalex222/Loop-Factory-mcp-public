@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../src/store.mjs';
 import { verifyRun } from '../src/run-verifier.mjs';
+import { resolveStateHome } from '../src/state-home.mjs';
 
 function arg(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -17,7 +18,7 @@ if (!runId) {
 }
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
-const home = arg('--home', process.env.SUPER_LOOP_HOME || join(packageRoot, '.super-loop'));
+const home = resolveStateHome(packageRoot, { home: arg('--home') }).homeDir;
 const result = verifyRun(createStore(home), runId);
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 process.exit(result.publicationEligible === true ? 0 : 1);

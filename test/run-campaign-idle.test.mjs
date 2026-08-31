@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -11,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 function waitFor(predicate, timeoutMs = 5000) {
   const started = Date.now();
@@ -36,7 +36,6 @@ function waitForExit(child, timeoutMs = 5000) {
 
 test('standalone CLI idles after one fake Codex mine and exits through the real stop-file', async () => {
   const root = mkdtempSync(join(tmpdir(), 'loop-factory-cli-idle-'));
-  const fakeBin = join(root, 'codex');
   const countFile = join(root, 'worker-count.txt');
   const configPath = join(root, 'campaign.json');
   const home = join(root, 'state');
@@ -53,18 +52,15 @@ test('standalone CLI idles after one fake Codex mine and exits through the real 
     allowUnknownFrontier: false
   };
   mkdirSync(home, { recursive: true });
-  writeFileSync(fakeBin, `#!/bin/sh
-count=0
-if [ -f "$CALL_COUNT_FILE" ]; then count="$(cat "$CALL_COUNT_FILE")"; fi
-count=$((count + 1))
-printf '%s' "$count" > "$CALL_COUNT_FILE"
-cat >/dev/null
-printf '%s\\n' '{"type":"thread.started","thread_id":"thread-cli-idle-real-shape"}'
-printf '%s\\n' '{"type":"turn.started"}'
-printf '%s\\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"<CANDIDATES>[]</CANDIDATES>"}}'
-printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}'
-`);
-  chmodSync(fakeBin, 0o755);
+  const fakeBin = createFakeCli(root, 'codex', {
+    countFileEnv: 'CALL_COUNT_FILE',
+    stdout: [
+      '{"type":"thread.started","thread_id":"thread-cli-idle-real-shape"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"<CANDIDATES>[]</CANDIDATES>"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}'
+    ].join('\n') + '\n'
+  });
   writeFileSync(configPath, JSON.stringify({
     task: 'Mine the configured corpus for novel evidence-backed loop candidates.',
     model: 'gpt-5.6-sol',

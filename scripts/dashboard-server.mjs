@@ -27,6 +27,7 @@ import {
   buildLoopFactoryRunEnvelope,
   buildLoopFactoryRunSummary
 } from '../src/app-contract.mjs';
+import { resolveStateHome } from '../src/state-home.mjs';
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -41,7 +42,7 @@ function pathRunId(value) {
   }
 }
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const home = flag('--home', process.env.SUPER_LOOP_HOME || join(PKG_ROOT, '.super-loop'));
+const home = resolveStateHome(PKG_ROOT, { home: flag('--home') }).homeDir;
 const port = Number(flag('--port', process.env.SUPER_LOOP_DASHBOARD_PORT || '8787'));
 const store = createStore(home);
 

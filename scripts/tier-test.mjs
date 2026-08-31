@@ -20,14 +20,15 @@
 //   SUPER_LOOP_ALLOW_EXEC=1 node scripts/tier-test.mjs --skill verification-discipline --fixture /tmp/tier-test-repo --tiers tier1,tier4,tier2,tier3
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, isAbsolute } from 'node:path';
 import { buildServer } from '../src/server.mjs';
 import { resolveOnPath } from '../src/host.mjs';
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_FIXTURE = '/tmp/tier-test-repo';
-const MONOREPO_FIXTURE = '/tmp/tier-test-monorepo'; // the false-green trap (root test skips the changed pkg)
+const DEFAULT_FIXTURE = join(tmpdir(), 'tier-test-repo');
+const MONOREPO_FIXTURE = join(tmpdir(), 'tier-test-monorepo'); // the false-green trap (root test skips the changed pkg)
 
 // ---- tiers (LOCKED set; operator supplies endpoints via env) --------------------------
 // All four are driven through opencode by model slug. Cost order (cheapest first); tier3 is
@@ -122,7 +123,7 @@ function scaffoldMonorepoTrap(dir) {
 // ---- test execution (used to measure the fixture state, NOT to drive a model) ----------
 function npmTest(cwd) {
   try {
-    const out = execFileSync('node', ['--test'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
+    const out = execFileSync(process.execPath, ['--test'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
     return { passed: true, output: String(out) };
   } catch (e) {
     return { passed: false, output: String((e && (e.stdout || '')) + (e && (e.stderr || ''))) };

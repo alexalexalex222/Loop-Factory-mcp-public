@@ -12,12 +12,11 @@ import {
   runJudgeKit,
   versionAtLeast
 } from '../scripts/judge-build-week.mjs';
+import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 function fakeCodex(version) {
   const dir = mkdtempSync(join(tmpdir(), 'loop-factory-judge-codex-'));
-  const path = join(dir, 'codex');
-  writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' 'codex-cli ${version}'\n`);
-  chmodSync(path, 0o755);
+  const path = createFakeCli(dir, 'codex', { stdout: `codex-cli ${version}\n` });
   return { dir, path };
 }
 

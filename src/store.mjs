@@ -4,7 +4,7 @@
 // reverify. Writes are atomic (tmp file + rename) so a crash can't corrupt state.
 import { mkdirSync, writeFileSync, readFileSync, renameSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { isSafeId, safeId } from './util.mjs';
+import { isPortableId, isSafeId, portableId, safeId } from './util.mjs';
 import { parseSkillFile } from './skill-schema.mjs';
 
 export function createStore(homeDir) {
@@ -50,15 +50,45 @@ export function createStore(homeDir) {
     renameSync(tmp, path);
   }
 
+  function namesUnder(root) {
+    if (!existsSync(root)) return [];
+    try { return readdirSync(root); } catch { return []; }
+  }
+
+  function exactEntry(root, name) {
+    return namesUnder(root).includes(name);
+  }
+
+  function caseCollision(root, name) {
+    const folded = name.toLowerCase();
+    return namesUnder(root).find((entry) => entry !== name && entry.toLowerCase() === folded) || null;
+  }
+
+  function assertNewPortableEntry(root, id, label, suffix = '') {
+    const entry = `${id}${suffix}`;
+    if (!isSafeId(id)) safeId(id, label);
+    if (exactEntry(root, entry)) return;
+    portableId(id, label);
+    const collision = caseCollision(root, entry);
+    if (collision) {
+      throw new Error(`${label} "${id}" has a case-insensitive collision with "${collision.slice(0, suffix ? -suffix.length : undefined)}"`);
+    }
+  }
+
   return {
     homeDir,
     runDir,
 
+    runIdCollision(runId) {
+      return caseCollision(runsRoot, String(runId));
+    },
+
     exists(runId) {
-      return existsSync(statePath(runId));
+      return exactEntry(runsRoot, String(runId)) && existsSync(statePath(runId));
     },
 
     save(state) {
+      assertNewPortableEntry(runsRoot, state.runId, 'runId');
       mkdirSync(runDir(state.runId), { recursive: true });
       mkdirSync(artifactsDir(state.runId), { recursive: true });
       atomicWrite(statePath(state.runId), JSON.stringify(state, null, 2));
@@ -123,9 +153,14 @@ export function createStore(homeDir) {
       return target;
     },
     loopExists(loopId) {
-      return existsSync(this.loopPath(loopId));
+      return exactEntry(loopsRoot, `${loopId}.json`) && existsSync(this.loopPath(loopId));
+    },
+    loopIdCollision(loopId) {
+      const hit = caseCollision(loopsRoot, `${loopId}.json`);
+      return hit ? hit.slice(0, -5) : null;
     },
     writeLoop(record) {
+      assertNewPortableEntry(loopsRoot, record.id, 'loopId', '.json');
       mkdirSync(loopsRoot, { recursive: true });
       atomicWrite(this.loopPath(record.id), JSON.stringify(record, null, 2));
       return record.id;
@@ -156,9 +191,14 @@ export function createStore(homeDir) {
       return target;
     },
     skillExists(skillId) {
-      return existsSync(this.skillPath(skillId));
+      return exactEntry(skillsRoot, `${skillId}.md`) && existsSync(this.skillPath(skillId));
+    },
+    skillIdCollision(skillId) {
+      const hit = caseCollision(skillsRoot, `${skillId}.md`);
+      return hit ? hit.slice(0, -3) : null;
     },
     writeSkill(record) {
+      assertNewPortableEntry(skillsRoot, record.id, 'skillId', '.md');
       mkdirSync(skillsRoot, { recursive: true });
       atomicWrite(this.skillPath(record.id), record.content);
       return record.id;
@@ -178,6 +218,7 @@ export function createStore(homeDir) {
         .filter((id) => isSafeId(id));
     },
     writeIndex(skillId, obj) {
+      assertNewPortableEntry(skillsRoot, skillId, 'skillId', '.index.json');
       mkdirSync(skillsRoot, { recursive: true });
       atomicWrite(this.indexPath(skillId), JSON.stringify(obj, null, 2));
       return skillId;

@@ -5,7 +5,7 @@
 // a FAKE allowlisted binary — a real frontier run is validated in an authed env.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import {
@@ -16,21 +16,18 @@ import {
 } from '../src/executor.mjs';
 import { sha256 } from '../src/util.mjs';
 import { freshEngine, initThroughBaselineBar } from './helpers.mjs';
+import { createFakeCli } from './fixtures/fake-cli.mjs';
 
 const H = (model, title) => ({ title, bottleneck: 'b', operation: 'o', expectedMovement: '+q', route: { model } });
 
 // Build a temp dir with a fake `claude` binary that echoes a deterministic run-log
 // plus a usage line. Returns { dir, sentinel } and restores env via the caller.
 function fakeBinDir({ sleep = false } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'superloop-fakebin-'));
+  const dir = mkdtempSync(join(tmpdir(), 'loop factory fake bin & '));
   const sentinel = join(dir, 'INJECTED');
-  const script = sleep
-    ? '#!/bin/sh\nsleep 5\n'
-    : `#!/bin/sh\n# echoes a deterministic run-log; never executes its prompt-file arg\nprintf '%s\\n' 'STRIP MINER RUN: discovered 3 qualified loops with contradiction sweep and clean-context replay; evidence fidelity high'\nprintf '%s\\n' '{"usage":{"total_tokens":1234}}'\nexit 0\n`;
+  const stdout = 'STRIP MINER RUN: discovered 3 qualified loops with contradiction sweep and clean-context replay; evidence fidelity high\n{"usage":{"total_tokens":1234}}\n';
   for (const name of ['claude', 'glm']) {
-    const p = join(dir, name);
-    writeFileSync(p, script);
-    chmodSync(p, 0o755);
+    createFakeCli(dir, name, sleep ? { delayMs: 5000 } : { stdout });
   }
   return { dir, sentinel };
 }
@@ -59,16 +56,16 @@ test('codex execution selects the requested model explicitly and returns a hashe
   const dir = mkdtempSync(join(tmpdir(), 'superloop-fakecodex-'));
   const argvPath = join(dir, 'argv.txt');
   const stdinPath = join(dir, 'stdin.txt');
-  const bin = join(dir, 'codex');
-  writeFileSync(bin, `#!/bin/sh
-printf '%s\\n' "$@" > "$ARGV_OUT"
-cat > "$STDIN_OUT"
-printf '%s\\n' '{"type":"thread.started","thread_id":"thread-real-shape"}'
-printf '%s\\n' '{"type":"turn.started"}'
-printf '%s\\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"verified output"}}'
-printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":8,"reasoning_output_tokens":0}}'
-`);
-  chmodSync(bin, 0o755);
+  const bin = createFakeCli(dir, 'codex', {
+    captureArgvEnv: 'ARGV_OUT',
+    captureStdinEnv: 'STDIN_OUT',
+    stdout: [
+      '{"type":"thread.started","thread_id":"thread-real-shape"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"verified output"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":8,"reasoning_output_tokens":0}}'
+    ].join('\n') + '\n'
+  });
   const prompt = 'prompt stays on stdin; $(touch SHOULD_NOT_RUN)';
   try {
     const res = runWorker({
@@ -153,13 +150,11 @@ printf '%s\\n' '{"type":"result","result":"verified Fable output","model":"claud
 
 test('a failed Codex launch preserves supervisor-owned stderr and invocation hashes without becoming valid output', () => {
   const dir = mkdtempSync(join(tmpdir(), 'superloop-failed-codex-'));
-  const bin = join(dir, 'codex');
-  writeFileSync(bin, `#!/bin/sh
-printf '%s\\n' '{"type":"thread.started","thread_id":"thread-failed-real-shape"}'
-printf '%s\\n' 'deterministic OAuth transport failure' >&2
-exit 17
-`);
-  chmodSync(bin, 0o755);
+  const bin = createFakeCli(dir, 'codex', {
+    stdout: '{"type":"thread.started","thread_id":"thread-failed-real-shape"}\n',
+    stderr: 'deterministic OAuth transport failure\n',
+    exitCode: 17
+  });
   const env = {
     ...process.env,
     SUPER_LOOP_ALLOW_EXEC: '1',
@@ -325,11 +320,9 @@ test('executor renders only the explicitly assigned mechanism capsule', () => {
 
 test('explicit Codex binary override is absolute, basename-locked, and used without widening execution', () => {
   const dir = mkdtempSync(join(tmpdir(), 'superloop-codex-override-'));
-  const bin = join(dir, 'codex');
-  writeFileSync(bin, `#!/bin/sh
-printf '%s\\n' '{"type":"agent_message","text":"override output"}'
-`);
-  chmodSync(bin, 0o755);
+  const bin = createFakeCli(dir, 'codex', {
+    stdout: '{"type":"agent_message","text":"override output"}\n'
+  });
   try {
     assert.equal(resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: 'relative/codex' }).reason, 'BINARY_OVERRIDE_INVALID');
     assert.equal(resolveWorkerBinary('gpt-5.6-sol', { SUPER_LOOP_CODEX_BIN: join(dir, 'not-codex') }).reason, 'BINARY_OVERRIDE_INVALID');
@@ -426,11 +419,7 @@ touch "${marker}"
 
 test('spawned workers never inherit operator authority or real-test approval values', () => {
   const dir = mkdtempSync(join(tmpdir(), 'superloop-worker-env-'));
-  const bin = join(dir, 'codex');
-  writeFileSync(bin, `#!/bin/sh
-printf '%s\\n' "{\\"type\\":\\"agent_message\\",\\"text\\":\\"\${SUPER_LOOP_OPERATOR_AUTHORITY:-clean}:\${SUPER_LOOP_REAL_TEST_APPROVAL:-clean}\\"}"
-`);
-  chmodSync(bin, 0o755);
+  const bin = createFakeCli(dir, 'codex', { authorityEcho: true });
   try {
     const result = runWorker({
       model: 'gpt-5.6-sol',
@@ -597,6 +586,63 @@ test('no shell / no command injection: a prompt with shell metacharacters is ine
   }
 });
 
+test('allowlisted model argv metacharacters stay inert and never become a command', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'loop factory argv & '));
+  const sentinel = join(dir, 'MODEL_ARG_INJECTED');
+  const bin = createFakeCli(dir, 'codex', {
+    stdout: '{"type":"agent_message","text":"argv remained data"}\n'
+  });
+  try {
+    const model = `gpt-5.6-sol & echo pwned > ${sentinel}`;
+    const result = runWorker({
+      model,
+      prompt: 'prompt remains stdin',
+      env: { ...process.env, SUPER_LOOP_ALLOW_EXEC: '1', SUPER_LOOP_CODEX_BIN: bin }
+    });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(existsSync(sentinel), false);
+    assert.equal(result.invocation.processAdapter, process.platform === 'win32' ? 'windows-command-shim' : 'native-exec-file');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Windows command shims refuse percent expansion in model argv', { skip: process.platform !== 'win32' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'loop-factory-percent-expansion-'));
+  const bin = createFakeCli(dir, 'codex', {
+    stdout: '{"type":"agent_message","text":"must not launch"}\n'
+  });
+  try {
+    const result = runWorker({
+      model: 'gpt-5.6-sol%CMDCMDLINE%',
+      prompt: 'prompt remains stdin',
+      env: { ...process.env, SUPER_LOOP_ALLOW_EXEC: '1', SUPER_LOOP_CODEX_BIN: bin }
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'EXEC_ADAPTER_REFUSED');
+    assert.match(result.message, /environment expansion syntax/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('large fake-worker output remains bounded by the executor buffer and hash-receipted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'loop-factory-large-output-'));
+  const output = 'x'.repeat(256 * 1024);
+  const bin = createFakeCli(dir, 'codex', { stdout: output });
+  try {
+    const result = runWorker({
+      model: 'gpt-5.6-sol', prompt: 'x',
+      env: { ...process.env, SUPER_LOOP_ALLOW_EXEC: '1', SUPER_LOOP_CODEX_BIN: bin }
+    });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.stdout.length, output.length);
+    assert.equal(result.invocation.stdoutSha256, sha256(output));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a non-allowlisted route never executes', () => {
   process.env.SUPER_LOOP_ALLOW_EXEC = '1';
   try {
@@ -621,6 +667,37 @@ test('a worker timeout is killed and reported (invalid batch, does not count)', 
   } finally {
     process.env.PATH = origPath;
     delete process.env.SUPER_LOOP_ALLOW_EXEC;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a timed-out Windows command shim kills its complete descendant process tree', { skip: process.platform !== 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'loop-factory-timeout-tree-'));
+  const sentinel = join(dir, 'DESCENDANT_SURVIVED');
+  const bin = createFakeCli(dir, 'codex', {
+    delayMs: 5000,
+    spawnDescendantEnv: 'LOOP_FACTORY_TEST_DESCENDANT',
+    descendantDelayMs: 1200
+  });
+  try {
+    const result = runWorker({
+      model: 'gpt-5.6-sol',
+      prompt: 'timeout tree proof',
+      timeoutMs: 300,
+      env: {
+        ...process.env,
+        SUPER_LOOP_ALLOW_EXEC: '1',
+        SUPER_LOOP_CODEX_BIN: bin,
+        LOOP_FACTORY_TEST_DESCENDANT: sentinel
+      }
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'TIMEOUT');
+    assert.equal(result.timedOut, true);
+    assert.equal(result.invocation.timeoutCleanup, 'windows-taskkill-process-tree-before-return');
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    assert.equal(existsSync(sentinel), false, 'timed-out descendant must not survive to write its sentinel');
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
